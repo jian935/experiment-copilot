@@ -32,7 +32,9 @@
 | 规则轨迹 | 结论那条证据展开后是 6 条规则按优先级依次判断，标出命中/被覆盖/未触发 | [`04-规则判定轨迹.png`](docs/screenshots/04-规则判定轨迹.png) |
 | 结论卡导出 | 一键导出 2 倍图 PNG（880×552），可直接贴文档/简历/群聊 | [`05-结论卡导出.png`](docs/screenshots/05-结论卡导出.png) |
 | Agent 面板 | 建议问题、规则/智能双模式、工具调用可视化、回答带可点引用、数字审计徽章 | [`06-Agent-建议问题.png`](docs/screenshots/06-Agent-建议问题.png) · [`07-Agent-问答.png`](docs/screenshots/07-Agent-问答.png) |
-| 评测看板 | 混淆矩阵、按类型/按 p 值分桶准确率、4 条失败案例可点开、ablation 双列对比 | [`08-评测看板.png`](docs/screenshots/08-评测看板.png) |
+| 评测看板 | 混淆矩阵、按类型/按 p 值分桶准确率、4 条失败案例可点开 | [`08-评测看板.png`](docs/screenshots/08-评测看板.png) |
+| Ablation 对比 | 规则模式 vs 真实 DeepSeek 并排（引用覆盖 / 可疑数字 / 违规 / 口径 / 字数） | [`09-Ablation对比.png`](docs/screenshots/09-Ablation对比.png) |
+| Agent 智能模式 | 真实 DeepSeek：4 次工具调用、回答带可点引用、数字审计通过 | [`10-Agent-智能模式.png`](docs/screenshots/10-Agent-智能模式.png) |
 
 **演示视频（36s）**：[`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) —— 真实操作录屏 + 中文旁白 + 字幕。
 **作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 1.75MB，视频与截图全部内联，可直接发人。

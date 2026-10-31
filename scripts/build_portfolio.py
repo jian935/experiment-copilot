@@ -27,7 +27,7 @@ SHOTS = [
     ('SHOT2', 'docs/screenshots/02-实验详情-护栏拦截.png'),
     ('SHOT3', 'docs/screenshots/03-证据链-逐步代入.png'),
     ('SHOT4', 'docs/screenshots/08-评测看板.png'),
-    ('SHOT5', 'docs/screenshots/07-Agent-问答.png'),
+    ('SHOT5', 'docs/screenshots/10-Agent-智能模式.png'),
     ('SHOT6', 'docs/screenshots/05-结论卡导出.png'),
 ]
 

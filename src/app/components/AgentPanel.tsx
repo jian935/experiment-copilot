@@ -341,9 +341,9 @@ function AssistantTurn({
         </div>
       )}
 
-      <p className="text-[12.5px] leading-6 text-ink/90">
-        {renderWithCites(reply.text, onCite)}
-      </p>
+      <div className="space-y-1.5 text-[12.5px] leading-6 text-ink/90">
+        {renderRich(reply.text, onCite)}
+      </div>
 
       {reply.note && <p className="mt-1 text-[10px] text-dim">备注：{reply.note}</p>}
 
@@ -370,23 +370,80 @@ function AssistantTurn({
   );
 }
 
-/** 把 [E6] 渲染成可点的证据 chip */
-function renderWithCites(text: string, onCite: (id: string) => void) {
-  const parts = text.split(/(\[E\d+\])/g);
-  return parts.map((p, i) => {
-    const m = /^\[(E\d+)\]$/.exec(p);
-    if (m) {
-      return (
-        <button
-          key={i}
-          onClick={() => onCite(m[1])}
-          className="mx-1 rounded bg-brand/15 px-1.5 py-[1px] font-mono text-[10px] text-brand2 transition-colors hover:bg-brand/25"
-          title={`查看证据 ${m[1]}`}
-        >
-          {m[1]}
-        </button>
+/**
+ * 轻量渲染：只支持模型实际会用的三种写法——段落、`- ` 列表、`**加粗**`。
+ * 不引 markdown 库：一来体积，二来这里只需要这三种，其余一律当纯文本（安全）。
+ */
+function renderRich(text: string, onCite: (id: string) => void) {
+  // 只有标点/空白、没有实义字符的行直接丢掉（模型偶尔会多输出一个「。」）
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && /[\p{L}\p{N}]/u.test(l));
+  const blocks: React.ReactNode[] = [];
+  let bullets: string[] = [];
+  let numbers: string[] = [];
+
+  const flush = (key: string) => {
+    if (bullets.length) {
+      blocks.push(
+        <ul key={`ul-${key}`} className="ml-1 list-disc space-y-0.5 pl-4 marker:text-dim">
+          {bullets.map((b, i) => (
+            <li key={i}>{inline(b, onCite)}</li>
+          ))}
+        </ul>,
       );
+      bullets = [];
     }
-    return <span key={i}>{p}</span>;
+    if (numbers.length) {
+      blocks.push(
+        <ol key={`ol-${key}`} className="ml-1 list-decimal space-y-0.5 pl-5 marker:text-dim">
+          {numbers.map((b, i) => (
+            <li key={i}>{inline(b, onCite)}</li>
+          ))}
+        </ol>,
+      );
+      numbers = [];
+    }
+  };
+
+  lines.forEach((line, i) => {
+    if (/^[-*•]\s+/.test(line)) {
+      bullets.push(line.replace(/^[-*•]\s+/, ''));
+      return;
+    }
+    if (/^\d+[.、)]\s+/.test(line)) {
+      numbers.push(line.replace(/^\d+[.、)]\s+/, ''));
+      return;
+    }
+    flush(String(i));
+    const plain = line.replace(/^#{1,6}\s*/, '');
+    blocks.push(<p key={i}>{inline(plain, onCite)}</p>);
   });
+  flush('end');
+  return blocks;
+}
+
+/** 行内：**加粗** 与 [E6] 引用 */
+function inline(text: string, onCite: (id: string) => void) {
+  return text.split(/(\*\*[^*]+\*\*|\[E\d+\])/g).map((part, i) => {
+    const cite = /^\[(E\d+)\]$/.exec(part);
+    if (cite) return <CiteChip key={i} id={cite[1]} onCite={onCite} />;
+    const bold = /^\*\*([^*]+)\*\*$/.exec(part);
+    if (bold) return <strong key={i} className="font-semibold text-ink">{bold[1]}</strong>;
+    return <span key={i}>{part}</span>;
+  });
+}
+
+/** 把 [E6] 渲染成可点的证据 chip */
+function CiteChip({ id, onCite }: { id: string; onCite: (id: string) => void }) {
+  return (
+    <button
+      onClick={() => onCite(id)}
+      className="mx-1 rounded bg-brand/15 px-1.5 py-[1px] font-mono text-[10px] text-brand2 transition-colors hover:bg-brand/25"
+      title={`查看证据 ${id}`}
+    >
+      {id}
+    </button>
+  );
 }
