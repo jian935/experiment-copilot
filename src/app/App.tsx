@@ -111,6 +111,7 @@ export default function App() {
               analysis={analysis}
               rows={data.rowsByExp.get(expId) ?? []}
               dataset={data.dataset}
+              analyses={data.analyses}
               initialEv={ev}
               onBack={() => go('#/')}
             />

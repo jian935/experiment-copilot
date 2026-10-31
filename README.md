@@ -1,6 +1,6 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M3 完成（证据链可验算：逐步代入 + 规则轨迹 + 结论卡导出 + 视图/证据深链）** ｜ 2026-10-31
+> 状态：**M4 完成（Agent：8 工具 + 5 铁律 + 数字审计 + 规则/智能双模式 + ablation）** ｜ 2026-10-31
 > 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ M1 评测：[`docs/EVAL.md`](docs/EVAL.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
@@ -31,6 +31,7 @@
 | 证据链 | 9 条证据时间线，**每条都能展开看逐步代入**（① 转化率 → ② SE → ③ z/p → ④ Newcombe CI → ⑤ 判定阈值） | [`03-证据链-逐步代入.png`](docs/screenshots/03-证据链-逐步代入.png) |
 | 规则轨迹 | 结论那条证据展开后是 6 条规则按优先级依次判断，标出命中/被覆盖/未触发 | [`04-规则判定轨迹.png`](docs/screenshots/04-规则判定轨迹.png) |
 | 结论卡导出 | 一键导出 2 倍图 PNG（880×552），可直接贴文档/简历/群聊 | [`05-结论卡导出.png`](docs/screenshots/05-结论卡导出.png) |
+| Agent 面板 | 建议问题、规则/智能双模式、工具调用可视化、回答带可点引用、数字审计徽章 | [`06-Agent-建议问题.png`](docs/screenshots/06-Agent-建议问题.png) · [`07-Agent-问答.png`](docs/screenshots/07-Agent-问答.png) |
 
 深链：`#/e/E001` 直达实验，`#/e/E001?ev=E6` 直接展开第 6 条证据，`#/?d=ship&s=diff` 还原筛选视图。
 
@@ -47,7 +48,8 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 27 个单测（统计 / 决策 / 证据推导 / 导出卡片）
+npm test           # 42 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent）
+npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
 npm run gen        # 用固定种子重新生成 120 个实验（data/）
 npm run calibrate  # 120 例校准：混淆矩阵 + 五项指标
 ```
@@ -67,7 +69,7 @@ src/app/                UI：Vite + React 19 + TS + Tailwind v3
 scripts/                生成 / 校准 / 导出前端数据
 tests/                  18 个单测（含 6 组 scipy 对齐）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
-docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / 截图
+docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```
 
 ## 已完成
@@ -103,6 +105,20 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 | 深链 | 列表筛选写回 URL（`replaceState`，不触发 hashchange）；证据级深链 `?ev=E6` 自动展开并滚动到可视区 |
 | 单测 | 27 个（新增 9 个）：推导数值必须对得上引擎、规则轨迹恰好命中一条、护栏 z 不得为占位 0、SVG 不得含 undefined/NaN |
 
+### M4 — Agent（说话的人，不是算数的人）
+
+| 模块 | 内容 |
+|---|---|
+| 8 个工具 | 读取结论 / 重算检验 / 扫描分层 / 检查护栏 / 推算 MDE / 检索相似 / 检索列表 / 回溯规则；全部纯函数只读引擎结果 |
+| 5 条铁律 | 不许自己算数 / 每个数字必须带 `[E#]` 引用 / 证据不足就说不知道 / 口径变化必须说明 / 不许编造历史实验 |
+| 双模式 | **规则模式**（免密钥，确定性路由 + 模板）；**智能模式**（DeepSeek function calling，浏览器直连，Key 只存 sessionStorage），失败自动回退规则模式并说明原因 |
+| 数字审计 | 回答里的每个数字都要在白名单（引擎 + 工具返回）里按显示精度对得上；对不上就标红列出 |
+| 引用可点 | 回答里的 `E6` 是按钮，点开直接跳到证据抽屉并展开该条 |
+| Ablation | `npm run ablation`：同一批问题（8 题 × 3 个实验）跑规则/智能两种模式，比较引用覆盖率、可疑数字率、口径识别率 |
+
+**规则模式当前成绩**（24 条问答，`docs/ABLATION.md`）：引用覆盖 **100%**、可疑数字 **0**、违规 **0**、口径陷阱识别 **100%**。
+智能模式需要你的 DeepSeek Key（`DEEPSEEK_API_KEY=sk-... npm run ablation`），尚未跑；**没有跑之前不会给它写任何数字**。
+
 ## 技术栈
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）+ Recharts（仅趋势图）；
@@ -110,5 +126,5 @@ Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语�
 
 ## 里程碑
 
-M1 数据+统计 ✅ → M2 结论卡 UI ✅ → **M3 证据链可验算 ✅** → M4 Agent（8 工具 + 5 铁律）→ M5 120 例评测看板 → M6 打磨/部署/视频。
+M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → **M4 Agent ✅** → M5 120 例评测看板 → M6 打磨/部署/视频。
 验收标准见蓝图 §13。

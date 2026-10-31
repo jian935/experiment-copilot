@@ -7,6 +7,7 @@ import {
   Download,
   FlaskConical,
   ListTree,
+  MessageSquare,
   RefreshCw,
   ShieldAlert,
   Sparkles,
@@ -31,6 +32,9 @@ import { Forest, type ForestRow } from './Forest';
 import { Trend } from './Trend';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { exportConclusionCard } from '../lib/exportCard';
+import { AgentPanel } from './AgentPanel';
+import type { AgentCtx } from '../../lib/agent/types.ts';
+import type { Analysis as AnalysisT } from '../../lib/decide.ts';
 import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
 
 type Tab = 'segments' | 'guardrails' | 'calc';
@@ -40,6 +44,7 @@ export function ExperimentDetail({
   analysis,
   rows,
   dataset,
+  analyses,
   initialEv,
   onBack,
 }: {
@@ -47,6 +52,7 @@ export function ExperimentDetail({
   analysis: Analysis;
   rows: DailyRow[];
   dataset: Dataset;
+  analyses: Map<string, AnalysisT>;
   initialEv?: string | null;
   onBack: () => void;
 }) {
@@ -56,6 +62,7 @@ export function ExperimentDetail({
   const [showTruth, setShowTruth] = useState(false);
   const [recalc, setRecalc] = useState<{ ok: boolean; ms: number; n: number } | null>(null);
   const [exportState, setExportState] = useState<'idle' | 'ok' | 'err'>('idle');
+  const [agentOpen, setAgentOpen] = useState(false);
 
   function closeDrawer() {
     setDrawer(false);
@@ -158,6 +165,9 @@ export function ExperimentDetail({
           <Button variant="outline" size="sm" onClick={onExport} title="把结论卡导出为 PNG，可直接贴到文档或简历">
             {exportState === 'ok' ? <BadgeCheck size={13} className="text-ship" /> : <Download size={13} />}
             {exportState === 'ok' ? '已导出' : exportState === 'err' ? '导出失败' : '导出结论卡'}
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setAgentOpen(true)}>
+            <MessageSquare size={13} /> 问这个实验
           </Button>
           <Button
             variant="primary"
@@ -461,6 +471,17 @@ export function ExperimentDetail({
           </div>
         )}
       </Panel>
+
+      <AgentPanel
+        open={agentOpen}
+        onClose={() => setAgentOpen(false)}
+        ctx={{ dataset, analyses, exp, analysis } as AgentCtx}
+        onCite={(ev) => {
+          setAgentOpen(false);
+          setFocusEv(ev);
+          setDrawer(true);
+        }}
+      />
 
       <EvidenceDrawer
         open={drawer}
