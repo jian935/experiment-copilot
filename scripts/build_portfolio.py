@@ -69,7 +69,8 @@ for key, png in SHOTS:
     if not os.path.exists(png):
         raise SystemExit(f'缺少截图：{png}')
     tmp = os.path.join(ASSETS, os.path.basename(png).replace('.png', '.jpg'))
-    run([FF, '-y', '-i', png, '-vf', 'scale=1000:-2', '-q:v', '4', tmp])
+    # 内联进单文件的是 1600px 高清版（点击可全屏看细节；q:v 3 约等于 JPEG 88）
+    run([FF, '-y', '-i', png, '-vf', 'scale=1600:-2', '-q:v', '3', tmp])
     shots[key] = tmp
 
 html = open(SRC, encoding='utf-8').read()

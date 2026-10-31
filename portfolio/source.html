@@ -55,8 +55,23 @@
   tr:last-child td{border-bottom:0}
   .good{color:var(--ship)} .bad{color:var(--noship)} .warn{color:var(--amber)}
   .shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
-  .shots figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#04060b}
-  .shots img{display:block;width:100%;height:auto}
+  .shots figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#04060b;position:relative}
+  .shots img{display:block;width:100%;height:auto;cursor:zoom-in;transition:opacity .15s}
+  .shots figure:hover img{opacity:.9}
+  .shots figure::after{content:"点击看高清";position:absolute;top:8px;right:8px;font-size:10.5px;color:#c7d2e4;
+    background:rgba(7,10,17,.72);border:1px solid var(--line2);padding:2px 7px;border-radius:999px;opacity:0;transition:opacity .15s}
+  .shots figure:hover::after{opacity:1}
+  /* 灯箱：复用同一张 data URI，不额外增加文件体积 */
+  .lb{position:fixed;inset:0;z-index:99;display:none;background:rgba(4,6,11,.95);
+    align-items:center;justify-content:center;padding:24px}
+  .lb.on{display:flex}
+  .lb img{max-width:96vw;max-height:86vh;width:auto;height:auto;object-fit:contain;
+    border:1px solid var(--line2);border-radius:10px;box-shadow:0 30px 80px -20px #000}
+  .lb .bar{position:absolute;bottom:18px;left:0;right:0;display:flex;justify-content:center;gap:10px}
+  .lb .bar a,.lb .bar button{font-size:12.5px;color:var(--ink);background:rgba(18,26,43,.92);
+    border:1px solid var(--line2);border-radius:8px;padding:7px 14px;cursor:pointer}
+  .lb .bar a:hover,.lb .bar button:hover{border-color:var(--brand)}
+  .lb .hint{position:absolute;top:16px;left:0;right:0;text-align:center;font-size:11.5px;color:var(--dim)}
   .shots figcaption{font-size:11.5px;color:var(--dim);padding:8px 10px;border-top:1px solid var(--line)}
   ul{padding-left:18px;margin:10px 0}
   li{color:var(--muted);font-size:14px;margin:6px 0}
@@ -131,12 +146,12 @@
 
   <h2>六个界面</h2>
   <div class="shots">
-    <figure><img src="{{SHOT1}}" alt="实验列表"><figcaption>① 实验列表：120 个实验，一行一个结论 + 迷你 CI</figcaption></figure>
-    <figure><img src="{{SHOT2}}" alt="实验详情"><figcaption>② 实验详情：结论卡 + 三条硬前置检查 + 森林图</figcaption></figure>
-    <figure><img src="{{SHOT3}}" alt="证据链"><figcaption>③ 证据链：每条都能展开看逐步代入</figcaption></figure>
-    <figure><img src="{{SHOT5}}" alt="Agent 问答"><figcaption>④ Agent（真实 DeepSeek）：4 次工具调用，回答带可点引用，右上角标数字是否可溯源</figcaption></figure>
-    <figure><img src="{{SHOT6}}" alt="结论卡导出"><figcaption>⑤ 结论卡：一键导出成图片，直接贴进文档</figcaption></figure>
-    <figure><img src="{{SHOT4}}" alt="评测看板"><figcaption>⑥ 评测看板：混淆矩阵 + 按证据强度分桶</figcaption></figure>
+    <figure><img src="{{SHOT1}}" alt="实验列表" data-name="01-实验列表"><figcaption>① 实验列表：120 个实验，一行一个结论 + 迷你 CI</figcaption></figure>
+    <figure><img src="{{SHOT2}}" alt="实验详情" data-name="02-实验详情"><figcaption>② 实验详情：结论卡 + 三条硬前置检查 + 森林图</figcaption></figure>
+    <figure><img src="{{SHOT3}}" alt="证据链" data-name="03-证据链-逐步代入"><figcaption>③ 证据链：每条都能展开看逐步代入</figcaption></figure>
+    <figure><img src="{{SHOT5}}" alt="Agent 问答" data-name="04-Agent-智能模式"><figcaption>④ Agent（真实 DeepSeek）：4 次工具调用，回答带可点引用，右上角标数字是否可溯源</figcaption></figure>
+    <figure><img src="{{SHOT6}}" alt="结论卡导出" data-name="05-结论卡导出"><figcaption>⑤ 结论卡：一键导出成图片，直接贴进文档</figcaption></figure>
+    <figure><img src="{{SHOT4}}" alt="评测看板" data-name="06-评测看板"><figcaption>⑥ 评测看板：混淆矩阵 + 按证据强度分桶</figcaption></figure>
   </div>
 
   <h2>五个关键取舍</h2>
@@ -202,11 +217,55 @@
     统计自研（零依赖）· DeepSeek function calling（浏览器直连，Key 只存 sessionStorage）· 无后端、无数据库。
   </p>
 
+  <div class="lb" id="lb" aria-hidden="true">
+    <div class="hint">Esc 或点击空白处关闭 ｜ 图内文字为 1600px 高清原图</div>
+    <img id="lbImg" alt="">
+    <div class="bar">
+      <a id="lbDl" download="screenshot.jpg">下载这张图</a>
+      <button type="button" id="lbClose">关闭</button>
+    </div>
+  </div>
+
   <footer>
     <span>Experiment Copilot · 实验结论官</span>
     <span>作者：绝望的土豆泥</span>
     <span class="r">数据为固定种子合成数据，用于已知真值评测</span>
   </footer>
 </div>
+<script>
+  (function () {
+    var lb = document.getElementById('lb');
+    var img = document.getElementById('lbImg');
+    var dl = document.getElementById('lbDl');
+    var close = document.getElementById('lbClose');
+
+    function hide() {
+      lb.classList.remove('on');
+      lb.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+    }
+
+    document.querySelectorAll('.shots img').forEach(function (el) {
+      el.addEventListener('click', function () {
+        // 直接复用缩略图的 src（本身就是高清 data URI），不会额外增加体积
+        img.src = el.src;
+        img.alt = el.alt || '';
+        dl.href = el.src;
+        dl.download = (el.dataset.name || 'screenshot') + '.jpg';
+        lb.classList.add('on');
+        lb.setAttribute('aria-hidden', 'false');
+        document.body.style.overflow = 'hidden';
+      });
+    });
+
+    lb.addEventListener('click', function (e) {
+      if (e.target === lb) hide();
+    });
+    close.addEventListener('click', hide);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') hide();
+    });
+  })();
+</script>
 </body>
 </html>

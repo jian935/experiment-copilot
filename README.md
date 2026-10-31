@@ -37,7 +37,7 @@
 | Agent 智能模式 | 真实 DeepSeek：4 次工具调用、回答带可点引用、数字审计通过 | [`10-Agent-智能模式.png`](docs/screenshots/10-Agent-智能模式.png) |
 
 **演示视频（36s）**：[`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) —— 真实操作录屏 + 中文旁白 + 字幕。
-**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 1.75MB，视频与截图全部内联，可直接发人。
+**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 2.6MB，视频与 1600px 截图全部内联；点击任意截图可全屏查看并下载原图。
 
 深链：`#/e/E001` 直达实验，`#/e/E001?ev=E6` 直接展开第 6 条证据，`#/?d=ship&s=diff` 还原筛选视图。
 
