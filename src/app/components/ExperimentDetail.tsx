@@ -299,7 +299,7 @@ export function ExperimentDetail({
           }
         />
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs">
+          <table className="w-full min-w-[560px] border-collapse text-left text-xs">
             <thead>
               <tr className="border-b border-line text-[11px] text-dim">
                 <th className="px-4 py-2 font-medium">变体</th>
@@ -376,7 +376,7 @@ export function ExperimentDetail({
 
         {tab === 'guardrails' && (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-xs">
+            <table className="w-full min-w-[560px] border-collapse text-left text-xs">
               <thead>
                 <tr className="border-b border-line text-[11px] text-dim">
                   <th className="px-4 py-2 font-medium">指标</th>

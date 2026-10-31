@@ -52,7 +52,7 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 48 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 评测口径）
+npm test           # 56 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
 python scripts/build_portfolio.py                                    # 重建作品集页
@@ -126,7 +126,17 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 | Ablation | `npm run ablation`：同一批问题（8 题 × 3 个实验）跑规则/智能两种模式，比较引用覆盖率、可疑数字率、口径识别率 |
 
 **规则模式当前成绩**（24 条问答，`docs/ABLATION.md`）：引用覆盖 **100%**、可疑数字 **0**、违规 **0**、口径陷阱识别 **100%**。
-智能模式需要你的 DeepSeek Key（`DEEPSEEK_API_KEY=sk-... npm run ablation`），尚未跑；**没有跑之前不会给它写任何数字**。
+智能模式需要 DeepSeek Key（`DEEPSEEK_API_KEY=sk-... npm run ablation`），尚未跑；**没有跑之前不会给它写任何数字**。
+
+**没有 Key 也能验证链路**（不产生任何模型能力结论，只验证工具循环）：
+
+```bash
+node scripts/mock_llm.mjs          # 本地 mock，返回「先调工具、再作答」
+# 浏览器控制台：localStorage.ec_llm_base = 'http://127.0.0.1:8787/v1'，Key 随便填
+```
+
+工具循环本身有 8 个单测覆盖（`tests/llm.test.ts`）：工具结果回填、未知工具、坏 JSON 参数、超过 3 轮、
+接口 401、网络不通、模型编数字被抓、缺引用被判违规。
 
 ### M5 — 评测看板（`#/eval`）
 

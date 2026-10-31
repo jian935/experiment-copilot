@@ -3,6 +3,19 @@ import { TOOL_NAMES, TOOL_SCHEMA, runTool } from '../../lib/agent/tools.ts';
 import type { AgentCtx, AgentReply, ToolCall, ToolName } from '../../lib/agent/types.ts';
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1';
+
+/**
+ * 允许本地覆盖接口地址：只用于「没有 Key 时验证工具循环」——
+ * 起 scripts/mock_llm.mjs 后设置 localStorage.ec_llm_base 即可。
+ * 正常使用不设这个键，就走 DeepSeek 官方地址。
+ */
+function baseOverride(): string | null {
+  try {
+    return globalThis.localStorage?.getItem('ec_llm_base') || null;
+  } catch {
+    return null;
+  }
+}
 const DEFAULT_MODEL = 'deepseek-chat';
 
 interface ChatMessage {
@@ -29,7 +42,7 @@ export async function askWithLlm(
   ctx: AgentCtx,
   opts: LlmOptions,
 ): Promise<AgentReply> {
-  const base = (opts.baseUrl || DEFAULT_BASE).replace(/\/$/, '');
+  const base = (opts.baseUrl || baseOverride() || DEFAULT_BASE).replace(/\/$/, '');
   const model = opts.model || DEFAULT_MODEL;
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(ctx) },

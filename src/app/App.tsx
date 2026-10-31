@@ -22,17 +22,17 @@ export default function App() {
             </span>
             <span className="leading-tight">
               <span className="block text-[13.5px] font-semibold tracking-tight text-ink">Experiment Copilot</span>
-              <span className="block text-[10px] text-dim">实验结论官 · 可复算的实验决策</span>
+              <span className="hidden text-[10px] text-dim sm:block">实验结论官 · 可复算的实验决策</span>
             </span>
           </button>
 
-          <div className="ml-3 hidden items-center gap-1 md:flex">
+          <div className="ml-1 flex items-center gap-0.5 sm:ml-3 sm:gap-1">
             <button
               onClick={() => go('#/')}
               className={
                 expId || isEval
-                  ? 'rounded-lg px-2.5 py-1.5 text-xs text-muted transition-colors hover:bg-panel2 hover:text-ink'
-                  : 'rounded-lg bg-panel2 px-2.5 py-1.5 text-xs text-ink'
+                  ? 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
+                  : 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
               }
             >
               实验列表
@@ -41,8 +41,8 @@ export default function App() {
               onClick={() => go('#/eval')}
               className={
                 isEval
-                  ? 'rounded-lg bg-panel2 px-2.5 py-1.5 text-xs text-ink'
-                  : 'rounded-lg px-2.5 py-1.5 text-xs text-muted transition-colors hover:bg-panel2 hover:text-ink'
+                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
+                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
               }
             >
               评测看板

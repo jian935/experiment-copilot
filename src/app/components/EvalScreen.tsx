@@ -181,7 +181,7 @@ export function EvalScreen({
           right={<span className="text-[10px] text-dim">{r.mismatches.length} 条</span>}
         />
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs">
+          <table className="w-full min-w-[720px] border-collapse text-left text-xs">
             <thead>
               <tr className="border-b border-line text-[10.5px] text-dim">
                 <th className="px-4 py-2 font-medium">实验</th>

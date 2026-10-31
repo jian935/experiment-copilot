@@ -184,7 +184,7 @@ export function ExperimentList({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left">
+          <table className="w-full min-w-[860px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line text-[11px] font-medium text-dim">
                 <th className="px-4 py-2.5">实验</th>
