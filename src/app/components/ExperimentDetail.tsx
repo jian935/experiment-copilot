@@ -4,6 +4,7 @@ import {
   BadgeCheck,
   ChevronDown,
   CircleHelp,
+  Download,
   FlaskConical,
   ListTree,
   RefreshCw,
@@ -29,6 +30,7 @@ import {
 import { Forest, type ForestRow } from './Forest';
 import { Trend } from './Trend';
 import { EvidenceDrawer } from './EvidenceDrawer';
+import { exportConclusionCard } from '../lib/exportCard';
 import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
 
 type Tab = 'segments' | 'guardrails' | 'calc';
@@ -38,18 +40,43 @@ export function ExperimentDetail({
   analysis,
   rows,
   dataset,
+  initialEv,
   onBack,
 }: {
   exp: Experiment;
   analysis: Analysis;
   rows: DailyRow[];
   dataset: Dataset;
+  initialEv?: string | null;
   onBack: () => void;
 }) {
-  const [drawer, setDrawer] = useState(false);
+  const [drawer, setDrawer] = useState(!!initialEv);
+  const [focusEv, setFocusEv] = useState<string | null>(initialEv ?? null);
   const [tab, setTab] = useState<Tab>('segments');
   const [showTruth, setShowTruth] = useState(false);
   const [recalc, setRecalc] = useState<{ ok: boolean; ms: number; n: number } | null>(null);
+  const [exportState, setExportState] = useState<'idle' | 'ok' | 'err'>('idle');
+
+  function closeDrawer() {
+    setDrawer(false);
+    setFocusEv(null);
+    if (initialEv) window.history.replaceState(null, '', `#/e/${exp.id}`);
+  }
+
+  async function onExport() {
+    try {
+      await exportConclusionCard(exp, analysis, {
+        datasetVersion: datasetVersion(dataset.generatedAt),
+        seed: String(dataset.seedBase),
+      });
+      setExportState('ok');
+    } catch (e) {
+      console.error(e);
+      setExportState('err');
+    } finally {
+      setTimeout(() => setExportState('idle'), 2600);
+    }
+  }
 
   const meta = DECISION_META[analysis.decision];
   const tone = meta.tone as Tone;
@@ -124,11 +151,22 @@ export function ExperimentDetail({
             <span className="font-mono">seed {exp.seed}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={runRecalc}>
             <RefreshCw size={13} /> 一键复算
           </Button>
-          <Button variant="primary" size="sm" onClick={() => setDrawer(true)}>
+          <Button variant="outline" size="sm" onClick={onExport} title="把结论卡导出为 PNG，可直接贴到文档或简历">
+            {exportState === 'ok' ? <BadgeCheck size={13} className="text-ship" /> : <Download size={13} />}
+            {exportState === 'ok' ? '已导出' : exportState === 'err' ? '导出失败' : '导出结论卡'}
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => {
+              setFocusEv(null);
+              setDrawer(true);
+            }}
+          >
             <ListTree size={13} /> 证据链（{analysis.evidence.length}）
           </Button>
         </div>
@@ -426,11 +464,12 @@ export function ExperimentDetail({
 
       <EvidenceDrawer
         open={drawer}
-        onClose={() => setDrawer(false)}
+        onClose={closeDrawer}
         exp={exp}
         analysis={analysis}
         onRecalc={runRecalc}
         recalc={recalc}
+        focusId={focusEv}
       />
     </div>
   );

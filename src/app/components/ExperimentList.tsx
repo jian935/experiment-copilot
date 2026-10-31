@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { ArrowRight, Search } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRight, Check, Link2, Search } from 'lucide-react';
 import type { Analysis } from '../../lib/decide.ts';
 import type { Dataset, Experiment } from '../../lib/types.ts';
 import {
@@ -13,6 +13,7 @@ import {
   liftClass,
   type Tone,
 } from '../lib/format';
+import { copyText, readFilters, writeFilters } from '../lib/share';
 import { Button, Chip, DecisionBadge, Panel, Stat, cx } from './ui';
 
 type SortKey = 'id' | 'p' | 'diff';
@@ -46,10 +47,25 @@ export function ExperimentList({
   onOpen: (id: string) => void;
   seedNote: string;
 }) {
-  const [q, setQ] = useState('');
-  const [decision, setDecision] = useState<string | null>(null);
-  const [archetype, setArchetype] = useState<string>('all');
-  const [sort, setSort] = useState<SortKey>('id');
+  const initial = useMemo(() => readFilters(), []);
+  const [q, setQ] = useState(initial.q ?? '');
+  const [decision, setDecision] = useState<string | null>(initial.d ?? null);
+  const [archetype, setArchetype] = useState<string>(initial.a ?? 'all');
+  const [sort, setSort] = useState<SortKey>((initial.s as SortKey) ?? 'id');
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  // 筛选状态写回 URL，方便把当前视图直接发给别人
+  useEffect(() => {
+    writeFilters({ d: decision ?? undefined, a: archetype === 'all' ? undefined : archetype, q: q.trim() || undefined, s: sort === 'id' ? undefined : sort });
+  }, [q, decision, archetype, sort]);
+
+  async function copyViewLink() {
+    const ok = await copyText(window.location.href);
+    if (ok) {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 1800);
+    }
+  }
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { ship: 0, 'no-ship': 0, iterate: 0, inconclusive: 0 };
@@ -160,6 +176,10 @@ export function ExperimentList({
                 {label}
               </Chip>
             ))}
+            <Button variant="ghost" size="sm" onClick={copyViewLink} className="ml-1" title="复制带筛选状态的链接">
+              {linkCopied ? <Check size={12} className="text-ship" /> : <Link2 size={12} />}
+              {linkCopied ? '已复制' : '复制视图'}
+            </Button>
           </div>
         </div>
 

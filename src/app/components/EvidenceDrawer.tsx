@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react';
 import {
   BadgeCheck,
   BarChart3,
+  ChevronDown,
+  Check,
+  Copy,
   FlaskConical,
   Gavel,
   ListTree,
@@ -10,6 +14,7 @@ import {
 import type { Analysis, Evidence } from '../../lib/decide.ts';
 import type { Experiment } from '../../lib/types.ts';
 import { fmtP } from '../lib/format';
+import { absoluteUrl, copyText } from '../lib/share';
 import { Button, Drawer, cx } from './ui';
 
 const KIND_META: Record<Evidence['kind'], { label: string; icon: typeof FlaskConical; cls: string }> = {
@@ -27,6 +32,7 @@ export function EvidenceDrawer({
   analysis,
   onRecalc,
   recalc,
+  focusId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -34,14 +40,43 @@ export function EvidenceDrawer({
   analysis: Analysis;
   onRecalc: () => void;
   recalc: { ok: boolean; ms: number; n: number } | null;
+  focusId?: string | null;
 }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState<string | null>(null);
+
+  // 深链打开时自动展开目标条目
+  useEffect(() => {
+    if (open && focusId) {
+      setExpanded((prev) => ({ ...prev, [focusId]: true }));
+      setTimeout(() => {
+        document.getElementById(`ev-${focusId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }, 220);
+    }
+  }, [open, focusId]);
+
+  function toggle(id: string) {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+    requestAnimationFrame(() => {
+      document.getElementById(`ev-${id}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    });
+  }
+
+  async function share(evId: string) {
+    const ok = await copyText(absoluteUrl(`#/e/${exp.id}?ev=${evId}`));
+    if (ok) {
+      setCopied(evId);
+      setTimeout(() => setCopied((c) => (c === evId ? null : c)), 1600);
+    }
+  }
+
   return (
     <Drawer
       open={open}
       onClose={onClose}
       title={`证据链 · ${exp.id} ${exp.name}`}
-      subtitle="每条结论都对应一条可核对的证据：数据口径、样本量、统计量与 p 值。模型不参与任何计算。"
-      width={600}
+      subtitle="每条结论都对应一条可核对的证据；点开条目可看逐步代入。模型不参与任何计算。"
+      width={620}
       footer={
         <div className="flex items-center justify-between gap-3">
           <div className="text-[10.5px] leading-4 text-dim">
@@ -65,21 +100,116 @@ export function EvidenceDrawer({
         {analysis.evidence.map((e) => {
           const meta = KIND_META[e.kind];
           const Icon = meta.icon;
+          const openItem = !!expanded[e.id];
+          const hasBody = e.kind === 'decision' || (e.calc && e.calc.length > 0);
           return (
-            <li key={e.id} className="relative">
-              <span className="absolute -left-[23px] top-2 h-2 w-2 rounded-full bg-line2 ring-4 ring-panel" />
-              <div className="rounded-lg border border-line bg-panel2/50 px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <span className={cx('inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset', meta.cls)}>
+            <li key={e.id} id={`ev-${e.id}`} className="relative scroll-mt-4">
+              <span
+                className={cx(
+                  'absolute -left-[23px] top-2 h-2 w-2 rounded-full ring-4 ring-panel',
+                  openItem ? 'bg-brand2' : 'bg-line2',
+                )}
+              />
+              <div
+                className={cx(
+                  'rounded-lg border bg-panel2/50 transition-colors',
+                  openItem ? 'border-brand/40 bg-panel2/80' : 'border-line',
+                  focusId === e.id && 'ring-1 ring-brand/40',
+                )}
+              >
+                <div className="flex items-start gap-2 px-3 py-2.5">
+                  <span
+                    className={cx(
+                      'mt-0.5 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset',
+                      meta.cls,
+                    )}
+                  >
                     <Icon size={10} /> {meta.label}
                   </span>
-                  <span className="text-[12px] font-medium text-ink">{e.label}</span>
-                  <span className="ml-auto font-mono text-[10px] text-dim">{e.id}</span>
+                  <div className="min-w-0 flex-1">
+                    <button
+                      className={cx('block text-left text-[12px] font-medium text-ink', hasBody && 'hover:text-brand2')}
+                      onClick={hasBody ? () => toggle(e.id) : undefined}
+                      disabled={!hasBody}
+                    >
+                      {e.label}
+                    </button>
+                    <p className="num mt-1 text-[11px] leading-5 text-muted">{e.detail}</p>
+                    {e.kind === 'decision' && (
+                      <div className="mt-1.5 flex items-center gap-1 text-[10.5px] text-ship">
+                        <BadgeCheck size={11} /> 由上面全部证据按固定优先级规则推出
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      onClick={() => share(e.id)}
+                      className="rounded p-1 text-dim transition-colors hover:bg-panel hover:text-brand2"
+                      title="复制这条证据的链接"
+                    >
+                      {copied === e.id ? <Check size={11} className="text-ship" /> : <Copy size={11} />}
+                    </button>
+                    {hasBody && (
+                      <button
+                        onClick={() => toggle(e.id)}
+                        className="rounded p-1 text-dim transition-colors hover:bg-panel hover:text-ink"
+                        title={openItem ? '收起' : '展开计算过程'}
+                      >
+                        <ChevronDown size={12} className={cx('transition-transform', openItem && 'rotate-180')} />
+                      </button>
+                    )}
+                    <span className="ml-0.5 font-mono text-[9.5px] text-dim">{e.id}</span>
+                  </div>
                 </div>
-                <p className="num mt-1.5 text-[11px] leading-5 text-muted">{e.detail}</p>
-                {e.kind === 'decision' && (
-                  <div className="mt-1.5 flex items-center gap-1 text-[10.5px] text-ship">
-                    <BadgeCheck size={11} /> 由上面全部证据按固定优先级规则推出
+
+                {openItem && e.kind === 'decision' && (
+                  <div className="border-t border-line/70 px-3 py-2.5">
+                    <div className="mb-1.5 text-[10.5px] text-dim">
+                      6 条规则按固定优先级依次判断，遇到第一条命中即停（当前命中：{analysis.reasonCode}）
+                    </div>
+                    <table className="w-full border-collapse text-[10.5px]">
+                      <tbody>
+                        {analysis.rules.map((r, i) => {
+                          const hit = r.code === analysis.reasonCode;
+                          return (
+                            <tr key={r.code} className={cx('border-b border-line/40 last:border-0', hit && 'bg-brand/5')}>
+                              <td className="py-1 pr-2 align-top text-dim">{i + 1}</td>
+                              <td className="py-1 pr-2 align-top">
+                                <span className={cx('font-mono', hit ? 'text-brand2' : r.hit ? 'text-iterate' : 'text-muted')}>
+                                  {r.code}
+                                </span>
+                                <div className="text-[9.5px] text-dim">{r.condition}</div>
+                              </td>
+                              <td className="py-1 pr-2 align-top text-[10px] text-muted">{r.detail}</td>
+                              <td className="py-1 align-top text-right">
+                                {hit ? (
+                                  <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[9.5px] text-brand2">命中</span>
+                                ) : r.hit ? (
+                                  <span className="text-[9.5px] text-dim">被更高优先级覆盖</span>
+                                ) : (
+                                  <span className="text-[9.5px] text-dim">未触发</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {openItem && e.kind !== 'decision' && e.calc && (
+                  <div className="space-y-2 border-t border-line/70 px-3 py-2.5">
+                    {e.calc.map((s) => (
+                      <div key={s.title}>
+                        <div className="text-[10.5px] font-medium text-ink/90">{s.title}</div>
+                        <div className="mt-0.5 font-mono text-[9.5px] leading-4 text-dim">{s.formula}</div>
+                        <div className="num mt-0.5 text-[10.5px] leading-4 text-muted">{s.value}</div>
+                      </div>
+                    ))}
+                    <div className="pt-0.5 text-[9.5px] text-dim">
+                      以上数值可在「计算过程」页手算复核；同一份数据每次复算结果逐位相同。
+                    </div>
                   </div>
                 )}
               </div>

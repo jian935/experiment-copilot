@@ -6,7 +6,7 @@ import { Button } from './components/ui';
 
 export default function App() {
   const { data, error } = useDataset();
-  const { expId, go } = useHashRoute();
+  const { expId, ev, go } = useHashRoute();
 
   return (
     <div className="min-h-screen bg-base bg-grid">
@@ -106,10 +106,12 @@ export default function App() {
           }
           return (
             <ExperimentDetail
+              key={expId}
               exp={exp}
               analysis={analysis}
               rows={data.rowsByExp.get(expId) ?? []}
               dataset={data.dataset}
+              initialEv={ev}
               onBack={() => go('#/')}
             />
           );

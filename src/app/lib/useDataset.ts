@@ -57,7 +57,7 @@ export function recompute(exp: Experiment, rows: DailyRow[]): Analysis {
   return analyze(exp, rows);
 }
 
-export function useHashRoute(): { expId: string | null; go: (hash: string) => void } {
+export function useHashRoute(): { expId: string | null; ev: string | null; go: (hash: string) => void } {
   const [hash, setHash] = useState(() => window.location.hash);
 
   useEffect(() => {
@@ -66,13 +66,16 @@ export function useHashRoute(): { expId: string | null; go: (hash: string) => vo
     return () => window.removeEventListener('hashchange', on);
   }, []);
 
-  const expId = useMemo(() => {
+  const route = useMemo(() => {
     const m = /^#\/e\/([\w-]+)/.exec(hash);
-    return m ? m[1] : null;
+    const qi = hash.indexOf('?');
+    const q = new URLSearchParams(qi >= 0 ? hash.slice(qi + 1) : '');
+    return { expId: m ? m[1] : null, ev: q.get('ev') };
   }, [hash]);
 
   return {
-    expId,
+    expId: route.expId,
+    ev: route.ev,
     go: (h) => {
       window.location.hash = h;
       window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
