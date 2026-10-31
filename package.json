@@ -1,0 +1,18 @@
+{
+  "name": "experiment-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Experiment Copilot · 实验结论官：不让 LLM 算数的 A/B 实验分析 Copilot",
+  "scripts": {
+    "test": "vitest run",
+    "gen": "tsx scripts/gen_experiments.ts",
+    "calibrate": "tsx scripts/check_calibration.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
