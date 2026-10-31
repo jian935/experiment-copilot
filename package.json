@@ -1,18 +1,38 @@
 {
   "name": "experiment-copilot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Experiment Copilot · 实验结论官：不让 LLM 算数的 A/B 实验分析 Copilot",
   "scripts": {
+    "dev": "npm run data && vite",
+    "build": "npm run data && tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "data": "tsx scripts/build_data.ts",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit",
     "gen": "tsx scripts/gen_experiments.ts",
     "calibrate": "tsx scripts/check_calibration.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "autoprefixer": "^10.6.2",
+    "postcss": "^8.5.32",
+    "tailwindcss": "^3.4.19",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
+    "vite": "^8.3.5",
     "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.66.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.10.1",
+    "tailwind-merge": "^3.7.0"
   }
 }

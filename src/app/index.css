@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * 深色分析台配色：低饱和背景 + 靛蓝品牌色 + 语义化结论色。
+ * 参考 GrowthBook / Metabase / Linear 的密度与层级，不追求花哨。
+ */
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-base font-sans text-ink antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'tnum';
+  }
+  ::selection {
+    background: rgba(99, 102, 241, 0.4);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a3a52 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #2a3a52;
+    border-radius: 9px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* 轻微网格背景，给"分析台"一点空间感 */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.anim-up {
+  animation: fade-up 0.28s ease-out both;
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0.4;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.anim-slide {
+  animation: slide-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}

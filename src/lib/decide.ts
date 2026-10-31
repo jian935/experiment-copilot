@@ -51,6 +51,14 @@ export interface Analysis {
   evidence: Evidence[];
 }
 
+/** 证据文本里的 p 值：erfc 大 |z| 下溢到 0 时写 <1e-16，避免出现 0.00e+0 */
+function ep(p: number): string {
+  if (!Number.isFinite(p)) return '—';
+  if (p < 1e-16) return '<1e-16';
+  if (p >= 0.001) return p.toFixed(3);
+  return p.toExponential(2);
+}
+
 function emptyAgg(): VariantAgg {
   return { n: 0, c: 0, refunds: 0, complaints: 0, latencyWeighted: 0 };
 }
@@ -157,19 +165,19 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
   };
 
   add('srm', 'SRM 分流检查',
-    `control ${c.n} vs treatment ${t.n}；χ²=${srm.chi2.toFixed(1)}，p=${srm.p.toExponential(2)}，相对偏差 ${(srm.relImb * 100).toFixed(2)}%${srm.flagged ? ' → 异常' : ' → 通过'}`,
+    `control ${c.n} vs treatment ${t.n}；χ²=${srm.chi2.toFixed(1)}，p=${ep(srm.p)}，相对偏差 ${(srm.relImb * 100).toFixed(2)}%${srm.flagged ? ' → 异常' : ' → 通过'}`,
     srm.p);
   add('metric', exp.primaryMetric,
-    `control ${(overall.controlRate * 100).toFixed(2)}% vs treatment ${(overall.treatmentRate * 100).toFixed(2)}%；差值 ${(overall.diff * 100).toFixed(2)}pp，95% CI [${(overall.ci95[0] * 100).toFixed(2)}, ${(overall.ci95[1] * 100).toFixed(2)}]pp，p=${overall.p.toExponential(2)}`,
+    `control ${(overall.controlRate * 100).toFixed(2)}% vs treatment ${(overall.treatmentRate * 100).toFixed(2)}%；差值 ${(overall.diff * 100).toFixed(2)}pp，95% CI [${(overall.ci95[0] * 100).toFixed(2)}, ${(overall.ci95[1] * 100).toFixed(2)}]pp，p=${ep(overall.p)}`,
     overall.p);
   for (const s of segments.tenure) {
     add('segment', `分层：${s.label}`,
-      `差值 ${(s.test.diff * 100).toFixed(2)}pp，p=${s.test.p.toExponential(2)}，BH q=${s.q.toFixed(3)}${s.q <= 0.1 ? ' → 显著' : ''}`,
+      `差值 ${(s.test.diff * 100).toFixed(2)}pp，p=${ep(s.test.p)}，BH q=${s.q.toFixed(3)}${s.q <= 0.1 ? ' → 显著' : ''}`,
       s.test.p);
   }
   if (interaction) {
     add('segment', '新老交互',
-      `新老效应差 ${(interaction.diffDiff * 100).toFixed(2)}pp，p=${interaction.p.toExponential(2)}`,
+      `新老效应差 ${(interaction.diffDiff * 100).toFixed(2)}pp，p=${ep(interaction.p)}`,
       interaction.p);
   }
   for (const g of guardrails) {
@@ -177,7 +185,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     const fmt = (v: number) => (isMs ? `${v.toFixed(0)}ms` : `${(v * 100).toFixed(2)}%`);
     const fmtDiff = (v: number) => (isMs ? `${v >= 0 ? '+' : ''}${v.toFixed(0)}ms` : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}pp`);
     add('guardrail', `护栏：${g.label}`,
-      `control ${fmt(g.controlRate)} vs treatment ${fmt(g.treatmentRate)}，差值 ${fmtDiff(g.diff)}，p=${g.p.toExponential(2)}${g.gating ? '' : '（仅展示，不参与决策）'}`,
+      `control ${fmt(g.controlRate)} vs treatment ${fmt(g.treatmentRate)}，差值 ${fmtDiff(g.diff)}，p=${ep(g.p)}${g.gating ? '' : '（仅展示，不参与决策）'}`,
       g.p);
   }
 
@@ -200,15 +208,15 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
   } else if (worseGuardrail) {
     decision = 'no-ship';
     reasonCode = 'GUARDRAIL';
-    reason = `主指标${overall.diff > 0 ? '正向' : '负向'}，但${worseGuardrail.label}显著恶化（${(worseGuardrail.diff * 100).toFixed(2)}pp，p=${worseGuardrail.p.toExponential(2)}），护栏不通过。`;
+    reason = `主指标${overall.diff > 0 ? '正向' : '负向'}，但${worseGuardrail.label}显著恶化（${(worseGuardrail.diff * 100).toFixed(2)}pp，p=${ep(worseGuardrail.p)}），护栏不通过。`;
   } else if (overall.p < 0.05 && overall.diff < 0) {
     decision = 'no-ship';
     reasonCode = 'NEGATIVE';
-    reason = `主指标显著负向（${(overall.diff * 100).toFixed(2)}pp，p=${overall.p.toExponential(2)}），不建议上线。`;
+    reason = `主指标显著负向（${(overall.diff * 100).toFixed(2)}pp，p=${ep(overall.p)}），不建议上线。`;
   } else if (heterogeneous) {
     decision = 'iterate';
     reasonCode = 'HETEROGENEOUS';
-    reason = `效应集中在「${bestPos.label}」（${(bestPos.test.diff * 100).toFixed(2)}pp），「${flatSegment.label}」基本无效（${(flatSegment.test.diff * 100).toFixed(2)}pp，p=${flatSegment.test.p.toFixed(2)}），交互 p=${interaction?.p.toExponential(2)}；建议定向上线，仅对「${bestPos.label}」放开。`;
+    reason = `效应集中在「${bestPos.label}」（${(bestPos.test.diff * 100).toFixed(2)}pp），「${flatSegment.label}」基本无效（${(flatSegment.test.diff * 100).toFixed(2)}pp，p=${ep(flatSegment.test.p)}），交互 p=${ep(interaction?.p ?? 1)}；建议定向上线，仅对「${bestPos.label}」放开。`;
   } else if (overall.p >= 0.05) {
     decision = 'inconclusive';
     reasonCode = 'NOT_SIG';
@@ -216,7 +224,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
   } else {
     decision = 'ship';
     reasonCode = 'POSITIVE';
-    reason = `主指标显著正向（${(overall.diff * 100).toFixed(2)}pp，p=${overall.p.toExponential(2)}），护栏无显著恶化，建议上线。`;
+    reason = `主指标显著正向（${(overall.diff * 100).toFixed(2)}pp，p=${ep(overall.p)}），护栏无显著恶化，建议上线。`;
   }
 
   add('decision', '结论', `${decision} · ${reason}`);
