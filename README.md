@@ -1,6 +1,6 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M5 完成（评测看板：混淆矩阵 + 失败案例 + 证据强度分桶 + ablation 对比）** ｜ 2026-10-31
+> 状态：**M6 完成（36s 演示视频 + 单文件作品集落地页 + 简历素材）** ｜ 2026-11-01
 > 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ M1 评测：[`docs/EVAL.md`](docs/EVAL.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
@@ -34,6 +34,9 @@
 | Agent 面板 | 建议问题、规则/智能双模式、工具调用可视化、回答带可点引用、数字审计徽章 | [`06-Agent-建议问题.png`](docs/screenshots/06-Agent-建议问题.png) · [`07-Agent-问答.png`](docs/screenshots/07-Agent-问答.png) |
 | 评测看板 | 混淆矩阵、按类型/按 p 值分桶准确率、4 条失败案例可点开、ablation 双列对比 | [`08-评测看板.png`](docs/screenshots/08-评测看板.png) |
 
+**演示视频（36s）**：[`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) —— 真实操作录屏 + 中文旁白 + 字幕。
+**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 1.75MB，视频与截图全部内联，可直接发人。
+
 深链：`#/e/E001` 直达实验，`#/e/E001?ev=E6` 直接展开第 6 条证据，`#/?d=ship&s=diff` 还原筛选视图。
 
 详情页里两个「别的 demo 没有」的东西：
@@ -51,6 +54,8 @@ npm run preview    # 预览构建产物
 
 npm test           # 48 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 评测口径）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
+node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
+python scripts/build_portfolio.py                                    # 重建作品集页
 npm run gen        # 用固定种子重新生成 120 个实验（data/）
 npm run calibrate  # 120 例校准：混淆矩阵 + 五项指标
 ```
@@ -67,7 +72,10 @@ src/app/                UI：Vite + React 19 + TS + Tailwind v3
   components/Forest.tsx        手写 SVG 森林图（比图表库更可控）
   components/Trend.tsx         Recharts 分日趋势
   components/ExperimentList.tsx / ExperimentDetail.tsx / EvidenceDrawer.tsx
-scripts/                生成 / 校准 / 导出前端数据
+scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 / 作品集构建
+  record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
+  build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
+  build_portfolio.py      单文件作品集页（视频/截图内联）
 tests/                  18 个单测（含 6 组 scipy 对齐）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
 docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
@@ -134,6 +142,19 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 > FPR 分母只取 `archetype=null`（40 个真实无效应）。SRM 实验属于「数据坏了」另一种失败模式，
 > 混进分母会把误报率稀释成 6.0%——那不是更准，是分母被白送。
 
+### M6 — 演示与包装
+
+| 模块 | 内容 | 复现 |
+|---|---|---|
+| 演示视频 | 36s / 1280×720 / 30fps，真实操作 + 旁白 + 字幕；8 个片段按「先展示拒绝、再展示解释」排序 | `node scripts/record_demo.mjs` → `python scripts/build_demo_video.py` |
+| 作品集落地页 | 单文件自包含（视频 0.79MB + 6 张截图内联），可单独发给面试官 | `python scripts/build_portfolio.py` |
+| 简历素材 | 3 条 bullet、3 分钟面试动线、能说/不能说的数字、6 个高频追问 | `简历素材-项目链接与要点.md` |
+
+**视频流水线踩到的三个坑**（都写进了脚本注释）：
+1. screencast 只在画面变化时出帧，静止段没有帧 → 必须用 CDP 的帧时间戳重采样，不能按平均帧率算；
+2. 用 concat demuxer 的 `duration` 拼图片序列会漂移（实测 28.6s 拼成 33.1s）→ 改成 Python 侧按时间戳重采样成严格 30fps 序列；
+3. 录制脚本靠 sleep 等渲染不可靠（页面渲染比脚本慢）→ 全部改成轮询等元素出现再点，否则会点到还没挂载的按钮。
+
 ## 技术栈
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）+ Recharts（仅趋势图）；
@@ -141,5 +162,5 @@ Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语�
 
 ## 里程碑
 
-M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → M4 Agent ✅ → **M5 评测看板 ✅** → M6 打磨/部署/视频。
+M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → M4 Agent ✅ → M5 评测看板 ✅ → **M6 演示与包装 ✅** → 部署（等网络）。
 验收标准见蓝图 §13。

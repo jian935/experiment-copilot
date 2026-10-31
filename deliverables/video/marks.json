@@ -1,0 +1,51 @@
+{
+  "url": "http://127.0.0.1:4321/",
+  "width": 1440,
+  "height": 900,
+  "everyNthFrame": 1,
+  "duration": 29.63,
+  "frames": 216,
+  "fps": 7.29,
+  "marks": [
+    {
+      "name": "s1_list",
+      "start": 0,
+      "end": 4.02
+    },
+    {
+      "name": "s2_srm",
+      "start": 4.02,
+      "end": 7.87
+    },
+    {
+      "name": "s3_guardrail",
+      "start": 7.87,
+      "end": 11.5
+    },
+    {
+      "name": "s4_evidence",
+      "start": 11.5,
+      "end": 14.86
+    },
+    {
+      "name": "s5_audit",
+      "start": 14.86,
+      "end": 20.22
+    },
+    {
+      "name": "s6_agent",
+      "start": 20.22,
+      "end": 23.24
+    },
+    {
+      "name": "s7_eval",
+      "start": 23.24,
+      "end": 28.22
+    },
+    {
+      "name": "s8_close",
+      "start": 28.22,
+      "end": 29.63
+    }
+  ]
+}

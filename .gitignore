@@ -4,3 +4,10 @@ public/data/
 .local/
 *.log
 .tmp*
+
+# 录屏与视频中间产物（可重跑 scripts/record_demo.mjs + build_demo_video.py 重建）
+deliverables/video/frames/
+deliverables/video/build/
+
+# 作品集构建中间件（index.html 已内联全部资源，这些可重新生成）
+portfolio/assets/
