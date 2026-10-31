@@ -1,6 +1,6 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M4 完成（Agent：8 工具 + 5 铁律 + 数字审计 + 规则/智能双模式 + ablation）** ｜ 2026-10-31
+> 状态：**M5 完成（评测看板：混淆矩阵 + 失败案例 + 证据强度分桶 + ablation 对比）** ｜ 2026-10-31
 > 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ M1 评测：[`docs/EVAL.md`](docs/EVAL.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
@@ -32,6 +32,7 @@
 | 规则轨迹 | 结论那条证据展开后是 6 条规则按优先级依次判断，标出命中/被覆盖/未触发 | [`04-规则判定轨迹.png`](docs/screenshots/04-规则判定轨迹.png) |
 | 结论卡导出 | 一键导出 2 倍图 PNG（880×552），可直接贴文档/简历/群聊 | [`05-结论卡导出.png`](docs/screenshots/05-结论卡导出.png) |
 | Agent 面板 | 建议问题、规则/智能双模式、工具调用可视化、回答带可点引用、数字审计徽章 | [`06-Agent-建议问题.png`](docs/screenshots/06-Agent-建议问题.png) · [`07-Agent-问答.png`](docs/screenshots/07-Agent-问答.png) |
+| 评测看板 | 混淆矩阵、按类型/按 p 值分桶准确率、4 条失败案例可点开、ablation 双列对比 | [`08-评测看板.png`](docs/screenshots/08-评测看板.png) |
 
 深链：`#/e/E001` 直达实验，`#/e/E001?ev=E6` 直接展开第 6 条证据，`#/?d=ship&s=diff` 还原筛选视图。
 
@@ -48,7 +49,7 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 42 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent）
+npm test           # 48 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 评测口径）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
 npm run gen        # 用固定种子重新生成 120 个实验（data/）
 npm run calibrate  # 120 例校准：混淆矩阵 + 五项指标
@@ -119,6 +120,20 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 **规则模式当前成绩**（24 条问答，`docs/ABLATION.md`）：引用覆盖 **100%**、可疑数字 **0**、违规 **0**、口径陷阱识别 **100%**。
 智能模式需要你的 DeepSeek Key（`DEEPSEEK_API_KEY=sk-... npm run ablation`），尚未跑；**没有跑之前不会给它写任何数字**。
 
+### M5 — 评测看板（`#/eval`）
+
+| 模块 | 内容 |
+|---|---|
+| 五个 KPI | 决策准确率 96.7%（116/120）、null 误报率 7.5%（3/40）、正/负效应漏判 0%、Agent 引用覆盖 100% |
+| 混淆矩阵 | 4×4，对角线绿、错判红，鼠标悬停看「真实 → 引擎」的计数 |
+| 证据强度分桶 | 按 p 值分四桶看准确率：p<0.001 是 100%，**0.01–0.05 是 0%（0/3）**——恰好跨过阈值的实验本就无法判定 |
+| 失败案例 | 4 条全部列出、可点开看证据链；不修是刻意的（改了反而像在挑数据） |
+| Ablation | 规则模式 vs 智能模式并排：引用覆盖率 / 可疑数字率 / 违规率 / 口径识别 / 平均字数 |
+| 口径 | 单一源 `src/lib/evaluate.ts`，脚本 `npm run calibrate` 与看板共用，杜绝两套数字 |
+
+> FPR 分母只取 `archetype=null`（40 个真实无效应）。SRM 实验属于「数据坏了」另一种失败模式，
+> 混进分母会把误报率稀释成 6.0%——那不是更准，是分母被白送。
+
 ## 技术栈
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）+ Recharts（仅趋势图）；
@@ -126,5 +141,5 @@ Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语�
 
 ## 里程碑
 
-M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → **M4 Agent ✅** → M5 120 例评测看板 → M6 打磨/部署/视频。
+M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → M4 Agent ✅ → **M5 评测看板 ✅** → M6 打磨/部署/视频。
 验收标准见蓝图 §13。

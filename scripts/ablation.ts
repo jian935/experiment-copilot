@@ -10,7 +10,7 @@
  *   npx tsx scripts/ablation.ts                 # 只跑规则模式
  *   DEEPSEEK_API_KEY=sk-... npx tsx scripts/ablation.ts   # 同时跑 LLM
  */
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { analyze } from '../src/lib/decide.ts';
 import { generateDataset } from '../src/lib/simulate.ts';
 import { answerQuestion } from '../src/lib/agent/answer.ts';
@@ -37,6 +37,7 @@ interface Row {
   exp: string;
   q: string;
   by: 'rules' | 'llm';
+  intent: string;
   citable: boolean;
   cited: boolean;
   numbers: number;
@@ -72,6 +73,7 @@ function toRow(ctx: AgentCtx, q: string, reply: AgentReply): Row {
     exp: ctx.exp.id,
     q,
     by: reply.by,
+    intent: reply.intent,
     citable: reply.calls.some((c) => c.cites.length > 0),
     cited: /\[E\d+\]/.test(reply.text),
     numbers: reply.audit.total,
@@ -154,6 +156,20 @@ async function main() {
   lines.push('- 规则模式在这三项上通常是满分，但它的语言生硬、只能回答预设意图——这正是 LLM 的位置：**不是替它判断，是替它说话**。');
 
   writeFileSync('docs/ABLATION.md', lines.join('\n'));
+
+  // 给评测看板吃的摘要（只放聚合数字，不放全文，避免前端体积膨胀）
+  mkdirSync('public/data', { recursive: true });
+  writeFileSync(
+    'public/data/ablation.json',
+    JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      questions: QUESTIONS.length,
+      experiments: EXPS,
+      rules: mr,
+      llm: ml,
+      rows: rulesRows.map((r) => ({ exp: r.exp, q: r.q, intent: r.intent, cited: r.cited, numbers: r.numbers, suspicious: r.suspicious })),
+    }),
+  );
   console.log(`规则模式：${mr.n} 条｜引用覆盖 ${fmt(mr.citationRate)}｜可疑数字 ${fmt(mr.suspiciousRate)}｜违规 ${fmt(mr.violationRate)}`);
   if (ml) console.log(`智能模式：${ml.n} 条｜引用覆盖 ${fmt(ml.citationRate)}｜可疑数字 ${fmt(ml.suspiciousRate)}｜违规 ${fmt(ml.violationRate)}`);
   else console.log('智能模式未运行（未提供 DEEPSEEK_API_KEY）');

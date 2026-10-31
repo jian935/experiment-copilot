@@ -2,11 +2,12 @@ import { Activity, Code2, Loader2, TriangleAlert } from 'lucide-react';
 import { useDataset, useHashRoute } from './lib/useDataset';
 import { ExperimentList } from './components/ExperimentList';
 import { ExperimentDetail } from './components/ExperimentDetail';
+import { EvalScreen } from './components/EvalScreen';
 import { Button } from './components/ui';
 
 export default function App() {
   const { data, error } = useDataset();
-  const { expId, ev, go } = useHashRoute();
+  const { expId, ev, isEval, go } = useHashRoute();
 
   return (
     <div className="min-h-screen bg-base bg-grid">
@@ -29,12 +30,22 @@ export default function App() {
             <button
               onClick={() => go('#/')}
               className={
-                expId
+                expId || isEval
                   ? 'rounded-lg px-2.5 py-1.5 text-xs text-muted transition-colors hover:bg-panel2 hover:text-ink'
                   : 'rounded-lg bg-panel2 px-2.5 py-1.5 text-xs text-ink'
               }
             >
               实验列表
+            </button>
+            <button
+              onClick={() => go('#/eval')}
+              className={
+                isEval
+                  ? 'rounded-lg bg-panel2 px-2.5 py-1.5 text-xs text-ink'
+                  : 'rounded-lg px-2.5 py-1.5 text-xs text-muted transition-colors hover:bg-panel2 hover:text-ink'
+              }
+            >
+              评测看板
             </button>
           </div>
 
@@ -82,7 +93,16 @@ export default function App() {
           </div>
         )}
 
-        {data && !expId && (
+        {data && isEval && (
+          <EvalScreen
+            dataset={data.dataset}
+            analyses={data.analyses}
+            onOpen={(id) => go(`#/e/${id}`)}
+            onBack={() => go('#/')}
+          />
+        )}
+
+        {data && !expId && !isEval && (
           <ExperimentList
             dataset={data.dataset}
             analyses={data.analyses}
@@ -91,7 +111,7 @@ export default function App() {
           />
         )}
 
-        {data && expId && (() => {
+        {data && expId && !isEval && (() => {
           const exp = data.dataset.experiments.find((e) => e.id === expId);
           const analysis = data.analyses.get(expId);
           if (!exp || !analysis) {

@@ -57,7 +57,12 @@ export function recompute(exp: Experiment, rows: DailyRow[]): Analysis {
   return analyze(exp, rows);
 }
 
-export function useHashRoute(): { expId: string | null; ev: string | null; go: (hash: string) => void } {
+export function useHashRoute(): {
+  expId: string | null;
+  ev: string | null;
+  isEval: boolean;
+  go: (hash: string) => void;
+} {
   const [hash, setHash] = useState(() => window.location.hash);
 
   useEffect(() => {
@@ -76,6 +81,7 @@ export function useHashRoute(): { expId: string | null; ev: string | null; go: (
   return {
     expId: route.expId,
     ev: route.ev,
+    isEval: /^#\/eval/.test(hash),
     go: (h) => {
       window.location.hash = h;
       window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
