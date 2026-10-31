@@ -16,7 +16,17 @@ function baseOverride(): string | null {
     return null;
   }
 }
-const DEFAULT_MODEL = 'deepseek-chat';
+
+/** 允许换模型（例如 deepseek-v4-pro），默认 deepseek-flash */
+function modelOverride(): string | null {
+  try {
+    return globalThis.localStorage?.getItem('ec_llm_model') || null;
+  } catch {
+    return null;
+  }
+}
+// 当前 DeepSeek 开放平台可用 id：deepseek-flash / deepseek-v4-pro（老的 deepseek-chat 在本账号下不存在）
+const DEFAULT_MODEL = 'deepseek-flash';
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -43,7 +53,7 @@ export async function askWithLlm(
   opts: LlmOptions,
 ): Promise<AgentReply> {
   const base = (opts.baseUrl || baseOverride() || DEFAULT_BASE).replace(/\/$/, '');
-  const model = opts.model || DEFAULT_MODEL;
+  const model = opts.model || modelOverride() || DEFAULT_MODEL;
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(ctx) },
     { role: 'user', content: question },

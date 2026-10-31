@@ -264,6 +264,7 @@ export function systemPrompt(ctx: AgentCtx): string {
     '3. 证据不足就说不知道：如果工具没有返回所需信息，直接说「这一点数据里没有」，不要编。',
     '4. 口径变化必须显式说明：如果用户问的口径与当前实验不同（例如问 ARPU 但实验只测转化率），先说明口径差异。',
     '5. 不许编造历史实验或行业基准；需要对比时只能调用 find_similar / list_experiments。',
+    '6. 数字照抄工具给的格式化字段（如 diffPP、pText、summary），小数最多两位；禁止把 16 位浮点原样写进回答。',
     '',
     `当前实验：${ctx.exp.id} ${ctx.exp.name}；主指标 ${ctx.exp.primaryMetric}；数据为固定种子合成数据。`,
     `引擎结论：${a.decision}（规则 ${a.reasonCode}）。`,

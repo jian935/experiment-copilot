@@ -10,7 +10,7 @@
  *   npx tsx scripts/ablation.ts                 # 只跑规则模式
  *   DEEPSEEK_API_KEY=sk-... npx tsx scripts/ablation.ts   # 同时跑 LLM
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { analyze } from '../src/lib/decide.ts';
 import { generateDataset } from '../src/lib/simulate.ts';
 import { answerQuestion } from '../src/lib/agent/answer.ts';
@@ -44,6 +44,7 @@ interface Row {
   suspicious: number;
   tools: number;
   chars: number;
+  suspiciousList: string[];
   answersNoData: boolean;
   text: string;
   violations: number;
@@ -80,6 +81,7 @@ function toRow(ctx: AgentCtx, q: string, reply: AgentReply): Row {
     suspicious: reply.audit.suspicious.length,
     tools: reply.calls.length,
     chars: reply.text.length,
+    suspiciousList: reply.audit.suspicious,
     answersNoData: /没有「|数据里没有|未提供|不包含这个口径|不是这个口径|只测了/.test(reply.text),
     text: reply.text,
     violations: reply.violations?.length ?? 0,
@@ -87,7 +89,10 @@ function toRow(ctx: AgentCtx, q: string, reply: AgentReply): Row {
 }
 
 async function main() {
-  const key = process.env.DEEPSEEK_API_KEY || '';
+  // Key 优先读环境变量，其次读本地 .local/deepseek.key（已 gitignore，不会进仓库）
+  const key =
+    process.env.DEEPSEEK_API_KEY ||
+    (existsSync('.local/deepseek.key') ? readFileSync('.local/deepseek.key', 'utf8').trim() : '');
   const rulesRows: Row[] = [];
   const llmRows: Row[] = [];
 
@@ -128,13 +133,24 @@ async function main() {
   lines.push(`| 平均字数 | ${mr.avgChars} | ${ml ? ml.avgChars : '—'} |`);
   lines.push(`| 口径陷阱识别率 | ${fmt(mr.noDataRate)} | ${ml ? fmt(ml.noDataRate) : '—'} |`);
   lines.push('');
-  lines.push('## 规则模式的逐题结果\n');
-  lines.push('| 实验 | 问题 | 意图内工具数 | 引用 | 数字 | 可疑 | 违规 |');
-  lines.push('|---|---|---|---|---|---|---|');
-  for (const r of rulesRows) {
-    lines.push(
-      `| ${r.exp} | ${r.q} | ${r.tools} | ${r.cited ? '✓' : '✗'} | ${r.numbers} | ${r.suspicious} | ${r.violations} |`,
-    );
+  const table = (rows: Row[]) => {
+    lines.push('| 实验 | 问题 | 工具数 | 引用 | 数字 | 可疑 | 违规 | 可疑数字 |');
+    lines.push('|---|---|---|---|---|---|---|---|');
+    for (const r of rows) {
+      lines.push(
+        `| ${r.exp} | ${r.q} | ${r.tools} | ${r.cited ? '✓' : '✗'} | ${r.numbers} | ${r.suspicious} | ${r.violations} | ${
+          r.suspiciousList.join('、') || '—'
+        } |`,
+      );
+    }
+    lines.push('');
+  };
+
+  lines.push('## 逐题结果（规则模式）\n');
+  table(rulesRows);
+  if (llmRows.length) {
+    lines.push('## 逐题结果（智能模式）\n');
+    table(llmRows);
   }
   lines.push('');
   lines.push('## 逐题回答（规则模式）\n');

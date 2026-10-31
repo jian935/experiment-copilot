@@ -174,19 +174,25 @@
   <table>
     <thead><tr><th>指标</th><th class="num">规则模式（免密钥）</th><th class="num">智能模式（DeepSeek）</th></tr></thead>
     <tbody>
-      <tr><td>引用覆盖率</td><td class="num good">100%</td><td class="num" style="color:var(--dim)">待跑（需 Key）</td></tr>
-      <tr><td>可疑数字率</td><td class="num good">0%</td><td class="num" style="color:var(--dim)">待跑</td></tr>
-      <tr><td>口径陷阱识别</td><td class="num good">100%</td><td class="num" style="color:var(--dim)">待跑</td></tr>
+      <tr><td>引用覆盖率</td><td class="num good">100%</td><td class="num good">100%</td></tr>
+      <tr><td>可疑数字率</td><td class="num good">0%</td><td class="num good">0–0.6%</td></tr>
+      <tr><td>违规率（缺引用 / 可疑数字）</td><td class="num good">0%</td><td class="num warn">0–4.2%</td></tr>
+      <tr><td>口径陷阱识别</td><td class="num good">100%</td><td class="num good">100%</td></tr>
+      <tr><td>平均回答字数</td><td class="num">134</td><td class="num">251</td></tr>
     </tbody>
   </table>
-  <p class="cap">没有跑出数字的格子就写「待跑」——这个项目不做无来源的对比。</p>
+  <p class="cap">
+    智能模式 4 次运行，3 次全干净，1 次抓到 1 条错误数字。第一次跑时可疑数字率是 <b style="color:var(--ink)">1.8%</b>——
+    不是幻觉，是模型把工具的 16 位浮点原样抄进了回答；给工具补格式化字段、提示词禁止长小数后降到 0。
+  </p>
 
   <h2>边界与不会做的事</h2>
   <ul>
     <li><b>数据是合成的。</b>真值来自生成参数，不是人工标注；它证明的是「引擎与已知真值一致」，不是线上业务效果。</li>
     <li><b>没有真实用户与留存。</b>没做用户测试，也没有任何 DAU / 留存 / 转化数据可供包装。</li>
     <li><b>不接真实数仓。</b>没有埋点接入、权限、多租户；v1 只验证「结论可信」。</li>
-    <li><b>智能模式尚未跑评测。</b>没有 DeepSeek Key 就没有 LLM 侧的数字，只写规则模式的实测结果。</li>
+    <li><b>LLM 侧不是 100%。</b>4 次运行里有 1 次抓到 1 个错误数字（把 <code>4.2e-13</code> 写成 <code>1e-13</code>）；
+        数字审计只能标红给人复核，不能自动纠错。24 条问答也不足以支撑「模型分析能力」的结论。</li>
   </ul>
   <div class="warnbox"><p>面试时我会主动先说这些——因为「知道自己不知道什么」正好是这个项目要证明的能力。</p></div>
 

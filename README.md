@@ -54,6 +54,7 @@ npm run preview    # 预览构建产物
 
 npm test           # 56 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
+                   # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
 python scripts/build_portfolio.py                                    # 重建作品集页
 npm run gen        # 用固定种子重新生成 120 个实验（data/）
@@ -125,8 +126,19 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 | 引用可点 | 回答里的 `E6` 是按钮，点开直接跳到证据抽屉并展开该条 |
 | Ablation | `npm run ablation`：同一批问题（8 题 × 3 个实验）跑规则/智能两种模式，比较引用覆盖率、可疑数字率、口径识别率 |
 
-**规则模式当前成绩**（24 条问答，`docs/ABLATION.md`）：引用覆盖 **100%**、可疑数字 **0**、违规 **0**、口径陷阱识别 **100%**。
-智能模式需要 DeepSeek Key（`DEEPSEEK_API_KEY=sk-... npm run ablation`），尚未跑；**没有跑之前不会给它写任何数字**。
+**实测成绩**（24 条问答 = 8 题 × 3 个实验，`docs/ABLATION.md`）：
+
+| 指标 | 规则模式（免密钥） | 智能模式（deepseek-flash） |
+|---|---|---|
+| 引用覆盖率 | 100% | **100%** |
+| 可疑数字率 | 0% | **0–0.6%**（4 次运行，3 次为 0） |
+| 违规率 | 0% | **0–4.2%**（1 次抓到 1 条） |
+| 口径陷阱识别 | 100% | **100%** |
+| 平均字数 | 134 | 251 |
+
+第一次跑真实模型时可疑数字率是 **1.8%**——原因不是幻觉，而是模型把工具的 16 位浮点原样抄进回答
+（`0.02099419631592228`）。给工具补了 `diffPP` / `pText` 这类格式化字段、并在提示词里禁止长小数后降到 0。
+过程与波动写在 [`docs/ABLATION-NOTES.md`](docs/ABLATION-NOTES.md)——**包括那次唯一没跑干净的运行**。
 
 **没有 Key 也能验证链路**（不产生任何模型能力结论，只验证工具循环）：
 

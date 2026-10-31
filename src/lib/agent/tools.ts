@@ -18,6 +18,14 @@ const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
 const pp = (v: number, d = 2) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}pp`;
 const pv = (p: number) => (p < 1e-16 ? '<1e-16' : p < 0.001 ? p.toExponential(1) : p.toFixed(3));
 
+const DECISION_CN: Record<string, string> = {
+  ship: '建议上线',
+  'no-ship': '不建议上线',
+  iterate: '定向上线',
+  inconclusive: '无法下结论',
+  unknown: '未知',
+};
+
 function cite(a: Analysis, kind: Evidence['kind'], labelPart?: string): string[] {
   const hit = a.evidence.filter((e) => e.kind === kind && (!labelPart || e.label.includes(labelPart)));
   return hit.map((e) => e.id);
@@ -133,13 +141,19 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
         .slice(0, limit)
         .map((e) => {
           const an = ctx.analyses.get(e.id);
+          const diff = an?.overall.diff ?? 0;
+          const p = an?.overall.p ?? 1;
           return {
             id: e.id,
             name: e.name,
             archetype: e.archetype,
             decision: an?.decision ?? 'unknown',
-            diff: an?.overall.diff ?? 0,
-            p: an?.overall.p ?? 1,
+            decisionLabel: DECISION_CN[an?.decision ?? 'inconclusive'],
+            // 给模型直接可抄的字符串：避免它输出 16 位浮点（实测会被数字审计判为可疑）
+            diffPP: pp(diff),
+            pText: pv(p),
+            diff,
+            p,
           };
         });
       return {
@@ -168,7 +182,16 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
         })
         .map((e) => {
           const an = ctx.analyses.get(e.id)!;
-          return { id: e.id, name: e.name, decision: an.decision, diff: an.overall.diff, p: an.overall.p };
+          return {
+            id: e.id,
+            name: e.name,
+            decision: an.decision,
+            decisionLabel: DECISION_CN[an.decision],
+            diffPP: pp(an.overall.diff),
+            pText: pv(an.overall.p),
+            diff: an.overall.diff,
+            p: an.overall.p,
+          };
         });
       return {
         tool: name,
