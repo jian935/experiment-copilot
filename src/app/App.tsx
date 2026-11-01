@@ -1,15 +1,19 @@
-import { Activity, Code2, Loader2, TriangleAlert, Upload } from 'lucide-react';
+import { Activity, Code2, Loader2, Settings2, TriangleAlert, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { useDataset, useHashRoute } from './lib/useDataset';
+import { useSettings } from './lib/settings';
 import { ExperimentList } from './components/ExperimentList';
 import { ExperimentDetail } from './components/ExperimentDetail';
 import { EvalScreen } from './components/EvalScreen';
 import { ImportDialog } from './components/ImportDialog';
+import { SettingsScreen } from './components/SettingsScreen';
 import { Button } from './components/ui';
 
 export default function App() {
-  const { data, error, importData } = useDataset();
-  const { expId, ev, isEval, go } = useHashRoute();
+  const { settings, patchConfig, patchLlm, reset } = useSettings();
+  // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
+  const { data, error, importData } = useDataset(settings.config);
+  const { expId, ev, isEval, isSettings, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
 
   return (
@@ -50,12 +54,29 @@ export default function App() {
             >
               评测看板
             </button>
+            <button
+              onClick={() => go('#/settings')}
+              className={
+                isSettings
+                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
+                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
+              }
+            >
+              口径字典 / 设置
+            </button>
           </div>
 
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)} title="导入自己的数据">
               <Upload size={13} /> 导入数据
             </Button>
+            <button
+              onClick={() => go('#/settings')}
+              title="决策口径与模型设置"
+              className="rounded-lg border border-line p-1.5 text-muted transition-colors hover:border-line2 hover:text-ink"
+            >
+              <Settings2 size={14} />
+            </button>
             <span className="hidden items-center gap-1.5 rounded-full border border-line bg-panel2/60 px-2.5 py-1 text-[10.5px] text-muted sm:flex">
               <i className="h-1.5 w-1.5 rounded-full bg-ship" />
               确定性引擎 · 无模型参与计算
@@ -99,6 +120,18 @@ export default function App() {
           </div>
         )}
 
+        {data && isSettings && (
+          <SettingsScreen
+            settings={settings}
+            patchConfig={patchConfig}
+            patchLlm={patchLlm}
+            reset={reset}
+            dataset={data.dataset}
+            analyses={data.analyses}
+            onBack={() => go('#/')}
+          />
+        )}
+
         {data && isEval && (
           <EvalScreen
             dataset={data.dataset}
@@ -108,7 +141,7 @@ export default function App() {
           />
         )}
 
-        {data && !expId && !isEval && (
+        {data && !expId && !isEval && !isSettings && (
           <ExperimentList
             dataset={data.dataset}
             analyses={data.analyses}
@@ -119,7 +152,7 @@ export default function App() {
           />
         )}
 
-        {data && expId && !isEval && (() => {
+        {data && expId && !isEval && !isSettings && (() => {
           const exp = data.dataset.experiments.find((e) => e.id === expId);
           const analysis = data.analyses.get(expId);
           if (!exp || !analysis) {

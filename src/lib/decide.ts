@@ -257,7 +257,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     const latC = rows.filter((r) => r.variant === 'control').map((r) => r.latencyP95);
     const latT = rows.filter((r) => r.variant === 'treatment').map((r) => r.latencyP95);
     const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
-    const latMargin = lc * lg.relativeMargin;
+    // 延迟用相对容忍度：margin 读作「相对 control 的比例」
+    const latMargin = lg.relative ? lc * lg.margin : lg.margin;
     const latBoot = bootstrapTwoSample(latC, latT, (x, y) => mean(y) - mean(x), {
       reps: cfg.bootstrapReps,
       seed: cfg.simSeed,
@@ -275,7 +276,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       worse: latP < lg.alpha,
       gating: lg.gating, // 延迟噪声大且与损失非线性，v1 仅展示
       bootstrap: latBoot,
-      marginLabel: `≤ +${(lg.relativeMargin * 100).toFixed(0)}%（${latMargin.toFixed(1)}ms）`,
+      marginLabel: `≤ +${(lg.margin * 100).toFixed(0)}%（${latMargin.toFixed(1)}ms）`,
     });
   }
 
@@ -391,8 +392,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
         },
         {
           title: '② 声明容忍度',
-          formula: `margin = control × ${(cfg.guardrails.latencyP95.relativeMargin * 100).toFixed(0)}%`,
-          value: `${g.controlRate.toFixed(1)}ms × ${(cfg.guardrails.latencyP95.relativeMargin * 100).toFixed(0)}% = ${(g.controlRate * cfg.guardrails.latencyP95.relativeMargin).toFixed(1)}ms（${g.marginLabel}）`,
+          formula: `margin = control × ${(cfg.guardrails.latencyP95.margin * 100).toFixed(0)}%`,
+          value: `${g.controlRate.toFixed(1)}ms × ${(cfg.guardrails.latencyP95.margin * 100).toFixed(0)}% = ${(g.controlRate * cfg.guardrails.latencyP95.margin).toFixed(1)}ms（${g.marginLabel}）`,
         },
         {
           title: `③ Bootstrap 区间（${b.reps.toLocaleString('en-US')} 次重抽样，${b.method === 'bca' ? 'BCa' : '百分位'}法）`,

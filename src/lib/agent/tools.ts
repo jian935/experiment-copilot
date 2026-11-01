@@ -2,6 +2,7 @@ import { mdeTwoProportion, powerTwoProportion } from '../stats.ts';
 import type { Analysis, Evidence } from '../decide.ts';
 import type { Decision } from '../types.ts';
 import type { AgentCtx, ToolCall, ToolName } from './types.ts';
+import { METRIC_DEFS, directionLabel, findMetrics } from '../metrics.ts';
 
 export const TOOL_LABEL: Record<ToolName, string> = {
   get_overview: '读取结论',
@@ -13,6 +14,7 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   list_experiments: '检索实验列表',
   explain_rules: '回溯判定规则',
   bayesian_view: '贝叶斯视角',
+  metric_dictionary: '口径字典',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -32,7 +34,7 @@ function cite(a: Analysis, kind: Evidence['kind'], labelPart?: string): string[]
   return hit.map((e) => e.id);
 }
 
-/** 9 个工具全部是纯函数：只读 Analysis / Dataset，不联网、不算任何新口径 */
+/** 10 个工具全部是纯函数：只读 Analysis / Dataset 与口径字典，不联网、不算任何新口径 */
 export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unknown> = {}): ToolCall {
   const { analysis: a, exp, dataset } = ctx;
 
@@ -239,6 +241,43 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
       };
     }
 
+    case 'metric_dictionary': {
+      // 口径字典是「Agent 不能自创指标」的唯一依据：
+      // 只认 METRIC_DEFS 里登记过的口径，问到没登记的必须明说没有，不许现编。
+      const q = typeof args.metric === 'string' ? args.metric : (ctx.question ?? '');
+      const mentioned = findMetrics(q);
+      const wantUnknown =
+        mentioned.length === 0 &&
+        /口径|指标|定义|怎么算|如何计算|什么是/.test(q) &&
+        /[A-Za-z\u4e00-\u9fa5]{2,}/.test(q);
+
+      return {
+        tool: name,
+        args,
+        summary: mentioned.length
+          ? `命中 ${mentioned.length} 个已登记口径：${mentioned.map((m) => m.label).join('、')}`
+          : `已登记口径共 ${METRIC_DEFS.length} 个：${METRIC_DEFS.map((m) => m.label).join('、')}`,
+        data: {
+          known: METRIC_DEFS.map((m) => ({
+            key: m.key,
+            label: m.label,
+            kind: m.kind,
+            direction: m.direction,
+            directionLabel: directionLabel(m),
+            unit: m.unit,
+            formula: m.formula,
+            source: m.source,
+            method: m.method,
+            guardrailMargin: m.guardrailMargin,
+          })),
+          matched: mentioned.map((m) => m.key),
+          /** 问了一个字典里没有的指标：只能说没有，不许编 */
+          unknownMention: wantUnknown,
+        },
+        cites: mentioned.length ? cite(a, 'metric') : [],
+      };
+    }
+
     default:
       throw new Error(`未知工具：${name}`);
   }
@@ -336,6 +375,21 @@ export const TOOL_SCHEMA = [
       description:
         '贝叶斯视角：用 Beta-Binomial 后验给出 treatment 优于 control 的概率（P(B>A)）、95% 可信区间与期望损失（若误判上线的平均损失）',
       parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'metric_dictionary',
+      description:
+        '查口径字典：所有已登记指标的定义、方向、单位、计算式、统计方法与护栏容忍度。只能引用字典里存在的指标，字典里没有的必须说明没有，不得自行定义',
+      parameters: {
+        type: 'object',
+        properties: {
+          metric: { type: 'string', description: '要查的指标名（如「退款率」）；留空则返回全部' },
+        },
+        required: [],
+      },
     },
   },
 ];

@@ -31,7 +31,8 @@ export type ToolName =
   | 'find_similar'
   | 'list_experiments'
   | 'explain_rules'
-  | 'bayesian_view';
+  | 'bayesian_view'
+  | 'metric_dictionary';
 
 export interface AgentReply {
   /** 最终回答（含 [E1] 这类引用标记） */

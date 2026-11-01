@@ -14,10 +14,19 @@ import { answerQuestion } from '../../lib/agent/answer.ts';
 import { TOOL_LABEL } from '../../lib/agent/tools.ts';
 import type { AgentCtx, AgentReply, ToolCall } from '../../lib/agent/types.ts';
 import { askWithLlm } from '../lib/llm';
+import { useSettings } from '../lib/settings';
 import { Button, Drawer, cx } from './ui';
 
-const KEY_STORE = 'ec_llm_key';
 const MODE_STORE = 'ec_agent_mode';
+
+/** 从 base URL 里取 host，避免界面上把完整 URL（含路径）塞满 */
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return baseUrl || '默认端点';
+  }
+}
 
 const SUGGESTIONS = [
   '为什么是这个结论？',
@@ -43,6 +52,8 @@ export function AgentPanel({
   ctx: AgentCtx;
   onCite: (evId: string) => void;
 }) {
+  // 模型设置来自设置页（provider / base_url / model / Key），不再是硬编码的 DeepSeek
+  const { settings, patchLlm } = useSettings();
   const [mode, setMode] = useState<'rules' | 'llm'>(() => {
     try {
       return (localStorage.getItem(MODE_STORE) as 'rules' | 'llm') || 'rules';
@@ -50,13 +61,7 @@ export function AgentPanel({
       return 'rules';
     }
   });
-  const [apiKey, setApiKey] = useState(() => {
-    try {
-      return sessionStorage.getItem(KEY_STORE) || '';
-    } catch {
-      return '';
-    }
-  });
+  const [apiKey, setApiKey] = useState(() => settings.llm.apiKey);
   const [keyDraft, setKeyDraft] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
@@ -95,6 +100,8 @@ export function AgentPanel({
       if (mode === 'llm' && apiKey) {
         const reply = await askWithLlm(question, ctx, {
           apiKey,
+          baseUrl: settings.llm.baseUrl || undefined,
+          model: settings.llm.model || undefined,
           onTool: (c) => setPendingTool(c),
         });
         setTurns((p) => [...p, { role: 'assistant', reply }]);
@@ -145,11 +152,7 @@ export function AgentPanel({
                   const k = keyDraft.trim();
                   if (!k) return;
                   setApiKey(k);
-                  try {
-                    sessionStorage.setItem(KEY_STORE, k);
-                  } catch {
-                    /* 忽略 */
-                  }
+                  patchLlm({ apiKey: k }); // 与设置页共享同一份配置
                   setKeyDraft('');
                 }}
               >
@@ -180,7 +183,7 @@ export function AgentPanel({
             <span>
               {mode === 'llm'
                 ? apiKey
-                  ? '智能模式：DeepSeek（Key 只存在本会话）'
+                  ? `智能模式：${settings.llm.model || '默认模型'} @ ${hostOf(settings.llm.baseUrl)}`
                   : '智能模式需要 Key，或切回规则模式'
                 : '规则模式：无需密钥，全部离线计算'}
             </span>
@@ -196,7 +199,7 @@ export function AgentPanel({
         {(
           [
             ['rules', '规则模式', '免密钥 · 确定性'],
-            ['llm', '智能模式', 'DeepSeek · 需 Key'],
+            ['llm', '智能模式', 'OpenAI 兼容 · 需 Key'],
           ] as const
         ).map(([k, label, hint]) => (
           <button
@@ -242,9 +245,9 @@ export function AgentPanel({
               可以直接点开看原始证据。
             </p>
             <div className="mt-3 border-t border-line/60 pt-2.5">
-              <div className="text-[10px] text-dim">可调用的 9 个工具（模型只能通过它们取数）</div>
+              <div className="text-[10px] text-dim">可调用的 10 个工具（模型只能通过它们取数）</div>
               <div className="mt-1.5 flex flex-wrap gap-1">
-                {['读取结论', '重算检验', '扫描分层', '检查护栏', '推算 MDE', '检索相似', '检索列表', '回溯规则', '贝叶斯视角'].map((t) => (
+                {['读取结论', '重算检验', '扫描分层', '检查护栏', '推算 MDE', '检索相似', '检索列表', '回溯规则', '贝叶斯视角', '口径字典'].map((t) => (
                   <span key={t} className="rounded border border-line bg-panel px-1.5 py-0.5 text-[9.5px] text-muted">
                     {t}
                   </span>

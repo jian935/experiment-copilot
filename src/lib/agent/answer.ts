@@ -1,5 +1,6 @@
 import { auditNumbers, buildWhitelist } from './audit.ts';
 import { runTool } from './tools.ts';
+import { METRIC_LABELS } from '../metrics.ts';
 import type { AgentCtx, AgentReply, ToolCall } from './types.ts';
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -70,24 +71,18 @@ const INTENTS: IntentDef[] = [
     key: 'metric_scope',
     test: /arpu|客单价|人均收入|gmv|交易额|成交额|留存|retention|dau|mau|日活|月活|ctr|点击率|营收|收入|付费率/i,
     run: (ctx) => {
-      const KNOWN: [RegExp, string][] = [
-        [/arpu|客单价|人均收入/i, 'ARPU'],
-        [/gmv|交易额|成交额/i, 'GMV'],
-        [/留存|retention/i, '留存率'],
-        [/dau|mau|日活|月活/i, '活跃用户数'],
-        [/ctr|点击率/i, '点击率'],
-        [/营收|收入|revenue/i, '收入'],
-        [/付费率/i, '付费率'],
-      ];
-      const asked = KNOWN.find(([re]) => re.test(ctx.question ?? ''))?.[1] ?? '这个指标';
-      const measured = [ctx.exp.primaryMetric, ...ctx.exp.guardrailMetrics].join('、');
+      // 以口径字典为唯一真源：字典里没有的指标一律拒答，不在代码里另维护一份"已知指标"清单
+      const q = ctx.question ?? '';
+      const asked = q.match(/arpu|客单价|人均收入|gmv|交易额|成交额|留存|retention|dau|mau|日活|月活|ctr|点击率|营收|收入|付费率/i)?.[0] ?? '这个指标';
+      const registered = METRIC_LABELS.join('、');
       const cites = citeOf(ctx, 'metric');
       return {
         calls: [runTool('get_overview', ctx)],
-        text: withCites(
-          `这个实验只测了 ${measured}，数据里没有「${asked}」的口径，所以我答不了「${asked} 提升了多少」——这类跨口径的结论不能从转化率类推`,
-          cites,
-        ) + `如果确实要评估 ${asked}，需要一个以它为指标的实验，或者提供对应的埋点数据。`,
+        text:
+          withCites(
+            `「${asked}」不在口径字典里（已登记的只有 ${registered}），引擎没有算过它，所以我答不了它提升了多少——我不能替你定义一个口径，也不能从转化率类推`,
+            cites,
+          ) + `如果确实要评估 ${asked}，需要先在数据里补上对应字段并登记进口径字典，或者用一个以它为指标的实验。`,
       };
     },
   },
@@ -148,6 +143,35 @@ const INTENTS: IntentDef[] = [
         calls: [t, d],
         text: `${withCites(`按新老分层：${head}`, t.cites)}${interactionText ? `${withCites(interactionText, t.cites)}` : ''}${tail}`,
       };
+    },
+  },
+
+  {
+    key: 'metric',
+    test: /口径|指标定义|怎么算|如何计算|什么是.*率|字典/,
+    run: (ctx) => {
+      const d = runTool('metric_dictionary', ctx, { metric: ctx.question ?? '' });
+      const data = d.data as {
+        known: { key: string; label: string; formula: string; directionLabel: string; unit: string; method: string; guardrailMargin: number | null }[];
+        matched: string[];
+        unknownMention: boolean;
+      };
+      const hit = data.known.filter((m) => data.matched.includes(m.key));
+      const list = hit.length ? hit : data.known;
+      const lines = list
+        .map(
+          (m) =>
+            `${m.label}（${m.directionLabel}）：${m.formula}；统计方法 ${m.method}` +
+            (m.guardrailMargin !== null ? `；护栏容忍度 ${m.unit === 'ms' ? `+${(m.guardrailMargin * 100).toFixed(0)}%` : `${(m.guardrailMargin * 100).toFixed(2)}pp`}` : ''),
+        )
+        .join('；');
+      const head = hit.length
+        ? `口径字典里命中 ${hit.length} 个：${lines}`
+        : `口径字典共登记 ${data.known.length} 个指标：${lines}`;
+      const tail = data.unknownMention
+        ? ' 你问的指标不在口径字典里，引擎没有算过它，我不能替你定义——需要的话先把字段加进数据再说。'
+        : '';
+      return { calls: [d], text: `${withCites(head, d.cites)}${tail}` };
     },
   },
 
@@ -277,6 +301,8 @@ export function systemPrompt(ctx: AgentCtx): string {
     '4. 口径变化必须显式说明：如果用户问的口径与当前实验不同（例如问 ARPU 但实验只测转化率），先说明口径差异。',
     '5. 不许编造历史实验或行业基准；需要对比时只能调用 find_similar / list_experiments。',
     '6. 数字照抄工具给的格式化字段（如 diffPP、pText、summary），小数最多两位；禁止把 16 位浮点原样写进回答。',
+    `7. 只能引用口径字典里登记过的指标（${METRIC_LABELS.join('、')}）。用户问到字典外的指标（如 ARPU、留存），` +
+      '必须先说「这个指标不在口径字典里，引擎没算过」，禁止自行定义口径或换算。',
     '',
     `当前实验：${ctx.exp.id} ${ctx.exp.name}；主指标 ${ctx.exp.primaryMetric}；数据为固定种子合成数据。`,
     `引擎结论：${a.decision}（规则 ${a.reasonCode}）。`,

@@ -66,7 +66,7 @@ describe('智能模式的工具循环（M4）', () => {
     expect(r.violations).toEqual([]);
 
     // 第一次请求带 9 个工具，第二次请求带上了 tool 角色的回填
-    expect((bodies[0].tools as unknown[]).length).toBe(9);
+    expect((bodies[0].tools as unknown[]).length).toBe(10);
     const roles = bodies[1].messages.map((m) => m.role);
     expect(roles).toContain('assistant');
     expect(roles).toContain('tool');

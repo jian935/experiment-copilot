@@ -54,7 +54,7 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 119 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准）
+npm test           # 142 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
@@ -124,7 +124,7 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  119 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A 模拟）
+tests/                  142 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A 模拟 + 口径字典/阈值可配）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
 docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```
@@ -166,7 +166,10 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 
 | 模块 | 内容 |
 |---|---|
-| 9 个工具 | 读取结论 / 重算检验 / 扫描分层 / 检查护栏 / 推算 MDE / 检索相似 / 检索列表 / 回溯规则 / 贝叶斯视角；全部纯函数只读引擎结果 |
+| 10 个工具 | 读取结论 / 重算检验 / 扫描分层 / 检查护栏 / 推算 MDE / 检索相似 / 检索列表 / 回溯规则 / 贝叶斯视角 / 口径字典；全部纯函数只读引擎结果，未登记指标一律拒答 |
+| 口径字典 | `src/lib/metrics.ts` 登记全部指标（定义/方向/单位/计算式/统计方法/护栏容忍度）；引擎与 Agent 只认字典内的口径 |
+| 设置页 | 第 6 屏（`#/settings`）：α / FDR / 交互 α / SRM 双阈值 / 三个护栏的 margin·α·口径·是否拦截 / Bootstrap 次数·种子 / 模型 provider；改完立刻显示「多少条结论会变」 |
+| 阈值可配 | `analyze(exp, rows, cfg)` 接受 `Partial<DecisionConfig>`；所有阈值集中在 `src/lib/config.ts`，代码里无判定魔数 |
 | 5 条铁律 | 不许自己算数 / 每个数字必须带 `[E#]` 引用 / 证据不足就说不知道 / 口径变化必须说明 / 不许编造历史实验 |
 | 双模式 | **规则模式**（免密钥，确定性路由 + 模板）；**智能模式**（DeepSeek function calling，浏览器直连，Key 只存 sessionStorage），失败自动回退规则模式并说明原因 |
 | 数字审计 | 回答里的每个数字都要在白名单（引擎 + 工具返回）里按显示精度对得上；对不上就标红列出 |

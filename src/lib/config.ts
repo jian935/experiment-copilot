@@ -10,6 +10,20 @@
 
 import type { GuardrailMode } from './stats.ts';
 
+/**
+ * 单个护栏的规格。margin 统一写在「该指标自己的单位」下：
+ * 率类指标是绝对百分点（0.004 = 0.4pp），延迟类是相对比例（relative: true，0.05 = +5%）。
+ * 形状统一，避免调用处到处判断用哪个字段。
+ */
+export interface GuardrailSpec {
+  margin: number;
+  alpha: number;
+  gating: boolean;
+  mode: GuardrailMode;
+  /** true 时 margin 按 control 的相对比例解释 */
+  relative?: boolean;
+}
+
 export interface DecisionConfig {
   /** 主指标显著性水平（双侧） */
   alpha: number;
@@ -29,10 +43,10 @@ export interface DecisionConfig {
    * mode 决定"什么情况下算拦"，三种都是正式检验，严度不同（见 stats::GuardrailMode）。
    */
   guardrails: {
-    refundRate: { margin: number; alpha: number; gating: boolean; mode: GuardrailMode };
-    complaintRate: { margin: number; alpha: number; gating: boolean; mode: GuardrailMode };
-    /** 延迟类指标用相对门槛（+5%），因为不同接口基线差异极大 */
-    latencyP95: { relativeMargin: number; alpha: number; gating: boolean; mode: GuardrailMode };
+    refundRate: GuardrailSpec;
+    complaintRate: GuardrailSpec;
+    /** 延迟类指标用相对门槛（relative: true → margin 读作比例），因为不同接口基线差异极大 */
+    latencyP95: GuardrailSpec;
   };
 
   /** Bootstrap 重抽样次数（蓝图 §8 要求 10k） */
@@ -64,7 +78,7 @@ export const DEFAULT_CONFIG: DecisionConfig = {
     // 所以 margin=0 表示"任何在统计上确认的上升都要提示"，且只提示不拦截。
     complaintRate: { margin: 0, alpha: 0.005, gating: false, mode: 'harm_and_practical' },
     // 延迟：不同接口基线差异大，用相对 +5%；噪声大且与损失非线性，仍只展示不拦截。
-    latencyP95: { relativeMargin: 0.05, alpha: 0.05, gating: false, mode: 'harm_and_practical' },
+    latencyP95: { margin: 0.05, alpha: 0.05, gating: false, mode: 'harm_and_practical', relative: true },
   },
 
   bootstrapReps: 10000,

@@ -21,7 +21,7 @@ const heteroCtx = ctxOf('E002');
 
 describe('Agent 工具（M4）', () => {
   it('9 个工具都能调用，且引用的证据编号都真实存在', () => {
-    expect(TOOL_NAMES.length).toBe(9);
+    expect(TOOL_NAMES.length).toBe(10);
     const valid = new Set(guardrailCtx.analysis.evidence.map((e) => e.id));
     for (const name of TOOL_NAMES) {
       const call = runTool(name, guardrailCtx, name === 'segment_breakdown' ? { dimension: 'device' } : {});
@@ -92,6 +92,40 @@ describe('规则模式的回答', () => {
     expect(r.text).toContain('没有');
     expect(r.text).toContain('ARPU');
     expect(r.audit.suspicious).toEqual([]);
+  });
+
+  it('口径问题走字典，且不会编造未登记的指标', () => {
+    // 「退款率…」会先命中护栏意图、「有哪些…」会先命中列表意图（都对），
+    // 所以字典意图用只含口径关键词、不撞其它意图的问法验证
+    const r = answerQuestion('指标怎么算的', guardrailCtx);
+    expect(r.intent).toBe('metric');
+    expect(r.text).toContain('口径字典共登记');
+    expect(r.text).toContain('支付转化率');
+    expect(r.text).toContain('refunds / exposures');
+    expect(r.audit.suspicious).toEqual([]);
+
+    // 直接点名某个指标时，工具要能精确命中并给出它的计算式与统计方法
+    const call = runTool('metric_dictionary', guardrailCtx, { metric: '退款率' });
+    const data = call.data as { matched: string[]; known: { key: string; formula: string; method: string }[] };
+    expect(data.matched).toEqual(['refund_rate']);
+    expect(data.known.find((m) => m.key === 'refund_rate')!.formula).toBe('refunds / exposures');
+    expect(call.summary).toContain('退款率');
+  });
+
+  it('问到字典外的指标：明说没有，不自己定义', () => {
+    const r = answerQuestion('ARPU 的口径是什么', guardrailCtx);
+    expect(r.intent).toBe('metric_scope');
+    expect(r.text).toContain('不在口径字典里');
+    expect(r.text).toContain('支付转化率');
+    expect(r.text).not.toContain('ARPU（');
+    expect(r.audit.suspicious).toEqual([]);
+  });
+
+  it('系统提示里写明了可引用的指标白名单', () => {
+    const p = systemPrompt(guardrailCtx);
+    expect(p).toContain('只能引用口径字典里登记过的指标');
+    expect(p).toContain('支付转化率');
+    expect(p).toContain('退款率');
   });
 
   it('兜底问题也能给出结论概览，不空转', () => {
