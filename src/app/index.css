@@ -3,34 +3,42 @@
 @tailwind utilities;
 
 /*
- * 深色分析台配色：低饱和背景 + 靛蓝品牌色 + 语义化结论色。
- * 参考 GrowthBook / Metabase / Linear 的密度与层级，不追求花哨。
+ * 纯白 + 橙的暖色清透主题。
+ * 分层靠「1px 暖灰描边 + 极浅暖阴影」，不靠深色块；橙色只做点缀。
  */
 @layer base {
   html {
-    color-scheme: dark;
+    color-scheme: light;
   }
   body {
     @apply bg-base font-sans text-ink antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'tnum';
   }
   ::selection {
-    background: rgba(99, 102, 241, 0.4);
+    background: rgba(249, 115, 22, 0.18);
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: #2a3a52 transparent;
+    scrollbar-color: #e7d8c9 transparent;
   }
   *::-webkit-scrollbar {
     width: 9px;
     height: 9px;
   }
   *::-webkit-scrollbar-thumb {
-    background: #2a3a52;
+    background: #e7d8c9;
     border-radius: 9px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: #d9c6b3;
   }
   *::-webkit-scrollbar-track {
     background: transparent;
+  }
+  /* 键盘可达性：浅底上必须能看清焦点 */
+  :focus-visible {
+    outline: 2px solid rgba(249, 115, 22, 0.55);
+    outline-offset: 2px;
   }
 }
 
@@ -40,11 +48,11 @@
     font-feature-settings: 'tnum';
   }
 
-  /* 轻微网格背景，给"分析台"一点空间感 */
+  /* 极浅暖色网格：给白底一点空间感，但不抢内容 */
   .bg-grid {
     background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+      linear-gradient(to right, rgba(180, 130, 80, 0.055) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(180, 130, 80, 0.055) 1px, transparent 1px);
     background-size: 44px 44px;
   }
 }

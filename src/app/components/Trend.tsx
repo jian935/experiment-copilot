@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import type { DailyRow } from '../../lib/types';
 import { fmtNum, fmtPct } from '../lib/format';
+import { C } from '../lib/palette';
 
 interface Point {
   date: string;
@@ -52,16 +53,16 @@ export function Trend({ rows }: { rows: DailyRow[] }) {
     <div className="h-[176px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: -14 }}>
-          <CartesianGrid stroke="#1a2436" strokeDasharray="2 4" vertical={false} />
+          <CartesianGrid stroke={C.grid} strokeDasharray="2 4" vertical={false} />
           <XAxis
             dataKey="date"
-            tick={{ fill: '#6b7c96', fontSize: 10 }}
-            axisLine={{ stroke: '#1e2a3d' }}
+            tick={{ fill: C.dim, fontSize: 10 }}
+            axisLine={{ stroke: C.line }}
             tickLine={false}
           />
           <YAxis
             domain={[lo - pad, hi + pad]}
-            tick={{ fill: '#6b7c96', fontSize: 10 }}
+            tick={{ fill: C.dim, fontSize: 10 }}
             axisLine={false}
             tickLine={false}
             tickFormatter={(v: number) => `${(v * 100).toFixed(1)}%`}
@@ -75,7 +76,7 @@ export function Trend({ rows }: { rows: DailyRow[] }) {
                 <div className="rounded-lg border border-line2 bg-panel px-3 py-2 text-[11px] shadow-xl">
                   <div className="mb-1 text-dim">{label}</div>
                   <div className="num flex items-center gap-2 text-ink">
-                    <i className="h-1.5 w-1.5 rounded-full bg-[#64748b]" />
+                    <i className="h-1.5 w-1.5 rounded-full " />
                     control {fmtPct(p.control ?? 0)} · n={fmtNum(p.nc)}
                   </div>
                   <div className="num mt-0.5 flex items-center gap-2 text-brand2">
@@ -89,18 +90,18 @@ export function Trend({ rows }: { rows: DailyRow[] }) {
           <Line
             type="monotone"
             dataKey="control"
-            stroke="#64748b"
+            stroke={C.neutral}
             strokeWidth={1.8}
-            dot={{ r: 2.2, fill: '#64748b', strokeWidth: 0 }}
+            dot={{ r: 2.2, fill: C.neutral, strokeWidth: 0 }}
             activeDot={{ r: 3.5 }}
             isAnimationActive={false}
           />
           <Line
             type="monotone"
             dataKey="treatment"
-            stroke="#818cf8"
+            stroke={C.brand}
             strokeWidth={2}
-            dot={{ r: 2.2, fill: '#818cf8', strokeWidth: 0 }}
+            dot={{ r: 2.2, fill: C.brand, strokeWidth: 0 }}
             activeDot={{ r: 3.5 }}
             isAnimationActive={false}
           />

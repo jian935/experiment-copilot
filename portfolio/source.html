@@ -6,22 +6,22 @@
 <title>Experiment Copilot · 实验结论官</title>
 <style>
   :root{
-    --bg:#070a11; --panel:#0d1320; --panel2:#121a2b; --line:#1e2a3d; --line2:#2a3a52;
-    --ink:#e9eef8; --muted:#93a3bb; --dim:#6b7c96; --brand:#6366f1; --brand2:#818cf8;
-    --ship:#34d399; --noship:#fb7185; --amber:#fbbf24;
+    --bg:#fdfbf8; --panel:#ffffff; --panel2:#fff7ed; --line:#f2e9df; --line2:#e8dccd;
+    --ink:#241a12; --muted:#6f5f50; --dim:#9d8b7a; --brand:#f97316; --brand2:#c2410c;
+    --ship:#15803d; --noship:#be123c; --amber:#b45309;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
     font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
     -webkit-font-smoothing:antialiased;line-height:1.65;
-    background-image:linear-gradient(rgba(255,255,255,.026) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.026) 1px,transparent 1px);
+    background-image:linear-gradient(rgba(180,120,60,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(180,120,60,.04) 1px,transparent 1px);
     background-size:44px 44px}
   .wrap{max-width:980px;margin:0 auto;padding:0 24px}
   a{color:var(--brand2);text-decoration:none}
   a:hover{text-decoration:underline}
   .top{display:flex;align-items:center;gap:10px;padding:22px 0;border-bottom:1px solid var(--line)}
-  .mark{width:28px;height:28px;border-radius:8px;background:rgba(99,102,241,.16);border:1px solid rgba(99,102,241,.45);
-    display:grid;place-items:center;color:#a5b4fc;font-weight:700;font-size:13px}
+  .mark{width:28px;height:28px;border-radius:8px;background:rgba(249,115,22,.14);border:1px solid rgba(249,115,22,.4);
+    display:grid;place-items:center;color:#c2410c;font-weight:700;font-size:13px}
   .brand{font-weight:600;letter-spacing:.2px}
   .brand span{display:block;font-size:11px;color:var(--dim);font-weight:400}
   .top .right{margin-left:auto;font-size:12px;color:var(--dim)}
@@ -29,7 +29,7 @@
   h2{font-size:20px;margin:52px 0 14px;letter-spacing:-.2px}
   h3{font-size:14px;margin:22px 0 8px;color:var(--ink)}
   p{color:var(--muted);font-size:14.5px;margin:10px 0}
-  .lead{font-size:17px;color:#c7d2e4;max-width:760px}
+  .lead{font-size:17px;color:#5c4f43;max-width:760px}
   .kicker{font-size:12px;color:var(--brand2);letter-spacing:2px;text-transform:uppercase;margin-top:36px}
   .chips{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 8px}
   .chip{font-size:12px;color:var(--muted);border:1px solid var(--line);background:var(--panel2);
@@ -40,12 +40,13 @@
   .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:500}
   .btn:hover{text-decoration:none;border-color:var(--line2)}
   .btn.primary:hover{background:var(--brand2)}
-  .video{margin:28px 0 8px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#04060b}
+  .video{margin:28px 0 8px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#f6efe7}
   .video video{display:block;width:100%;height:auto}
   .cap{font-size:11.5px;color:var(--dim);margin-top:8px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-  .card{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:16px 18px}
+  .card{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:16px 18px;
+    box-shadow:0 14px 36px -28px rgba(120,60,20,.4)}
   .card h4{margin:0 0 6px;font-size:13.5px}
   .card p{margin:0;font-size:12.5px;line-height:1.7;color:var(--dim)}
   table{width:100%;border-collapse:collapse;margin:14px 0;font-size:13px}
@@ -55,20 +56,20 @@
   tr:last-child td{border-bottom:0}
   .good{color:var(--ship)} .bad{color:var(--noship)} .warn{color:var(--amber)}
   .shots{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
-  .shots figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#04060b;position:relative}
+  .shots figure{margin:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#f6efe7;position:relative}
   .shots img{display:block;width:100%;height:auto;cursor:zoom-in;transition:opacity .15s}
   .shots figure:hover img{opacity:.9}
-  .shots figure::after{content:"点击看高清";position:absolute;top:8px;right:8px;font-size:10.5px;color:#c7d2e4;
-    background:rgba(7,10,17,.72);border:1px solid var(--line2);padding:2px 7px;border-radius:999px;opacity:0;transition:opacity .15s}
+  .shots figure::after{content:"点击看高清";position:absolute;top:8px;right:8px;font-size:10.5px;color:#fdfbf8;
+    background:rgba(36,26,18,.72);border:1px solid var(--line2);padding:2px 7px;border-radius:999px;opacity:0;transition:opacity .15s}
   .shots figure:hover::after{opacity:1}
   /* 灯箱：复用同一张 data URI，不额外增加文件体积 */
-  .lb{position:fixed;inset:0;z-index:99;display:none;background:rgba(4,6,11,.95);
+  .lb{position:fixed;inset:0;z-index:99;display:none;background:rgba(36,26,18,.92);
     align-items:center;justify-content:center;padding:24px}
   .lb.on{display:flex}
   .lb img{max-width:96vw;max-height:86vh;width:auto;height:auto;object-fit:contain;
-    border:1px solid var(--line2);border-radius:10px;box-shadow:0 30px 80px -20px #000}
+    border:1px solid var(--line2);border-radius:10px;box-shadow:0 30px 80px -20px rgba(80,40,10,.35)}
   .lb .bar{position:absolute;bottom:18px;left:0;right:0;display:flex;justify-content:center;gap:10px}
-  .lb .bar a,.lb .bar button{font-size:12.5px;color:var(--ink);background:rgba(18,26,43,.92);
+  .lb .bar a,.lb .bar button{font-size:12.5px;color:var(--ink);background:rgba(255,247,237,.95);
     border:1px solid var(--line2);border-radius:8px;padding:7px 14px;cursor:pointer}
   .lb .bar a:hover,.lb .bar button:hover{border-color:var(--brand)}
   .lb .hint{position:absolute;top:16px;left:0;right:0;text-align:center;font-size:11.5px;color:var(--dim)}
@@ -76,9 +77,9 @@
   ul{padding-left:18px;margin:10px 0}
   li{color:var(--muted);font-size:14px;margin:6px 0}
   li b{color:var(--ink);font-weight:600}
-  .quote{border-left:2px solid var(--brand);padding:4px 0 4px 16px;margin:18px 0;color:#c7d2e4;font-size:15px}
-  .warnbox{border:1px solid rgba(251,191,36,.3);background:rgba(251,191,36,.07);border-radius:12px;padding:14px 16px;margin-top:14px}
-  .warnbox p{color:#e8d9a8;margin:0;font-size:13px}
+  .quote{border-left:2px solid var(--brand);padding:4px 0 4px 16px;margin:18px 0;color:#5c4f43;font-size:15px}
+  .warnbox{border:1px solid rgba(180,83,9,.28);background:rgba(180,83,9,.06);border-radius:12px;padding:14px 16px;margin-top:14px}
+  .warnbox p{color:#8a5a12;margin:0;font-size:13px}
   footer{border-top:1px solid var(--line);margin-top:56px;padding:22px 0 60px;display:flex;flex-wrap:wrap;gap:14px;
     font-size:12px;color:var(--dim)}
   footer .r{margin-left:auto}
@@ -228,7 +229,7 @@
 
   <footer>
     <span>Experiment Copilot · 实验结论官</span>
-    <span>作者：绝望的土豆泥</span>
+    <span>作者：jian935</span>
     <span class="r">数据为固定种子合成数据，用于已知真值评测</span>
   </footer>
 </div>

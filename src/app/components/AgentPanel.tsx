@@ -300,7 +300,7 @@ function AssistantTurn({
   return (
     <div className="rounded-xl border border-line bg-panel2/50 p-3">
       <div className="mb-1.5 flex items-center gap-2">
-        <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9.5px] text-dim">
+        <span className="rounded bg-panel2 px-1.5 py-0.5 text-[9.5px] text-dim">
           {reply.by === 'llm' ? 'DeepSeek' : '规则引擎'}
         </span>
         <span className="font-mono text-[9.5px] text-dim">{reply.intent}</span>

@@ -14,6 +14,7 @@ import {
   type Tone,
 } from '../lib/format';
 import { copyText, readFilters, writeFilters } from '../lib/share';
+import { C } from '../lib/palette';
 import { Button, Chip, DecisionBadge, Panel, Stat, cx } from './ui';
 
 type SortKey = 'id' | 'p' | 'diff';
@@ -26,10 +27,10 @@ function MiniCI({ ci, diff }: { ci: [number, number]; diff: number }) {
   const span = hi - lo || 0.002;
   const x = (v: number) => 1 + ((v - lo) / span) * (W - 2);
   const sig = ci[0] > 0 || ci[1] < 0;
-  const color = !sig ? '#64748b' : diff > 0 ? '#34d399' : '#fb7185';
+  const color = !sig ? C.neutral : diff > 0 ? C.ship : C.noship;
   return (
     <svg width={W} height={H} className="shrink-0" aria-hidden>
-      <line x1={x(0)} x2={x(0)} y1={1} y2={H - 1} stroke="#3d4b63" strokeWidth={1} strokeDasharray="2 2" />
+      <line x1={x(0)} x2={x(0)} y1={1} y2={H - 1} stroke={C.line2} strokeWidth={1} strokeDasharray="2 2" />
       <line x1={x(ci[0])} x2={x(ci[1])} y1={H / 2} y2={H / 2} stroke={color} strokeWidth={1.6} opacity={0.8} strokeLinecap="round" />
       <circle cx={x(diff)} cy={H / 2} r={2.4} fill={color} />
     </svg>

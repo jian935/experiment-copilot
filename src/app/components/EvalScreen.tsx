@@ -5,6 +5,7 @@ import { DECISIONS, evaluate } from '../../lib/evaluate.ts';
 import type { Dataset } from '../../lib/types.ts';
 import { ARCHETYPE_LABEL, DECISION_META, fmtP, fmtPP, liftClass } from '../lib/format';
 import { DecisionBadge, Panel, PanelHead, cx } from './ui';
+import { C } from '../lib/palette';
 
 interface Ablation {
   generatedAt: string;
@@ -104,10 +105,10 @@ export function EvalScreen({
                         )}
                         style={{
                           background: diag
-                            ? `rgba(52, 211, 153, ${alpha})`
+                            ? `rgba(21, 128, 61, ${alpha})`
                             : v > 0
-                              ? `rgba(251, 113, 133, ${alpha})`
-                              : 'rgba(255,255,255,0.02)',
+                              ? `rgba(190, 18, 60, ${alpha})`
+                              : 'rgba(180, 130, 80, 0.05)',
                         }}
                         title={`真实 ${DECISION_META[td].label} → 引擎 ${DECISION_META[pd].label}：${v}`}
                       >
@@ -135,9 +136,9 @@ export function EvalScreen({
                     {(b.accuracy * 100).toFixed(1)}% · {b.correct}/{b.n}
                   </span>
                 </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                <div className="h-1.5 overflow-hidden rounded-full bg-line">
                   <div
-                    className={cx('h-full rounded-full', b.accuracy < 0.9 ? 'bg-noship' : 'bg-ship')}
+                    className={cx('h-full rounded-full', b.accuracy < 0.9 ? 'bg-noship/85' : 'bg-ship/85')}
                     style={{ width: `${Math.max(2, b.accuracy * 100)}%` }}
                   />
                 </div>
@@ -163,9 +164,9 @@ export function EvalScreen({
                   {(a.accuracy * 100).toFixed(0)}% · {a.correct}/{a.n}
                 </span>
               </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+              <div className="h-1.5 overflow-hidden rounded-full bg-line">
                 <div
-                  className={cx('h-full rounded-full', a.accuracy < 0.9 ? 'bg-noship' : 'bg-brand2')}
+                  className={cx('h-full rounded-full', a.accuracy < 0.9 ? 'bg-noship/85' : 'bg-brand')}
                   style={{ width: `${Math.max(2, a.accuracy * 100)}%` }}
                 />
               </div>

@@ -6,10 +6,10 @@ const W = 880;
 const H = 600;
 
 const TONE_HEX: Record<Tone, string> = {
-  ship: '#34d399',
-  noship: '#fb7185',
-  iterate: '#fbbf24',
-  incon: '#94a3b8',
+  ship: '#15803d',
+  noship: '#be123c',
+  iterate: '#b45309',
+  incon: '#78716c',
 };
 
 function esc(s: string): string {
@@ -67,35 +67,35 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
   const shift = (3 - reasonLines.length) * 24;
   const Hd = H - shift;
   const metrics = [
-    { k: '绝对差值', v: fmtPP(a.overall.diff), c: a.overall.diff > 0 ? '#34d399' : '#fb7185' },
-    { k: '95% 置信区间', v: `[${(a.overall.ci95[0] * 100).toFixed(2)}, ${(a.overall.ci95[1] * 100).toFixed(2)}]pp`, c: '#e9eef8' },
-    { k: 'p 值', v: fmtP(a.overall.p), c: '#e9eef8' },
-    { k: '总样本', v: fmtNum(a.overall.n1 + a.overall.n2), c: '#e9eef8' },
+    { k: '绝对差值', v: fmtPP(a.overall.diff), c: a.overall.diff > 0 ? '#15803d' : '#be123c' },
+    { k: '95% 置信区间', v: `[${(a.overall.ci95[0] * 100).toFixed(2)}, ${(a.overall.ci95[1] * 100).toFixed(2)}]pp`, c: '#241a12' },
+    { k: 'p 值', v: fmtP(a.overall.p), c: '#241a12' },
+    { k: '总样本', v: fmtNum(a.overall.n1 + a.overall.n2), c: '#241a12' },
   ];
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${Hd}" viewBox="0 0 ${W} ${Hd}">
   <defs>
     <linearGradient id="glow" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="${color}" stop-opacity="0.16"/>
-      <stop offset="0.55" stop-color="${color}" stop-opacity="0.02"/>
+      <stop offset="0" stop-color="${color}" stop-opacity="0.10"/>
+      <stop offset="0.55" stop-color="${color}" stop-opacity="0.01"/>
     </linearGradient>
   </defs>
-  <rect width="${W}" height="${Hd}" fill="#0a0f1a"/>
-  <rect x="0.5" y="0.5" width="${W - 1}" height="${Hd - 1}" fill="none" stroke="#1e2a3d"/>
+  <rect width="${W}" height="${Hd}" fill="#ffffff"/>
+  <rect x="0.5" y="0.5" width="${W - 1}" height="${Hd - 1}" fill="none" stroke="#f2e9df"/>
   <rect width="${W}" height="196" fill="url(#glow)"/>
 
   <!-- header -->
-  <rect x="40" y="34" width="22" height="22" rx="6" fill="#6366f1" fill-opacity="0.18" stroke="#6366f1" stroke-opacity="0.5"/>
-  <path d="M45 50 l4 -5 3.5 3 5 -6.5" fill="none" stroke="#a5b4fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="72" y="50" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#e9eef8">Experiment Copilot</text>
-  <text x="${72 + textWidth('Experiment Copilot', 13.5) * 1.06 + 14}" y="50" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5" fill="#6b7c96">实验结论官 · 可复算的实验决策</text>
-  <text x="${W - 40}" y="50" text-anchor="end" font-family="SFMono-Regular, Consolas, monospace" font-size="11" fill="#4d5a70">${esc(meta.datasetVersion)}</text>
+  <rect x="40" y="34" width="22" height="22" rx="6" fill="#f97316" fill-opacity="0.18" stroke="#f97316" stroke-opacity="0.5"/>
+  <path d="M45 50 l4 -5 3.5 3 5 -6.5" fill="none" stroke="#ea580c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="72" y="50" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="13.5" font-weight="600" fill="#241a12">Experiment Copilot</text>
+  <text x="${72 + textWidth('Experiment Copilot', 13.5) * 1.06 + 14}" y="50" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11.5" fill="#9d8b7a">实验结论官 · 可复算的实验决策</text>
+  <text x="${W - 40}" y="50" text-anchor="end" font-family="SFMono-Regular, Consolas, monospace" font-size="11" fill="#a89684">${esc(meta.datasetVersion)}</text>
 
   <!-- title -->
-  <rect x="40" y="78" width="${Math.max(52, textWidth(exp.id, 11) + 18)}" height="20" rx="5" fill="#121a2b" stroke="#1e2a3d"/>
-  <text x="${40 + Math.max(52, textWidth(exp.id, 11) + 18) / 2}" y="92" text-anchor="middle" font-family="SFMono-Regular, Consolas, monospace" font-size="11" fill="#93a3bb">${esc(exp.id)}</text>
-  <text x="40" y="136" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="26" font-weight="600" fill="#e9eef8">${esc(exp.name)}</text>
-  <text x="40" y="160" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12" fill="#6b7c96">${esc(exp.primaryMetric)}（二值） · ${esc(exp.startDate)} → ${esc(exp.endDate)} · ${esc(exp.trafficSplit)}</text>
+  <rect x="40" y="78" width="${Math.max(52, textWidth(exp.id, 11) + 18)}" height="20" rx="5" fill="#fff7ed" stroke="#f2e9df"/>
+  <text x="${40 + Math.max(52, textWidth(exp.id, 11) + 18) / 2}" y="92" text-anchor="middle" font-family="SFMono-Regular, Consolas, monospace" font-size="11" fill="#6f5f50">${esc(exp.id)}</text>
+  <text x="40" y="136" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="26" font-weight="600" fill="#241a12">${esc(exp.name)}</text>
+  <text x="40" y="160" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12" fill="#9d8b7a">${esc(exp.primaryMetric)}（二值） · ${esc(exp.startDate)} → ${esc(exp.endDate)} · ${esc(exp.trafficSplit)}</text>
 
   <!-- decision -->
   <text x="40" y="222" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="42" font-weight="700" fill="${color}">${esc(dm.label)}</text>
@@ -103,36 +103,36 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
   ${reasonLines
     .map(
       (line, i) =>
-        `<text x="40" y="${258 + i * 24}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="15" fill="#c3cfe2">${esc(line)}</text>`,
+        `<text x="40" y="${258 + i * 24}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="15" fill="#4a3a2c">${esc(line)}</text>`,
     )
     .join('\n  ')}
 
   <!-- metrics -->
-  <line x1="40" y1="${352 - shift}" x2="${W - 40}" y2="${352 - shift}" stroke="#1e2a3d"/>
+  <line x1="40" y1="${352 - shift}" x2="${W - 40}" y2="${352 - shift}" stroke="#f2e9df"/>
   ${metrics
     .map(
-      (m, i) => `<text x="${40 + i * 205}" y="${380 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#6b7c96">${esc(m.k)}</text>
+      (m, i) => `<text x="${40 + i * 205}" y="${380 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#9d8b7a">${esc(m.k)}</text>
   <text x="${40 + i * 205}" y="${408 - shift}" font-family="SFMono-Regular, Consolas, monospace" font-size="20" font-weight="600" fill="${m.c}">${esc(m.v)}</text>`,
     )
     .join('\n  ')}
 
   <!-- checks -->
-  <line x1="40" y1="${434 - shift}" x2="${W - 40}" y2="${434 - shift}" stroke="#1e2a3d"/>
+  <line x1="40" y1="${434 - shift}" x2="${W - 40}" y2="${434 - shift}" stroke="#f2e9df"/>
   ${checks
     .map((c, i) => {
       const x = 40 + i * 274;
-      const ink = c.ok ? '#34d399' : '#fb7185';
+      const ink = c.ok ? '#15803d' : '#be123c';
       return `<circle cx="${x + 5}" cy="${462 - shift}" r="4.5" fill="${ink}"/>
-  <text x="${x + 18}" y="${466 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" fill="#e9eef8">${esc(c.label)}</text>
-  <text x="${x + 18}" y="${484 - shift}" font-family="SFMono-Regular, Consolas, monospace" font-size="10.5" fill="#6b7c96">${esc(c.value)}</text>`;
+  <text x="${x + 18}" y="${466 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" fill="#241a12">${esc(c.label)}</text>
+  <text x="${x + 18}" y="${484 - shift}" font-family="SFMono-Regular, Consolas, monospace" font-size="10.5" fill="#9d8b7a">${esc(c.value)}</text>`;
     })
     .join('\n  ')}
 
   <!-- footer -->
-  <line x1="40" y1="${512 - shift}" x2="${W - 40}" y2="${512 - shift}" stroke="#1e2a3d"/>
-  <text x="40" y="${540 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#4d5a70">统计与决策全部由确定性引擎计算，模型不参与任何数值；合成数据 seed ${esc(meta.seed)}</text>
-  <text x="${W - 40}" y="${540 - shift}" text-anchor="end" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#4d5a70">作者：绝望的土豆泥</text>
-  <text x="40" y="${566 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="10.5" fill="#3d4b63">control ${fmtPct(a.overall.controlRate, 3)} → treatment ${fmtPct(a.overall.treatmentRate, 3)} · n₁=${fmtNum(a.overall.n1)} / n₂=${fmtNum(a.overall.n2)}</text>
+  <line x1="40" y1="${512 - shift}" x2="${W - 40}" y2="${512 - shift}" stroke="#f2e9df"/>
+  <text x="40" y="${540 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#a89684">统计与决策全部由确定性引擎计算，模型不参与任何数值；合成数据 seed ${esc(meta.seed)}</text>
+  <text x="${W - 40}" y="${540 - shift}" text-anchor="end" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#a89684">作者：jian935</text>
+  <text x="40" y="${566 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="10.5" fill="#a89684">control ${fmtPct(a.overall.controlRate, 3)} → treatment ${fmtPct(a.overall.treatmentRate, 3)} · n₁=${fmtNum(a.overall.n1)} / n₂=${fmtNum(a.overall.n2)}</text>
 </svg>`;
 }
 
@@ -161,7 +161,7 @@ export async function exportConclusionCard(
     canvas.height = cardH * scale;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('当前浏览器不支持 canvas');
-    ctx.fillStyle = '#0a0f1a';
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, W * scale, cardH * scale);
     const png = canvas.toDataURL('image/png');

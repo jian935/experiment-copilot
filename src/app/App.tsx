@@ -76,8 +76,8 @@ export default function App() {
               </div>
               <p className="mt-2 text-xs leading-5 text-noship/80">{error}</p>
               <p className="mt-2 text-xs leading-5 text-muted">
-                确认 <code className="rounded bg-white/10 px-1">public/data/dataset.json</code> 存在
-                （执行 <code className="rounded bg-white/10 px-1">npm run data</code> 生成）。
+                确认 <code className="rounded bg-panel2 px-1">public/data/dataset.json</code> 存在
+                （执行 <code className="rounded bg-panel2 px-1">npm run data</code> 生成）。
               </p>
               <Button className="mt-3" size="sm" onClick={() => location.reload()}>
                 重新加载
@@ -146,7 +146,7 @@ export default function App() {
           <span>统计与决策全部在浏览器端确定性计算</span>
           <span className="text-line2">|</span>
           <span>数据为固定种子合成数据，用于已知真值评测</span>
-          <span className="ml-auto">作者：绝望的土豆泥</span>
+          <span className="ml-auto">作者：jian935</span>
         </div>
       </footer>
     </div>

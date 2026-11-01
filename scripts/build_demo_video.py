@@ -77,30 +77,31 @@ def duration_of(path):
 
 
 # ---------- 1. 标题卡 / 尾卡 ----------
-def make_card(path, lines, tone='#818cf8'):
-    img = Image.new('RGB', (W, H), '#070a11')
+def make_card(path, lines, tone='#f97316'):
+    """白底 + 暖橙点缀，和应用的浅色主题保持一致"""
+    img = Image.new('RGB', (W, H), '#fffdf9')
     d = ImageDraw.Draw(img)
     for x in range(0, W, 44):
-        d.line([(x, 0), (x, H)], fill='#0d1320')
+        d.line([(x, 0), (x, H)], fill='#f6efe7')
     for y in range(0, H, 44):
-        d.line([(0, y), (W, y)], fill='#0d1320')
+        d.line([(0, y), (W, y)], fill='#f6efe7')
 
-    d.rounded_rectangle([W // 2 - 26, 214, W // 2 + 26, 266], radius=14, fill='#121a2b', outline=tone, width=2)
+    d.rounded_rectangle([W // 2 - 26, 214, W // 2 + 26, 266], radius=14, fill='#fff7ed', outline=tone, width=2)
     d.line([(W // 2 - 12, 248), (W // 2 - 4, 238), (W // 2 + 3, 243), (W // 2 + 13, 228)], fill=tone, width=4)
 
     f1 = ImageFont.truetype(FONT_B, 54)
     f2 = ImageFont.truetype(FONT, 24)
-    d.text((W // 2, 340), lines[0], font=f1, fill='#e9eef8', anchor='mm')
-    d.text((W // 2, 404), lines[1], font=f2, fill='#93a3bb', anchor='mm')
+    d.text((W // 2, 340), lines[0], font=f1, fill='#241a12', anchor='mm')
+    d.text((W // 2, 404), lines[1], font=f2, fill='#6f5f50', anchor='mm')
     f3 = ImageFont.truetype(FONT, 17)
-    d.text((W // 2, 470), lines[2], font=f3, fill=tone, anchor='mm')
-    img.save(path, 'JPEG', quality=92)
+    d.text((W // 2, 470), lines[2], font=f3, fill='#c2410c', anchor='mm')
+    img.save(path, 'JPEG', quality=94)
 
 
 title_jpg = os.path.join(WORK, 'title.jpg')
 end_jpg = os.path.join(WORK, 'end.jpg')
 make_card(title_jpg, ['Experiment Copilot', '实验结论官 · 可复算的实验决策', '不让模型算数，每个结论都能点开核对'])
-make_card(end_jpg, ['写作即造物 · 实验即证据', 'Experiment Copilot', '作者：绝望的土豆泥'], tone='#34d399')
+make_card(end_jpg, ['写作即造物 · 实验即证据', 'Experiment Copilot', '作者：jian935'], tone='#f97316')
 
 # ---------- 2. 用帧时间戳拼出真实时序的视频 ----------
 marks = json.load(open(os.path.join(VDIR, 'marks.json'), encoding='utf-8'))
@@ -215,7 +216,8 @@ with open(ass, 'w', encoding='utf-8') as f:
     f.write('[V4+ Styles]\n')
     f.write('Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, '
             'BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n')
-    f.write('Style: Sub,微软雅黑,30,&H00FFFFFF,&H00000000,&H70000000,0,0,3,1.2,0,2,80,80,54,1\n\n')
+    # ASS 颜色是 &HAABBGGRR：深棕字 + 半透明白底框，压在浅色界面上也不糊
+    f.write('Style: Sub,微软雅黑,30,&H00121A24,&H40FFFFFF,&H58FFFFFF,0,0,3,1.2,0,2,80,80,54,1\n\n')
     f.write('[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n')
     for a, b, text in subs:
         f.write(f'Dialogue: 0,{ass_time(a)},{ass_time(b)},Sub,,0,0,0,,{text}\n')

@@ -3,6 +3,7 @@ import { twMerge } from 'tailwind-merge';
 import clsx from 'clsx';
 import { X } from 'lucide-react';
 import { DECISION_META, type Tone, toneBg } from '../lib/format';
+import { C } from '../lib/palette';
 
 export const cx = (...a: Parameters<typeof clsx>) => twMerge(clsx(...a));
 
@@ -12,7 +13,7 @@ export function Panel({ className, children, ...rest }: HTMLAttributes<HTMLDivEl
   return (
     <div
       className={cx(
-        'rounded-xl border border-line bg-panel/80 shadow-[0_1px_0_rgba(255,255,255,0.03)_inset,0_18px_40px_-28px_rgba(0,0,0,0.9)]',
+        'rounded-xl border border-line bg-panel shadow-card',
         className,
       )}
       {...rest}
@@ -100,7 +101,7 @@ export function Chip({
 }
 
 function toneColor(tone: Tone): string {
-  return { ship: '#34d399', noship: '#fb7185', iterate: '#fbbf24', incon: '#94a3b8' }[tone];
+  return { ship: C.ship, noship: C.noship, iterate: C.iterate, incon: C.incon }[tone];
 }
 
 /* ---------------- Button ---------------- */
@@ -163,7 +164,7 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div
-        className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+        className="absolute inset-0 bg-[#3b2410]/25 backdrop-blur-[3px]"
         onClick={onClose}
         aria-hidden
       />

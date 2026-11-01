@@ -206,7 +206,7 @@ export function ExperimentDetail({
         <div
           className="flex flex-wrap items-start gap-5 px-5 py-4"
           style={{
-            background: `linear-gradient(100deg, ${toneStroke(tone)}14, transparent 62%)`,
+            background: `linear-gradient(100deg, ${toneStroke(tone)}0f, transparent 58%)`,
           }}
         >
           <div className="min-w-[190px]">
@@ -547,8 +547,10 @@ function SegmentBlock({
   rows: Analysis['segments']['tenure'];
 }) {
   return (
-    <div className="bg-panel">
+    <div className="min-w-0 bg-panel">
       <div className="border-b border-line px-4 py-2 text-[11px] font-medium text-muted">{title}</div>
+      {/* 两表并排时宽度不够就让表自己横向滚，不要把最后一列切掉 */}
+      <div className="overflow-x-auto">
       <table className="w-full border-collapse text-xs">
         <thead>
           <tr className="text-[10.5px] text-dim">
@@ -575,6 +577,7 @@ function SegmentBlock({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

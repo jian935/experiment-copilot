@@ -1,3 +1,5 @@
+import { C } from './palette';
+
 export function fmtPct(v: number, digits = 2): string {
   return `${(v * 100).toFixed(digits)}%`;
 }
@@ -26,6 +28,7 @@ export function fmtMs(v: number): string {
 }
 
 export type Tone = 'ship' | 'noship' | 'iterate' | 'incon';
+
 
 export const DECISION_META: Record<string, { label: string; short: string; tone: Tone; desc: string }> = {
   ship: { label: '建议上线', short: '上线', tone: 'ship', desc: '主指标显著正向且护栏无恶化' },
@@ -71,7 +74,7 @@ export function toneBg(tone: Tone): string {
 }
 
 export function toneStroke(tone: Tone): string {
-  return { ship: '#34d399', noship: '#fb7185', iterate: '#fbbf24', incon: '#94a3b8' }[tone];
+  return { ship: C.ship, noship: C.noship, iterate: C.iterate, incon: C.incon }[tone];
 }
 
 /** 差值方向着色：正向=绿（收益），负向=红（损失）。决策色与方向色分开，避免混用。 */
