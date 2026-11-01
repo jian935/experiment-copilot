@@ -84,5 +84,10 @@ for k, v in LINKS.items():
 assert '{{' not in html, '还有未替换的占位符：' + str([l for l in html.split('>') if '{{' in l][:3])
 
 open(OUT, 'w', encoding='utf-8').write(html)
+# 顺手放进 dist/，这样本地服务一个端口就能同时看应用和作品集页
+if os.path.isdir('dist'):
+    import shutil
+    shutil.copyfile(OUT, os.path.join('dist', 'portfolio.html'))
+
 size = os.path.getsize(OUT)
 print(f'构建完成：{OUT}（{size / 1024 / 1024:.2f} MB，视频 {os.path.getsize(web_video) / 1024 / 1024:.2f} MB 内联）')
