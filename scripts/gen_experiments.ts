@@ -14,8 +14,8 @@ const expHeader = ['exp_id', 'exp_name', 'hypothesis', 'start_date', 'end_date',
 const expRows = ds.experiments.map((e) => [e.id, e.name, e.hypothesis, e.startDate, e.endDate, e.variants.join('|'), e.trafficSplit, e.primaryMetric, e.metricType, e.guardrailMetrics.join('|'), e.archetype, e.trueLift, e.trueLiftScope, e.trueLiftOverall, e.trueDecision, e.seed]);
 writeFileSync('data/experiments.csv', csv([expHeader, ...expRows]));
 
-const dailyHeader = ['exp_id', 'date', 'variant', 'device', 'tenure', 'exposures', 'conversions', 'refunds', 'complaints', 'latency_p95'];
-const dailyRows = ds.daily.map((r) => [r.expId, r.date, r.variant, r.device, r.tenure, r.exposures, r.conversions, r.refunds, r.complaints, r.latencyP95]);
+const dailyHeader = ['exp_id', 'date', 'variant', 'device', 'tenure', 'exposures', 'conversions', 'refunds', 'complaints', 'latency_p95', 'revenue', 'pre_exposures', 'pre_conversions', 'pre_revenue'];
+const dailyRows = ds.daily.map((r) => [r.expId, r.date, r.variant, r.device, r.tenure, r.exposures, r.conversions, r.refunds, r.complaints, r.latencyP95, r.revenue ?? '', r.preExposures ?? '', r.preConversions ?? '', r.preRevenue ?? '']);
 writeFileSync('data/daily_metrics.csv', csv([dailyHeader, ...dailyRows]));
 
 const byArch: Record<string, number> = {};

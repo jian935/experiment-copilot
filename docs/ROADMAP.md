@@ -16,8 +16,8 @@
 | 频率派统计 | 两比例 z、Newcombe CI、Wilson、SRM 卡方、BH、Welch、power、MDE | `src/lib/stats.ts` |
 | 决策引擎 | 6 条硬规则 + 证据链 + 逐步代入 + 规则轨迹 | `src/lib/decide.ts` |
 | 数据 | 120 例合成、6 类真值、固定种子、7 天 × 2 分层 × 2 设备 | `src/lib/simulate.ts` |
-| Agent | 11 工具、数字审计、引用强制、多轮补全、无 Key 降级 | `src/lib/agent/*` |
-| 评测 | 决策准确率 93.3%、混淆矩阵、按 p 分桶、8 失败案例 | `src/lib/evaluate.ts`、`src/app/components/EvalScreen.tsx` |
+| Agent | 12 工具、数字审计、引用强制、多轮补全、无 Key 降级 | `src/lib/agent/*` |
+| 评测 | 决策准确率 93.3%（112/120）、混淆矩阵、按 p 分桶、8 条失败案例（含 1 条正效应误判为 iterate，原因可查） | `src/lib/evaluate.ts`、`src/app/components/EvalScreen.tsx` |
 | UI | 列表 / 详情 / 证据抽屉 / Agent / 评测 5 屏，浅色暖橙 | `src/app/*` |
 | 评测闭环 | ablation（规则 vs DeepSeek，24 题） | `scripts/ablation.ts` |
 

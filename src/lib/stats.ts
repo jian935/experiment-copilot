@@ -308,6 +308,33 @@ export function bayesBetaBinomial(
   return { probTreatBetter, meanDiff, credLow, credHigh, expectedLoss };
 }
 
+/**
+ * 连续指标的贝叶斯视角：Δ ~ N(diff, se²) 的正规后验（无信息先验）。
+ *
+ * 为什么不能沿用 Beta-Binomial：那是「计数/样本量」的共轭结构，连续指标的参数是均值，
+ * 共轭先验是正态，不是 Beta。硬把 ARPU 塞进 Beta 后验等于偷换口径。
+ *
+ * 公式与 Beta 版**逐字对应**（P(Δ>0) = Φ(diff/se)、期望损失 = se·φ(z) − diff·Φ(−z)），
+ * 所以两个口径的「更优概率 / 期望损失」可以直接横向比，不会出现"换个指标换了个定义"。
+ */
+export function bayesNormal(diff: number, se: number): BayesResult {
+  const sd = se > 0 && Number.isFinite(se) ? se : 0;
+  if (sd === 0) {
+    const p = diff > 0 ? 1 : diff < 0 ? 0 : 0.5;
+    return { probTreatBetter: p, meanDiff: diff, credLow: diff, credHigh: diff, expectedLoss: 0 };
+  }
+  const z = diff / sd;
+  const phi = Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
+  return {
+    probTreatBetter: normalCdf(z),
+    meanDiff: diff,
+    credLow: diff - 1.96 * sd,
+    credHigh: diff + 1.96 * sd,
+    // E[max(0, control − treatment)]：与 Beta 版同式
+    expectedLoss: sd * phi - diff * normalCdf(-z),
+  };
+}
+
 // ===================== 非劣检验（护栏的正式统计口径） =====================
 // 护栏不该是「差值 > 0.4pp 且 p < 0.01」这种拍脑袋阈值，而是一次非劣检验：
 // 先声明「最多能容忍多少恶化」（margin），再用单侧检验判断恶化有没有超过它。
@@ -436,16 +463,39 @@ export function studentTTwoSided(t: number, df: number): number {
   return Math.min(1, 2 * studentTSf(Math.abs(t), df));
 }
 
+/**
+ * t 分布分位数（双侧区间的临界值用）：解 P(T ≤ t) = p。
+ *
+ * 为什么不用正态分位顶替：格子级聚类方差的自由度只有 K−2（本项目典型 26），
+ * 这时 t₀.₉₇₅ = 2.06 而非 1.96，用正态会把区间收窄 5%——正好吃掉 CUPED 赚来的一半收益。
+ * 实现是二分：studentTSf 单调，精度到机器 eps，比查表更稳（df 是小数也照样能解）。
+ */
+export function studentTInv(p: number, df: number): number {
+  if (!(p > 0 && p < 1) || !(df > 0)) return NaN;
+  if (p === 0.5) return 0;
+  const target = p > 0.5 ? 1 - p : p; // 上尾
+  let lo = 0;
+  let hi = 1e3;
+  for (let i = 0; i < 200; i++) {
+    const mid = (lo + hi) / 2;
+    if (studentTSf(mid, df) > target) lo = mid;
+    else hi = mid;
+    if (hi - lo < 1e-12) break;
+  }
+  const t = (lo + hi) / 2;
+  return p > 0.5 ? t : -t;
+}
+
 // ===================== CUPED（方差缩减） =====================
 
 export interface CupedCell {
   /** 后周期样本量（同时作为权重） */
   n: number;
-  /** 后周期转化数 */
+  /** 后周期「分子」：率指标填转化数，连续指标填该格子的总量（如收入合计） */
   c: number;
   /** 前周期样本量 */
   nPre: number;
-  /** 前周期转化数 */
+  /** 前周期「分子」：率指标填转化数，连续指标填前周期总量 */
   cPre: number;
   treatment: boolean;
 }
@@ -514,7 +564,7 @@ function clusterMeanVar(vals: number[], ws: number[], dofLoss: number): { mean: 
  * 关键：**标准误不用 p(1−p)/n，而是从格子间离散程度直接估**（见 clusterMeanVar）。
  * 否则在过离散数据上，CUPED 带来的"精度提升"会是假的——区间变窄只是因为假设错了。
  */
-export function cupedAdjust(cells: CupedCell[]): CupedResult | null {
+export function cupedAdjust(cells: CupedCell[], kind: 'rate' | 'continuous' = 'rate'): CupedResult | null {
   const use = cells.filter((x) => x.n > 0 && x.nPre > 0);
   // 每组至少要有 4 个格子，否则稳健方差的分母太小，估出来的 SE 不可信
   if (use.length < 8) return null;
@@ -567,20 +617,26 @@ export function cupedAdjust(cells: CupedCell[]): CupedResult | null {
   const seRaw = Math.sqrt(Math.max(0, rawT.varr + rawC.varr));
   const seAdj = Math.sqrt(Math.max(0, adjT.varr + adjC.varr));
 
-  // 过离散因子：格子率的加权离散度 ÷ 二项期望方差
-  let chi = 0;
-  const pAll = use.reduce((s, v) => s + v.c, 0) / use.reduce((s, v) => s + v.n, 0);
-  for (let i = 0; i < use.length; i++) {
-    const pArm = use[i].treatment ? yT : yC;
-    const varr = pArm * (1 - pArm);
-    if (varr > 0) chi += ((y[i] - pArm) ** 2) * use[i].n / varr;
+  // 过离散因子：格子率的加权离散度 ÷ 二项期望方差。
+  // 只有率指标有「二项期望方差」这个参照，连续指标没有对应量（收入不是 n 次伯努利之和），
+  // 所以连续口径返回 1（不做过度自信折算），由 bayesNormal 直接吃 delta method 的 SE。
+  let dispersion = 1;
+  if (kind === 'rate') {
+    let chi = 0;
+    for (let i = 0; i < use.length; i++) {
+      const pArm = use[i].treatment ? yT : yC;
+      const varr = pArm * (1 - pArm);
+      if (varr > 0) chi += ((y[i] - pArm) ** 2) * use[i].n / varr;
+    }
+    dispersion = chi / Math.max(1, use.length - 2);
   }
-  const dispersion = chi / Math.max(1, use.length - 2);
 
   const df = Math.max(1, use.length - 3);
   const zRaw = seRaw > 0 ? diffRaw / seRaw : 0;
   const zAdj = seAdj > 0 ? diffAdj / seAdj : 0;
-  const tCrit = Math.abs(normalInv(0.975));
+  // 区间必须用 t 分位，不能再用 1.96：p 值本来就是 t 分布的，
+  // 若区间用正态分位，会出现「CI 跨 0 但 p<0.05」的自相矛盾（df=26 时差 5%）。
+  const tCrit = studentTInv(0.975, df);
   return {
     theta,
     rho,
@@ -599,6 +655,114 @@ export function cupedAdjust(cells: CupedCell[]): CupedResult | null {
     ciRaw: [diffRaw - tCrit * seRaw, diffRaw + tCrit * seRaw],
     ciAdj: [diffAdj - tCrit * seAdj, diffAdj + tCrit * seAdj],
     nCells: use.length,
+  };
+}
+
+// ===================== 连续 / 比值指标（ARPU 这类） =====================
+// 为什么不能把 ARPU 当比例做 z 检验：比例的方差 p(1−p)/n 由均值唯一确定（伯努利结构），
+// 收入没有这个结构——同样 ARPU=3.8 元，可能是人人 3.8 元，也可能是 2% 的人付了 190 元。
+// 所以必须用「每单位一个观测」的方差，而没有单位级明细时，只能退回格子级聚类方差（delta method）。
+
+export interface RatioCell {
+  /** 该格子的曝光（分母） */
+  n: number;
+  /** 该格子的指标总量（分子，如收入合计） */
+  sum: number;
+  treatment: boolean;
+}
+
+export interface RatioTest {
+  kind: 'continuous';
+  /** treatment − control（指标自身单位） */
+  diff: number;
+  controlValue: number;
+  treatmentValue: number;
+  /** 差值标准误 = √(Var_c + Var_t)，两臂各自聚类方差 */
+  se: number;
+  seControl: number;
+  seTreatment: number;
+  /** Welch–Satterthwaite 自由度（用格子数而不是人数，所以比人级检验小得多） */
+  df: number;
+  /** t 统计量（字段名沿用 z，便于与 PropTest 共用格式化代码） */
+  z: number;
+  p: number;
+  ci95: [number, number];
+  relativeLift: number;
+  n1: number;
+  n2: number;
+  sum1: number;
+  sum2: number;
+  /** 两臂各自的格子数 */
+  k1: number;
+  k2: number;
+}
+
+/**
+ * 比值指标的两臂检验（delta method + 格子级聚类方差）。
+ *
+ * 估计量：R̂ = Σ(格子总量) / Σ(格子曝光)，与 UI 上显示的「总收入 / 总曝光」逐字一致。
+ * 方差：把每臂的格子当抽样单元，线性化 z_i = n_i(a_i − R̂) 后取 Σz_i²/(Σn_i)²，
+ *   等号右边的含义正是「每个格子自己的 ARPU 相对整体 ARPU 抖多少」。
+ *   等样本量下它恰好退化成 s²/(m·n)（单位级方差除人数），不会凭空放大。
+ *
+ * 自由度：Welch–Satterthwaite，用 k−1 而不是 n−1 —— 只有 28 个格子，就没有 14000 个自由度。
+ * 这一点在 UI 与文档里都明写，因为它直接决定区间宽度（t₂₆=2.06 vs z=1.96）。
+ *
+ * 已知保守性（如实记录）：两臂共享的日效应会被各算一次，所以区间偏宽而非偏窄；
+ * 方向是「宁可漏判也不虚报」，A/A 误报率实测见 npm run aa。
+ */
+export function ratioTest(cells: RatioCell[]): RatioTest | null {
+  const arm = (isT: boolean) => {
+    const use = cells.filter((x) => x.treatment === isT && x.n > 0);
+    if (use.length < 2) return null;
+    const vals = use.map((x) => x.sum / x.n);
+    const ws = use.map((x) => x.n);
+    const { mean, varr } = clusterMeanVar(vals, ws, 1);
+    return {
+      mean,
+      varr,
+      k: use.length,
+      n: ws.reduce((s, v) => s + v, 0),
+      sum: use.reduce((s, x) => s + x.sum, 0),
+    };
+  };
+  const c = arm(false);
+  const t = arm(true);
+  if (!c || !t) return null;
+
+  const seControl = Math.sqrt(Math.max(0, c.varr));
+  const seTreatment = Math.sqrt(Math.max(0, t.varr));
+  const se = Math.sqrt(seControl * seControl + seTreatment * seTreatment);
+  const diff = t.mean - c.mean;
+  // Welch–Satterthwaite：df = (v_c+v_t)² / (v_c²/(k_c−1) + v_t²/(k_t−1))
+  // 这里的 v 就是「均值的方差」本身，所以分母用的是 v²/(k−1)，不能再把 v 除以 k−1 一次
+  // （除错会让 df 从 54 虚涨到 1400，t 分位退化成 1.96，区间凭空变窄）。
+  const dfRaw =
+    c.varr + t.varr > 0
+      ? ((c.varr + t.varr) ** 2) / ((c.varr ** 2) / Math.max(1, c.k - 1) + (t.varr ** 2) / Math.max(1, t.k - 1))
+      : c.k + t.k - 2;
+  const df = Math.max(1, dfRaw);
+  const z = se > 0 ? diff / se : 0;
+  const tCrit = Number.isFinite(df) ? studentTInv(0.975, df) : 1.96;
+  return {
+    kind: 'continuous',
+    diff,
+    controlValue: c.mean,
+    treatmentValue: t.mean,
+    se,
+    seControl,
+    seTreatment,
+    df,
+    z,
+    p: se > 0 ? studentTTwoSided(z, df) : 1,
+    ci95: [diff - tCrit * se, diff + tCrit * se],
+    relativeLift: c.mean !== 0 ? diff / c.mean : 0,
+    n1: c.n,
+    n2: t.n,
+    sum1: c.sum,
+    sum2: t.sum,
+    k1: c.k,
+    k2: t.k,
   };
 }
 

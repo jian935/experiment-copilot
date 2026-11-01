@@ -20,17 +20,26 @@ interface Point {
   nt: number;
 }
 
-export function Trend({ rows }: { rows: DailyRow[] }) {
+/**
+ * 分日趋势。
+ *
+ * kind 决定纵轴是转化率还是 ARPU：ARPU 实验拿转化率画趋势会让人以为「没什么变化」，
+ * 而实际收入可能已经明显上行——两个口径不能共用一张图。
+ */
+export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate' | 'continuous' }) {
+  const continuous = kind === 'continuous';
   const data = useMemo<Point[]>(() => {
-    const byDate = new Map<string, { c: number; nc: number; t: number; nt: number }>();
+    const byDate = new Map<string, { c: number; nc: number; t: number; nt: number; revC: number; revT: number }>();
     for (const r of rows) {
-      const cur = byDate.get(r.date) ?? { c: 0, nc: 0, t: 0, nt: 0 };
+      const cur = byDate.get(r.date) ?? { c: 0, nc: 0, t: 0, nt: 0, revC: 0, revT: 0 };
       if (r.variant === 'control') {
         cur.c += r.conversions;
         cur.nc += r.exposures;
+        cur.revC += r.revenue ?? 0;
       } else {
         cur.t += r.conversions;
         cur.nt += r.exposures;
+        cur.revT += r.revenue ?? 0;
       }
       byDate.set(r.date, cur);
     }
@@ -38,21 +47,23 @@ export function Trend({ rows }: { rows: DailyRow[] }) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, v]) => ({
         date: date.slice(5),
-        control: v.nc ? v.c / v.nc : null,
-        treatment: v.nt ? v.t / v.nt : null,
+        control: continuous ? (v.nc ? v.revC / v.nc : null) : v.nc ? v.c / v.nc : null,
+        treatment: continuous ? (v.nt ? v.revT / v.nt : null) : v.nt ? v.t / v.nt : null,
         nc: v.nc,
         nt: v.nt,
       }));
-  }, [rows]);
+  }, [rows, continuous]);
 
-  const lo = Math.min(...data.flatMap((d) => [d.control ?? 1, d.treatment ?? 1]));
-  const hi = Math.max(...data.flatMap((d) => [d.control ?? 0, d.treatment ?? 0]));
-  const pad = Math.max((hi - lo) * 0.25, 0.002);
+  const fmt = (v: number) => (continuous ? `${v.toFixed(2)}元` : fmtPct(v));
+  const vals = data.flatMap((d) => [d.control ?? 0, d.treatment ?? 0]);
+  const lo = Math.min(...vals, continuous ? 0 : 1);
+  const hi = Math.max(...vals);
+  const pad = Math.max((hi - lo) * 0.25, continuous ? 0.02 : 0.002);
 
   return (
     <div className="h-[176px] w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: -14 }}>
+        <LineChart data={data} margin={{ top: 8, right: 10, bottom: 0, left: -8 }}>
           <CartesianGrid stroke={C.grid} strokeDasharray="2 4" vertical={false} />
           <XAxis
             dataKey="date"
@@ -65,7 +76,7 @@ export function Trend({ rows }: { rows: DailyRow[] }) {
             tick={{ fill: C.dim, fontSize: 10 }}
             axisLine={false}
             tickLine={false}
-            tickFormatter={(v: number) => `${(v * 100).toFixed(1)}%`}
+            tickFormatter={(v: number) => (continuous ? v.toFixed(1) : `${(v * 100).toFixed(1)}%`)}
             width={52}
           />
           <Tooltip
@@ -76,12 +87,12 @@ export function Trend({ rows }: { rows: DailyRow[] }) {
                 <div className="rounded-lg border border-line2 bg-panel px-3 py-2 text-[11px] shadow-xl">
                   <div className="mb-1 text-dim">{label}</div>
                   <div className="num flex items-center gap-2 text-ink">
-                    <i className="h-1.5 w-1.5 rounded-full " />
-                    control {fmtPct(p.control ?? 0)} · n={fmtNum(p.nc)}
+                    <i className="h-1.5 w-1.5 rounded-full" style={{ background: C.neutral }} />
+                    control {fmt(p.control ?? 0)} · n={fmtNum(p.nc)}
                   </div>
                   <div className="num mt-0.5 flex items-center gap-2 text-brand2">
                     <i className="h-1.5 w-1.5 rounded-full bg-brand2" />
-                    treatment {fmtPct(p.treatment ?? 0)} · n={fmtNum(p.nt)}
+                    treatment {fmt(p.treatment ?? 0)} · n={fmtNum(p.nt)}
                   </div>
                 </div>
               );

@@ -23,7 +23,11 @@ interface Row {
   id: string;
   archetype: string;
   decision: string;
-  diffPP: number;
+  /** 主指标口径（ARPU 实验与转化率实验的「差值」不是同一个单位，混在一起统计就是口径错误） */
+  kind: 'rate' | 'continuous';
+  /** 率口径按 pp 记，连续口径按元记 */
+  diff: number;
+  diffUnit: 'pp' | '元';
   p: number;
   significant: boolean;
   medianDays: number | null;
@@ -54,6 +58,8 @@ for (const exp of ds.experiments) {
     c1,
     n2,
     c2,
+    kind: a.metricKind === 'continuous' ? 'continuous' : 'rate',
+    baselineValue: a.primary.controlValue,
     diff: a.primary.diff,
     se: a.primary.se,
     dailyRate: dailyRatePerArm(rowsOfExp, 3),
@@ -66,7 +72,9 @@ for (const exp of ds.experiments) {
     id: exp.id,
     archetype: exp.archetype,
     decision: a.decision,
-    diffPP: +(a.primary.diff * 100).toFixed(3),
+    kind: a.metricKind === 'continuous' ? 'continuous' : 'rate',
+    diff: a.primary.unit === '元' ? +a.primary.diff.toFixed(3) : +(a.primary.diff * 100).toFixed(3),
+    diffUnit: a.primary.unit,
     p: a.primary.p,
     significant: f.observed.significant,
     medianDays: f.sim.medianDays,
@@ -88,10 +96,14 @@ const median = (xs: number[]) => {
 
 const notSig = rows.filter((r) => !r.significant);
 const byArch = new Map<string, Row[]>();
+const byKind = new Map<string, Row[]>();
 for (const r of rows) {
   const list = byArch.get(r.archetype) ?? [];
   list.push(r);
   byArch.set(r.archetype, list);
+  const kl = byKind.get(r.kind) ?? [];
+  kl.push(r);
+  byKind.set(r.kind, kl);
 }
 
 const report = {
@@ -116,6 +128,23 @@ const report = {
     medianStuck: +median(list.map((r) => r.stuck))!.toFixed(3),
     medianDays: median(list.map((r) => r.medianDays).filter((v): v is number => v !== null)),
   })),
+  /** 两条口径的预测难度不同（连续指标的 SE 不随均值变化，外推更"直"），必须分开看 */
+  byMetricKind: [...byKind.entries()].map(([kind, list]) => {
+    // 天数与 stuck 只对「还没显著」的实验有意义：已显著的天数是 0，混进来会把中位数拉到 0，
+    // 让「还要跑几天」看起来毫无问题——那正是这个功能要回答的问题，不能被稀释。
+    const pending = list.filter((r) => !r.significant);
+    return {
+      kind,
+      n: list.length,
+      significant: list.filter((r) => r.significant).length,
+      pending: pending.length,
+      medianStuck: +median(pending.map((r) => r.stuck))!.toFixed(3),
+      medianDays: median(pending.map((r) => r.medianDays).filter((v): v is number => v !== null)),
+      medianRemainingDays: median(
+        pending.map((r) => r.remainingDays).filter((v): v is number => v !== null && Number.isFinite(v)),
+      ),
+    };
+  }),
   samples: rows.filter((r) => !r.significant).slice(0, 5),
 };
 
@@ -127,6 +156,14 @@ console.log(`实验数 ${report.experiments}（已显著 ${report.significant}�
 console.log(`未显著实验里「跑满 ${report.horizonDays} 天仍等不到」占 ${(report.stuckAmongNotSignificant * 100).toFixed(1)}%`);
 console.log(`未显著实验的中位天数：${report.medianDays ?? '—'}`);
 console.log(`判定分布：${JSON.stringify(report.verdictCounts)}`);
+console.log('按主指标口径（两条路的外推公式不同，不能混算）：');
+for (const k of report.byMetricKind) {
+  console.log(
+    `  ${k.kind.padEnd(11)} n=${String(k.n).padStart(3)} 已显著 ${String(k.significant).padStart(3)}` +
+      `  待定 ${String(k.pending).padStart(2)}  stuck 中位 ${k.medianStuck}  天数中位 ${k.medianDays ?? '—'}` +
+      `  点估计剩余天数中位 ${k.medianRemainingDays ?? '—'}`,
+  );
+}
 console.log('按类型：');
 for (const a of report.byArchetype) {
   console.log(
@@ -136,7 +173,7 @@ for (const a of report.byArchetype) {
 console.log('样例（未显著的）：');
 for (const s of report.samples) {
   console.log(
-    `  ${s.id} ${s.archetype} Δ=${s.diffPP}pp p=${s.p.toFixed(3)} 第 ${s.medianDays ?? '—'} 天 / 80% ${s.p80Days ?? '—'} 天 · stuck ${(s.stuck * 100).toFixed(0)}% · ${s.verdict}`,
+    `  ${s.id} ${s.archetype} Δ=${s.diff}${s.diffUnit} p=${s.p.toFixed(3)} 第 ${s.medianDays ?? '—'} 天 / 80% ${s.p80Days ?? '—'} 天 · stuck ${(s.stuck * 100).toFixed(0)}% · ${s.verdict}`,
   );
 }
 console.log('\n已写入 data/forecast_report.json');

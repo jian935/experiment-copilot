@@ -77,6 +77,11 @@ function defaultSpec() {
   };
 }
 
+function optionalNum(raw: unknown, field: string, ctx: string, min = -Infinity): number | undefined {
+  if (raw == null || String(raw).trim() === '') return undefined;
+  return num(raw, field, ctx, min);
+}
+
 /* ============================ JSON 导入 ============================ */
 
 function normExperiment(raw: Record<string, unknown>, i: number): Experiment {
@@ -95,6 +100,7 @@ function normExperiment(raw: Record<string, unknown>, i: number): Experiment {
   const guardrailMetrics = Array.isArray(raw.guardrailMetrics)
     ? (raw.guardrailMetrics as unknown[]).map((g) => String(g))
     : [];
+  const metricType = raw.metricType === 'continuous' ? 'continuous' : 'binary';
   return {
     id,
     name: raw.name != null ? String(raw.name) : id,
@@ -103,8 +109,9 @@ function normExperiment(raw: Record<string, unknown>, i: number): Experiment {
     endDate: raw.endDate != null ? String(raw.endDate) : '',
     variants,
     trafficSplit: raw.trafficSplit != null ? String(raw.trafficSplit) : '',
-    primaryMetric: raw.primaryMetric != null ? String(raw.primaryMetric) : 'conversions',
-    metricType: 'binary',
+    primaryMetric:
+      raw.primaryMetric != null ? String(raw.primaryMetric) : metricType === 'continuous' ? 'ARPU' : 'conversions',
+    metricType,
     guardrailMetrics,
     archetype,
     trueLift,
@@ -133,12 +140,21 @@ function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>)
   if (conversions > exposures) {
     throw new ImportError(`${ctx}：conversions(${conversions}) 不能超过 exposures(${exposures})`);
   }
-  const refunds = raw.refunds != null && String(raw.refunds).trim() !== '' ? num(raw.refunds, 'refunds', ctx, 0) : 0;
-  const complaints =
-    raw.complaints != null && String(raw.complaints).trim() !== '' ? num(raw.complaints, 'complaints', ctx, 0) : 0;
-  const latencyP95 =
-    raw.latencyP95 != null && String(raw.latencyP95).trim() !== '' ? num(raw.latencyP95, 'latencyP95', ctx, 0) : 0;
-  return { expId, date, variant, device, tenure, exposures, conversions, refunds, complaints, latencyP95 };
+  const refunds = optionalNum(raw.refunds, 'refunds', ctx, 0) ?? 0;
+  const complaints = optionalNum(raw.complaints, 'complaints', ctx, 0) ?? 0;
+  const latencyP95 = optionalNum(raw.latencyP95, 'latencyP95', ctx, 0) ?? 0;
+  // 收入与 CUPED 协变量都是可选的：缺了并不报错，只是 ARPU / CUPED 相关能力自动关闭
+  const revenue = optionalNum(raw.revenue, 'revenue', ctx, 0);
+  const preExposures = optionalNum(raw.preExposures, 'preExposures', ctx, 0);
+  const preConversions = optionalNum(raw.preConversions, 'preConversions', ctx, 0);
+  const preRevenue = optionalNum(raw.preRevenue, 'preRevenue', ctx, 0);
+  return {
+    expId, date, variant, device, tenure, exposures, conversions, refunds, complaints, latencyP95,
+    ...(revenue !== undefined ? { revenue } : {}),
+    ...(preExposures !== undefined ? { preExposures } : {}),
+    ...(preConversions !== undefined ? { preConversions } : {}),
+    ...(preRevenue !== undefined ? { preRevenue } : {}),
+  };
 }
 
 /**
@@ -219,10 +235,13 @@ function parseCsv(text: string): string[][] {
 /**
  * 从「日级明细 CSV」构造 Dataset。
  * 必需列：expId, date, variant, exposures, conversions
- * 可选列：device, tenure, refunds, complaints, latencyP95, name
+ * 可选列：device, tenure, refunds, complaints, latencyP95, name,
+ *         revenue（该格子收入合计，元）、preExposures / preConversions / preRevenue（CUPED 协变量）、
+ *         primaryMetric / metricType（把某个实验声明成 ARPU 主指标）
  * - variant 支持别名（对照/实验组/A/B/0/1）。
  * - 缺失 device/tenure 时整行归入默认单层（'iOS'/'new'），仍可分析（只是无分层）。
  * - 自动从明细推导 experiments（唯一 expId、日期范围、存在哪些护栏列）。
+ * - 有 revenue 列时 ARPU 会自动被计算（作为主指标或副指标）；没有则该能力静默关闭，不报错。
  * - 真实数据通常没有已知真值 → groundTruth = false，评测看板会自动隐藏。
  */
 export function parseDatasetCsv(text: string): Dataset {
@@ -247,12 +266,18 @@ export function parseDatasetCsv(text: string): Dataset {
   const iRef = col('refunds');
   const iComp = col('complaints');
   const iLat = col('latencyP95');
+  const iRev = col('revenue');
+  const iPreN = col('preExposures');
+  const iPreC = col('preConversions');
+  const iPreR = col('preRevenue');
+  const iPrim = col('primaryMetric');
+  const iType = col('metricType');
   const has = (i: number) => i >= 0;
 
   const daily: DailyRow[] = [];
   const meta = new Map<
     string,
-    { name?: string; devices: Set<Device>; tenures: Set<Tenure>; dates: string[] }
+    { name?: string; devices: Set<Device>; tenures: Set<Tenure>; dates: string[]; primaryMetric?: string; metricType?: 'binary' | 'continuous' }
   >();
 
   for (let r = 1; r < rows.length; r++) {
@@ -270,11 +295,21 @@ export function parseDatasetCsv(text: string): Dataset {
     const refunds = has(iRef) && get(iRef).trim() !== '' ? num(get(iRef), 'refunds', ctx, 0) : 0;
     const complaints = has(iComp) && get(iComp).trim() !== '' ? num(get(iComp), 'complaints', ctx, 0) : 0;
     const latencyP95 = has(iLat) && get(iLat).trim() !== '' ? num(get(iLat), 'latencyP95', ctx, 0) : 0;
+    const revenue = has(iRev) && get(iRev).trim() !== '' ? num(get(iRev), 'revenue', ctx, 0) : undefined;
+    const preExposures = has(iPreN) && get(iPreN).trim() !== '' ? num(get(iPreN), 'preExposures', ctx, 0) : undefined;
+    const preConversions = has(iPreC) && get(iPreC).trim() !== '' ? num(get(iPreC), 'preConversions', ctx, 0) : undefined;
+    const preRevenue = has(iPreR) && get(iPreR).trim() !== '' ? num(get(iPreR), 'preRevenue', ctx, 0) : undefined;
 
     const date = get(iDate).trim();
     if (!date) throw new ImportError(`${ctx}：缺少 date`);
 
-    daily.push({ expId, date, variant, device, tenure, exposures, conversions, refunds, complaints, latencyP95 });
+    daily.push({
+      expId, date, variant, device, tenure, exposures, conversions, refunds, complaints, latencyP95,
+      ...(revenue !== undefined ? { revenue } : {}),
+      ...(preExposures !== undefined ? { preExposures } : {}),
+      ...(preConversions !== undefined ? { preConversions } : {}),
+      ...(preRevenue !== undefined ? { preRevenue } : {}),
+    });
 
     let m = meta.get(expId);
     if (!m) {
@@ -288,6 +323,14 @@ export function parseDatasetCsv(text: string): Dataset {
       const nm = get(iName).trim();
       if (nm && !m.name) m.name = nm;
     }
+    if (has(iPrim)) {
+      const pm = get(iPrim).trim();
+      if (pm && !m.primaryMetric) m.primaryMetric = pm;
+    }
+    if (has(iType)) {
+      const mt = get(iType).trim().toLowerCase();
+      if ((mt === 'continuous' || mt === 'binary') && !m.metricType) m.metricType = mt;
+    }
   }
 
   if (daily.length === 0) throw new ImportError('CSV 没有有效数据行（请检查 expId / variant 列）');
@@ -300,6 +343,8 @@ export function parseDatasetCsv(text: string): Dataset {
   const experiments: Experiment[] = [];
   for (const [expId, m] of meta) {
     const dates = m.dates.slice().sort();
+    // 有 revenue 且声明了 continuous 才走 ARPU 主指标；只声明 continuous 但没收入会在 analyze 里被显式退回
+    const metricType = m.metricType ?? 'binary';
     experiments.push({
       id: expId,
       name: m.name ?? expId,
@@ -308,8 +353,8 @@ export function parseDatasetCsv(text: string): Dataset {
       endDate: dates[dates.length - 1] ?? '',
       variants: ['control', 'treatment'],
       trafficSplit: '',
-      primaryMetric: 'conversions',
-      metricType: 'binary',
+      primaryMetric: m.primaryMetric ?? (metricType === 'continuous' ? 'ARPU' : 'conversions'),
+      metricType,
       guardrailMetrics,
       archetype: 'null',
       trueLift: 0,
@@ -340,7 +385,8 @@ export const SAMPLE_JSON = `{
       "startDate": "2026-01-05",
       "endDate": "2026-01-12",
       "variants": ["control", "treatment"],
-      "primaryMetric": "conversions",
+      "primaryMetric": "ARPU",
+      "metricType": "continuous",
       "archetype": "positive",
       "trueLift": 0.012,
       "trueLiftOverall": 0.012,
@@ -349,13 +395,13 @@ export const SAMPLE_JSON = `{
     }
   ],
   "daily": [
-    { "expId": "exp_001", "date": "2026-01-05", "variant": "control", "device": "iOS", "tenure": "new", "exposures": 5000, "conversions": 260, "refunds": 60, "complaints": 5, "latencyP95": 800 },
-    { "expId": "exp_001", "date": "2026-01-05", "variant": "treatment", "device": "iOS", "tenure": "new", "exposures": 5000, "conversions": 320, "refunds": 62, "complaints": 6, "latencyP95": 810 }
+    { "expId": "exp_001", "date": "2026-01-05", "variant": "control", "device": "iOS", "tenure": "new", "exposures": 5000, "conversions": 260, "refunds": 60, "complaints": 5, "latencyP95": 800, "revenue": 18200, "preExposures": 4800, "preConversions": 250, "preRevenue": 17500 },
+    { "expId": "exp_001", "date": "2026-01-05", "variant": "treatment", "device": "iOS", "tenure": "new", "exposures": 5000, "conversions": 320, "refunds": 62, "complaints": 6, "latencyP95": 810, "revenue": 22400, "preExposures": 4800, "preConversions": 248, "preRevenue": 17360 }
   ]
 }`;
 
-export const SAMPLE_CSV = `expId,date,variant,device,tenure,exposures,conversions,refunds,complaints,latencyP95,name
-exp_001,2026-01-05,control,iOS,new,5000,260,60,5,800,新首页改版
-exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,新首页改版
-exp_001,2026-01-06,对照,Android,old,4800,250,58,4,790,新首页改版
-exp_001,2026-01-06,实验组,Android,old,4800,305,59,5,795,新首页改版`;
+export const SAMPLE_CSV = `expId,date,variant,device,tenure,exposures,conversions,refunds,complaints,latencyP95,revenue,primaryMetric,metricType,name
+exp_001,2026-01-05,control,iOS,new,5000,260,60,5,800,18200,ARPU,continuous,新首页改版
+exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,22400,ARPU,continuous,新首页改版
+exp_001,2026-01-06,对照,Android,old,4800,250,58,4,790,17500,ARPU,continuous,新首页改版
+exp_001,2026-01-06,实验组,Android,old,4800,305,59,5,795,21350,ARPU,continuous,新首页改版`;

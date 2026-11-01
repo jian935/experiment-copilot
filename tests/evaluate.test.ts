@@ -28,9 +28,18 @@ describe('评测口径（M5）', () => {
     expect(r.fpr.rate).toBeCloseTo(2 / 40, 10);
   });
 
-  it('正/负效应漏判为 0', () => {
-    expect(r.fnrPositive.miss).toBe(0);
+  it('负效应漏判为 0；正效应剩 1 条，且原因可查（不靠调阈值掩盖）', () => {
     expect(r.fnrNegative.miss).toBe(0);
+    // 把连续口径（ARPU）实验也铺到所有类型之后，多出 1 条「正效应被判成 iterate」。
+    // 原因不是主指标判错，而是分层交互显著：E029 新用户 +1.81元 / 老用户 +0.66元，
+    // 交互 p=0.004 —— 而造数据时两段真值完全相同（+2pp），所以这是抽样噪声撞上了
+    // 「交互显著就要求分层复查」这条规则。规则本身在 A/A 上极保守（异质误判 0.4%–0.8%），
+    // 我们没有为了让这条数字变成 0 去放宽阈值。
+    expect(r.fnrPositive.miss).toBe(1);
+    const bad = r.rows.filter((x) => x.trueDecision === 'ship' && x.predDecision !== 'ship');
+    expect(bad.length).toBe(1);
+    expect(bad[0].id).toBe('E029');
+    expect(bad[0].predDecision).toBe('iterate');
   });
 
   it('四类结论都在混淆矩阵里出现，且失败案例可枚举', () => {

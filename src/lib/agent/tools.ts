@@ -1,4 +1,4 @@
-import { mdeTwoProportion, powerTwoProportion } from '../stats.ts';
+import { mdeTwoProportion, normalCdf, normalInv, powerTwoProportion } from '../stats.ts';
 import { dailyRatePerArm, forecast } from '../forecast.ts';
 import type { Analysis, Evidence } from '../decide.ts';
 import type { Decision } from '../types.ts';
@@ -16,12 +16,18 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   list_experiments: '检索实验列表',
   explain_rules: '回溯判定规则',
   bayesian_view: '贝叶斯视角',
+  metric_decompose: '指标因子分解',
   metric_dictionary: '口径字典',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
 const pp = (v: number, d = 2) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}pp`;
 const pv = (p: number) => (p < 1e-16 ? '<1e-16' : p < 0.001 ? p.toExponential(1) : p.toFixed(3));
+
+/** 指标单位。Agent 回答里的每个差值都必须带对单位，否则「+0.42」是 pp 还是元没人知道 */
+type Unit = 'pp' | '元';
+const fmtDiff = (v: number, unit: Unit, d = 2) => (unit === '元' ? `${v >= 0 ? '+' : ''}${v.toFixed(d)}元` : pp(v, d));
+const fmtLevel = (v: number, unit: Unit, d = 2) => (unit === '元' ? `${v.toFixed(d)}元` : pct(v, d));
 
 const DECISION_CN: Record<string, string> = {
   ship: '建议上线',
@@ -50,8 +56,14 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
           decision: a.decision,
           reasonCode: a.reasonCode,
           reason: a.reason,
-          diffPP: Number((a.overall.diff * 100).toFixed(3)),
-          p: a.overall.p,
+          primaryMetric: a.primary.label,
+          metricKind: a.primary.kind,
+          unit: a.primary.unit,
+          /** 已格式化好的差值文本（模型直接抄，不用自己换算单位） */
+          diffText: fmtDiff(a.primary.diff, a.primary.unit),
+          diff: a.primary.diff,
+          p: a.primary.p,
+          pText: pv(a.primary.p),
           n: a.overall.n1 + a.overall.n2,
         },
         cites: [...cite(a, 'metric'), ...cite(a, 'decision')],
@@ -59,22 +71,52 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
     }
 
     case 'run_test': {
-      const o = a.overall;
+      const p = a.primary;
       return {
         tool: name,
         args,
-        summary: `差值 ${pp(o.diff)}（95% CI ${pp(o.ci95[0])} ~ ${pp(o.ci95[1])}），p=${pv(o.p)}`,
+        summary: `${p.label}：${fmtLevel(p.controlValue, p.unit)} → ${fmtLevel(p.treatmentValue, p.unit)}，差值 ${fmtDiff(p.diff, p.unit)}（95% CI ${fmtDiff(p.ci95[0], p.unit)} ~ ${fmtDiff(p.ci95[1], p.unit)}），p=${pv(p.p)}`,
         data: {
-          controlRate: o.controlRate,
-          treatmentRate: o.treatmentRate,
-          diff: o.diff,
-          ci95: o.ci95,
-          relativeLift: o.relativeLift,
-          z: o.z,
-          p: o.p,
-          n1: o.n1,
-          n2: o.n2,
-          significant: o.p < 0.05,
+          /** 主指标口径（率或 ARPU），决策就是按它下的 */
+          primary: {
+            label: p.label,
+            kind: p.kind,
+            unit: p.unit,
+            via: p.via,
+            controlValue: p.controlValue,
+            treatmentValue: p.treatmentValue,
+            diff: p.diff,
+            diffText: fmtDiff(p.diff, p.unit),
+            ci95: p.ci95,
+            ciText: `${fmtDiff(p.ci95[0], p.unit)} ~ ${fmtDiff(p.ci95[1], p.unit)}`,
+            relativeLift: p.relativeLift,
+            p: p.p,
+            pText: pv(p.p),
+            significant: p.p < 0.05,
+          },
+          /** 转化率口径（恒有，用作交叉验证；ARPU 主指标时它是副指标） */
+          conversion: {
+            controlRate: a.overall.controlRate,
+            treatmentRate: a.overall.treatmentRate,
+            diff: a.overall.diff,
+            diffText: pp(a.overall.diff),
+            p: a.overall.p,
+            pText: pv(a.overall.p),
+          },
+          /** ARPU 口径（数据里有收入时才有） */
+          arpu: a.arpu
+            ? {
+                controlValue: a.arpu.controlValue,
+                treatmentValue: a.arpu.treatmentValue,
+                diff: a.arpu.diff,
+                diffText: fmtDiff(a.arpu.diff, '元'),
+                p: a.arpu.p,
+                pText: pv(a.arpu.p),
+                df: Math.round(a.arpu.df),
+              }
+            : null,
+          n1: a.overall.n1,
+          n2: a.overall.n2,
         },
         cites: cite(a, 'metric'),
       };
@@ -83,18 +125,22 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
     case 'segment_breakdown': {
       const dim = String(args.dimension ?? 'tenure') as 'tenure' | 'device';
       const rows = a.segments[dim] ?? a.segments.tenure;
+      const unit = a.primary.unit;
       return {
         tool: name,
         args: { dimension: dim },
-        summary: rows.map((s) => `${s.label} ${pp(s.test.diff)}（q=${s.q.toFixed(2)}）`).join('；'),
+        summary: rows.map((s) => `${s.label} ${fmtDiff(s.diff, unit)}（q=${s.q.toFixed(2)}）`).join('；'),
         data: {
           dimension: dim,
+          unit,
           rows: rows.map((s) => ({
             label: s.label,
-            controlRate: s.test.controlRate,
-            treatmentRate: s.test.treatmentRate,
-            diff: s.test.diff,
-            p: s.test.p,
+            controlValue: s.controlValue,
+            treatmentValue: s.treatmentValue,
+            diff: s.diff,
+            diffText: fmtDiff(s.diff, unit),
+            p: s.p,
+            pText: pv(s.p),
             q: s.q,
             significant: s.q <= 0.1,
           })),
@@ -126,15 +172,55 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
     }
 
     case 'compute_mde': {
+      const p = a.primary;
+      const nCur = Math.min(a.overall.n1, a.overall.n2);
+      if (p.kind === 'continuous') {
+        // 连续指标：MDE = (z₁₋α/₂+z_power)·SE(n)，SE ∝ 1/√n，所以换到指定样本量只需按比例缩放。
+        // 功效反过来算：P(|Δ̂| > z·SE) = Φ(|Δ|/SE − z) + Φ(−|Δ|/SE − z)。
+        const nPerArm = typeof args.nPerArm === 'number' ? args.nPerArm : nCur;
+        const za = Math.abs(normalInv(0.975));
+        const zb = normalInv(0.8);
+        const seAt = p.se * Math.sqrt(Math.max(1, nCur) / Math.max(1, nPerArm));
+        const mde = (za + zb) * seAt;
+        const zz = seAt > 0 ? Math.abs(p.diff) / seAt : 0;
+        const power = Math.min(1, normalCdf(zz - za) + normalCdf(-zz - za));
+        return {
+          tool: name,
+          args: { nPerArm },
+          summary: `ARPU 在 n=${nPerArm}/组、当前 SE 下，80% 功效的最小可检出差值为 ${mde.toFixed(3)}元`,
+          data: {
+            metricKind: 'continuous',
+            unit: '元',
+            nPerArm,
+            mde,
+            mdeText: `${mde.toFixed(3)}元`,
+            power,
+            observedDiff: p.diff,
+            observedDiffText: fmtDiff(p.diff, '元'),
+            seAt,
+          },
+          cites: cite(a, 'metric'),
+        };
+      }
       const baseline = typeof args.baseline === 'number' ? args.baseline : a.overall.controlRate;
-      const nPerArm = typeof args.nPerArm === 'number' ? args.nPerArm : Math.min(a.overall.n1, a.overall.n2);
+      const nPerArm = typeof args.nPerArm === 'number' ? args.nPerArm : nCur;
       const mde = mdeTwoProportion(baseline, nPerArm);
       const power = powerTwoProportion(baseline, a.overall.treatmentRate, nPerArm);
       return {
         tool: name,
         args: { baseline, nPerArm },
         summary: `在 n=${nPerArm}/组、基线 ${pct(baseline)} 下，80% 功效的最小可检出差异为 ${pp(mde)}`,
-        data: { baseline, nPerArm, mde, power, observedDiff: a.overall.diff },
+        data: {
+          metricKind: 'rate',
+          unit: 'pp',
+          baseline,
+          nPerArm,
+          mde,
+          mdeText: pp(mde),
+          power,
+          observedDiff: p.diff,
+          observedDiffText: pp(p.diff),
+        },
         cites: cite(a, 'metric'),
       };
     }
@@ -154,19 +240,23 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
         }
       }
       const horizonDays = typeof args.horizonDays === 'number' ? args.horizonDays : 30;
+      const p = a.primary;
       const f = forecast({
         n1,
         c1,
         n2,
         c2,
-        diff: a.primary.diff,
-        se: a.primary.se,
+        kind: p.kind,
+        baselineValue: p.controlValue,
+        diff: p.diff,
+        se: p.se,
         dailyRate: dailyRatePerArm(rows, 3),
         elapsedDays: new Set(rows.map((r) => r.date)).size,
         horizonDays,
         sims: 1200,
         seed: 20261101,
       });
+      const fmtMde = (v: number) => (f.mde.unit === '元' ? `${v.toFixed(3)}元` : `${(v * 100).toFixed(2)}pp`);
       return {
         tool: name,
         args: { horizonDays },
@@ -187,8 +277,10 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
           remainingDays: Number.isFinite(f.point.remainingDays) ? f.point.remainingDays : null,
           nPerArm: f.observed.nPerArm,
           dailyRate: f.rate.perArmPerDay,
-          mdeNowPP: +(f.mde.now * 100).toFixed(3),
-          mdeAtHorizonPP: +(f.mde.atHorizon * 100).toFixed(3),
+          metricKind: f.observed.kind,
+          /** 已经格式化好的 MDE 文本（模型别自己换算单位） */
+          mdeNowText: fmtMde(f.mde.now),
+          mdeAtHorizonText: fmtMde(f.mde.atHorizon),
           via: a.primary.via,
         },
         cites: cite(a, 'metric'),
@@ -202,18 +294,22 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
         .slice(0, limit)
         .map((e) => {
           const an = ctx.analyses.get(e.id);
-          const diff = an?.overall.diff ?? 0;
-          const p = an?.overall.p ?? 1;
+          const unit: Unit = an?.primary.unit ?? 'pp';
+          const diff = an?.primary.diff ?? 0;
+          const p = an?.primary.p ?? 1;
           return {
             id: e.id,
             name: e.name,
             archetype: e.archetype,
+            primaryMetric: an?.primary.label ?? e.primaryMetric,
             decision: an?.decision ?? 'unknown',
             decisionLabel: DECISION_CN[an?.decision ?? 'inconclusive'],
-            // 给模型直接可抄的字符串：避免它输出 16 位浮点（实测会被数字审计判为可疑）
-            diffPP: pp(diff),
+            // 给模型直接可抄的字符串：避免它输出 16 位浮点（实测会被数字审计判为可疑），
+            // 也避免把不同实验的 pp / 元 混成一个单位
+            diffText: fmtDiff(diff, unit),
             pText: pv(p),
             diff,
+            unit,
             p,
           };
         });
@@ -248,10 +344,12 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
             name: e.name,
             decision: an.decision,
             decisionLabel: DECISION_CN[an.decision],
-            diffPP: pp(an.overall.diff),
-            pText: pv(an.overall.p),
-            diff: an.overall.diff,
-            p: an.overall.p,
+            primaryMetric: an.primary.label,
+            diffText: fmtDiff(an.primary.diff, an.primary.unit),
+            pText: pv(an.primary.p),
+            diff: an.primary.diff,
+            unit: an.primary.unit,
+            p: an.primary.p,
           };
         });
       return {
@@ -277,25 +375,84 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
 
     case 'bayesian_view': {
       const b = a.bayes;
-      const probPP = Math.min(99.9, +(b.probTreatBetter * 100).toFixed(1));
-      const credLowPP = +(b.credLow * 100).toFixed(1);
-      const credHighPP = +(b.credHigh * 100).toFixed(1);
-      const meanDiffPP = +(b.meanDiff * 100).toFixed(1);
-      const expectedLossPP = +(b.expectedLoss * 100).toFixed(1);
+      const unit = a.primary.unit;
+      const probPct = Math.min(99.9, +(b.probTreatBetter * 100).toFixed(1));
       return {
         tool: name,
         args,
-        summary: `treatment 更优概率 ${probPP}% · 95% 可信区间 [${credLowPP}, ${credHighPP}]pp`,
+        summary: `treatment 更优概率 ${probPct}% · 95% 可信区间 ${fmtDiff(b.credLow, unit, 3)} ~ ${fmtDiff(b.credHigh, unit, 3)}`,
         data: {
+          metricLabel: a.primary.label,
+          metricKind: a.primary.kind,
+          unit,
+          /** 后验分布口径：率指标 Beta-Binomial，连续指标正态 */
+          posterior: a.primary.kind === 'continuous' ? 'normal' : 'beta-binomial',
           probTreatBetter: b.probTreatBetter,
-          probPP,
-          credLowPP,
-          credHighPP,
-          meanDiffPP,
-          expectedLossPP,
+          probPct,
+          credLow: b.credLow,
+          credHigh: b.credHigh,
+          credText: `${fmtDiff(b.credLow, unit, 3)} ~ ${fmtDiff(b.credHigh, unit, 3)}`,
+          meanDiff: b.meanDiff,
+          meanDiffText: fmtDiff(b.meanDiff, unit, 3),
           expectedLoss: b.expectedLoss,
+          expectedLossText: fmtDiff(b.expectedLoss, unit, 3),
         },
         cites: cite(a, 'metric'),
+      };
+    }
+
+    case 'metric_decompose': {
+      // ARPU = 转化率 × 客单价。这个工具存在的唯一理由：
+      // 「ARPU 涨了，是因为买的人多了，还是因为买得更贵了」——两条路径的业务含义完全不同，
+      // 而只看总量（甚至只看 p 值）永远回答不了这个问题。
+      const bd = a.arpuBreakdown;
+      const rt = a.arpu;
+      if (!bd || !rt) {
+        return {
+          tool: name,
+          args,
+          summary: '这份数据没有收入字段，无法做 ARPU 分解',
+          data: { available: false, reason: '数据缺 revenue 字段（导入时补上收入列即可启用）' },
+          cites: [],
+        };
+      }
+      const d = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(3)}`;
+      const dominant = Math.abs(bd.fromCvr) >= Math.abs(bd.fromAov) ? '转化率' : '客单价';
+      const conflict = bd.fromCvr * bd.fromAov < 0;
+      return {
+        tool: name,
+        args,
+        summary:
+          `ARPU ${d(bd.total)}元 = 转化率贡献 ${d(bd.fromCvr)}元 + 客单价贡献 ${d(bd.fromAov)}元 + 交叉项 ${d(bd.fromInteraction)}元；` +
+          `主要由${dominant}驱动`,
+        data: {
+          available: true,
+          unit: '元',
+          controlCvr: bd.controlCvr,
+          treatmentCvr: bd.treatmentCvr,
+          controlAov: bd.controlAov,
+          treatmentAov: bd.treatmentAov,
+          /** 三块贡献（元/曝光），严格相加等于 total */
+          fromCvr: bd.fromCvr,
+          fromAov: bd.fromAov,
+          fromInteraction: bd.fromInteraction,
+          total: bd.total,
+          fromCvrText: `${d(bd.fromCvr)}元`,
+          fromAovText: `${d(bd.fromAov)}元`,
+          fromInteractionText: `${d(bd.fromInteraction)}元`,
+          totalText: `${d(bd.total)}元`,
+          dominant,
+          /** 两块贡献方向相反：总量会掩盖真实变化，必须显式说 */
+          oppositeSigns: conflict,
+          cvrText: `${pct(bd.controlCvr, 3)} → ${pct(bd.treatmentCvr, 3)}`,
+          aovText: `${bd.controlAov.toFixed(2)}元 → ${bd.treatmentAov.toFixed(2)}元`,
+          arpuP: rt.p,
+          arpuPText: pv(rt.p),
+        },
+        cites: cite(a, 'metric').filter((id) => {
+          const e = a.evidence.find((x) => x.id === id);
+          return !!e && /ARPU/.test(e.label);
+        }),
       };
     }
 
@@ -447,6 +604,15 @@ export const TOOL_SCHEMA = [
       name: 'bayesian_view',
       description:
         '贝叶斯视角：用 Beta-Binomial 后验给出 treatment 优于 control 的概率（P(B>A)）、95% 可信区间与期望损失（若误判上线的平均损失）',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'metric_decompose',
+      description:
+        '把 ARPU 的变化拆成「转化率 × 客单价」两块的贡献（另加交叉项），三块严格相加等于总差值。用于回答「ARPU 涨了是因为买的人多了还是买得更贵了」。数据没有收入字段时会返回 available=false',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },

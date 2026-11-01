@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Timer } from 'lucide-react';
 import {
   FORECAST_ASSUMPTIONS,
+  FORECAST_ASSUMPTION_CONTINUOUS,
   dailyRatePerArm,
   forecast,
   type ForecastResult,
@@ -22,6 +23,8 @@ export function ForecastPanel({
   rows,
   diff,
   se,
+  kind = 'rate',
+  baselineValue,
   horizonDays = 30,
   elapsedDays,
 }: {
@@ -29,6 +32,10 @@ export function ForecastPanel({
   /** 决策口径的差值 / 标准误（来自 analysis.primary） */
   diff: number;
   se: number;
+  /** 主指标类型：率指标走二项功效，ARPU 走 SE ∝ 1/√n */
+  kind?: 'rate' | 'continuous';
+  /** control 的水平值（连续指标展示用） */
+  baselineValue?: number;
   horizonDays?: number;
   elapsedDays?: number;
 }) {
@@ -49,6 +56,8 @@ export function ForecastPanel({
       c1,
       n2,
       c2,
+      kind,
+      baselineValue,
       diff,
       se,
       dailyRate: dailyRatePerArm(rows, 3),
@@ -57,7 +66,7 @@ export function ForecastPanel({
       sims: 2000,
       seed: 20261101,
     });
-  }, [rows, diff, se, horizonDays, elapsedDays]);
+  }, [rows, diff, se, kind, baselineValue, horizonDays, elapsedDays]);
 
   const tone =
     f.verdict.code === 'done' ? C.ship : f.verdict.code === 'unlikely' ? C.iterate : C.brand;
@@ -131,6 +140,7 @@ export function ForecastPanel({
               {a}
             </li>
           ))}
+          {kind === 'continuous' && <li className="list-disc">{FORECAST_ASSUMPTION_CONTINUOUS}</li>}
           <li className="list-disc">
             曲线是「跑到第 d 天时 p &lt; α」的模拟比例（每天单独判一次），不是「天天盯盘、第一次显著就停」——
             后者会因为反复检验而虚高把握度（peeking bias），这一版故意不用那个口径。

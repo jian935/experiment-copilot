@@ -43,6 +43,7 @@ export type ToolName =
   | 'list_experiments'
   | 'explain_rules'
   | 'bayesian_view'
+  | 'metric_decompose'
   | 'metric_dictionary';
 
 export interface AgentReply {

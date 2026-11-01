@@ -48,6 +48,18 @@ export const BASELINE_DEVICE_SD = 0.0018;
  */
 export const BASELINE_ARM_SD = 0.005;
 
+/**
+ * 客单价模型（ARPU 的数据来源）。
+ *
+ * 订单金额天然右偏：多数人买几十块，少数人买几百块。用对数正态近似（σ_log = 0.45），
+ * 这决定了 ARPU 的方差**不由均值决定**——正是它不能套 p(1−p)/n 的原因。
+ *
+ * AOV_ARM_SD 是「格子 × 变体」这一批用户的客单价漂移：同一批人前后周期共享，
+ * 所以它既是 CUPED 能减掉的方差，也保证 ARPU 的 A/A 检验不会因为格子间差异被低估。
+ */
+export const AOV_LOG_SD = 0.45;
+export const AOV_ARM_SD = 0.06;
+
 const NAMES = [
   '结算页改版', '首页按钮颜色', '推荐算法迭代', '新用户弹窗', '列表加载优化',
   '搜索排序调整', '价格展示方式', '优惠券入口', '购物车交互', '详情页图集',
@@ -96,13 +108,15 @@ export function buildExperiment(
   archetype: Archetype,
   seed: number,
   days: number,
-  opts: { startDate?: Date; nameIndex?: number } = {},
+  opts: { startDate?: Date; nameIndex?: number; primaryMetric?: 'rate' | 'continuous' } = {},
 ): { exp: Experiment; rows: DailyRow[] } {
   const startDate = opts.startDate ?? new Date('2026-09-01T00:00:00Z');
   const nameIndex = opts.nameIndex ?? 0;
+  const continuous = opts.primaryMetric === 'continuous';
   const rng = mulberry32(seed);
   const cfg = CFG[archetype];
   const p0 = 0.045 + 0.015 * rng();
+  const aov = 55 + 40 * rng(); // 该实验的客单价基线（55–95 元）
   // 日效应 / 设备效应：整段实验内固定、前后周期共享 —— 这正是 CUPED 能减掉的方差来源
   const dayEffect = Array.from({ length: days }, () => BASELINE_DAY_SD * randn(rng));
   const devEffect: Record<Device, number> = {
@@ -123,13 +137,16 @@ export function buildExperiment(
     endDate: isoDate(startDate, days - 1),
     variants: ['control', 'treatment'],
     trafficSplit: `${Math.round((1 - cfg.ratio) * 100)}/${Math.round(cfg.ratio * 100)}`,
-    primaryMetric: '支付转化率',
-    metricType: 'binary',
+    primaryMetric: continuous ? 'ARPU' : '支付转化率',
+    metricType: continuous ? 'continuous' : 'binary',
     guardrailMetrics: ['退款率', '投诉率'],
     archetype,
     trueLift: archetype === 'heterogeneous' ? cfg.liftNew : trueLiftOverall,
     trueLiftScope: archetype === 'heterogeneous' ? 'new_users' : 'overall',
     trueLiftOverall,
+    // 收入口径的真实效应：客单价不变时 ARPU 的相对提升 ≈ 转化率的相对提升。
+    // 写成 p0 的比值而不是拍一个数，是为了让「真值对照」能被手算核验。
+    trueRpuLift: p0 > 0 ? trueLiftOverall / p0 : 0,
     trueDecision: cfg.decision,
     seed,
   };
@@ -163,6 +180,17 @@ export function buildExperiment(
           const refundP = Math.min(0.2, refundBase + (variant === 'treatment' ? cfg.refundDiff : 0));
           const refunds = binomial(n, refundP, rng);
           const complaints = poisson(n * complaintBase, rng);
+
+          // ---- 收入：c 笔订单 × 该格子的客单价 ----
+          // 订单金额服从对数正态（σ_log = 0.45），c 笔之和按 CLT 用「均值 + 标准差 × 正态」抽样：
+          //   单笔 sd = aov·√(e^{σ²}−1)，c 笔之和 sd = 单笔 sd·√c
+          // 这条生成逻辑决定了 ARPU 的方差主要来自「多少人下单」和「每单多大」，
+          // 与转化率完全同源（ARPU = CVR × AOV），所以 ARPU 的真值方向必然跟着转化率走。
+          const aovCell = aov * (1 + AOV_ARM_SD * randn(rng));
+          const orderSd = aovCell * Math.sqrt(Math.exp(AOV_LOG_SD * AOV_LOG_SD) - 1);
+          const revenue = Math.max(0, c * aovCell + Math.sqrt(Math.max(c, 1)) * orderSd * randn(rng));
+          const preRevenue = Math.max(0, cPre * aovCell + Math.sqrt(Math.max(cPre, 1)) * orderSd * randn(rng));
+
           rows.push({
             expId: id,
             date: isoDate(startDate, d),
@@ -174,8 +202,10 @@ export function buildExperiment(
             refunds,
             complaints,
             latencyP95: Math.round(latencyMean + 18 * randn(rng)),
+            revenue: Math.round(revenue * 100) / 100,
             preExposures: nPre,
             preConversions: cPre,
+            preRevenue: Math.round(preRevenue * 100) / 100,
           });
         }
       }
@@ -194,7 +224,9 @@ export function generateAA(count = 1000, seedBase = 20261101, days = 7): Dataset
       'null',
       seedBase + (i + 1) * 7919,
       days,
-      { nameIndex: i },
+      // 一半率指标、一半 ARPU：两种口径的误报率要分开测，
+      // 因为它们的方差来源不同（二项 vs 收入的重尾），混在一起平均会掩盖某一方的问题。
+      { nameIndex: i, primaryMetric: i % 2 === 0 ? 'rate' : 'continuous' },
     );
     experiments.push(exp);
     daily.push(...rows);
@@ -208,6 +240,9 @@ export function generateAA(count = 1000, seedBase = 20261101, days = 7): Dataset
       preDays: days,
       baselineDaySd: BASELINE_DAY_SD,
       baselineDeviceSd: BASELINE_DEVICE_SD,
+      aovMean: 75,
+      aovLogSd: AOV_LOG_SD,
+      aovArmSd: AOV_ARM_SD,
       segments: ['device', 'tenure'],
       baselineRate: [0.045, 0.06],
       refundRate: 0.012,
@@ -244,7 +279,21 @@ export function generateDataset(seedBase = 20261031, days = 7): Dataset {
   order.forEach((archetype, i) => {
     const seed = seedBase + (i + 1) * 7919;
     const id = `E${String(i + 1).padStart(3, '0')}`;
-    const { exp, rows } = buildExperiment(id, archetype, seed, days, { startDate: start, nameIndex: i });
+    // 每 3 个实验里有 1 个以 ARPU 为主指标（40 个）：两种口径都能被评测到，
+    // 又不至于把转化率口径的样本砍掉一半（混淆矩阵需要每格都有足够样本）。
+    //
+    // ⚠️ 这里必须是「按块轮转」而不是 i % 3：archetype 是 6 个一循环铺下来的
+    // （guardrail / heterogeneous / negative / null / positive / srm），
+    // 用 i % 3 会让连续口径只落在 i≡2 (mod 3) 这一条线上 —— 恰好只剩 negative 与 srm 两类，
+    // 也就是说 ARPU 实验永远没有正效应、永远不过护栏检验。那样测出来的
+    // 「连续口径误报率/检出率」只覆盖了一半的决策路径，是评测盲区而不是结论。
+    // 每 6 个实验把偏移转一格，18 个实验正好覆盖 6 类 × 各类 2 次，且总数仍是 1/3。
+    const block = Math.floor(i / 6);
+    const { exp, rows } = buildExperiment(id, archetype, seed, days, {
+      startDate: start,
+      nameIndex: i,
+      primaryMetric: (i + block) % 3 === 2 ? 'continuous' : 'rate',
+    });
     experiments.push(exp);
     daily.push(...rows);
   });
@@ -258,6 +307,9 @@ export function generateDataset(seedBase = 20261031, days = 7): Dataset {
       preDays: days,
       baselineDaySd: BASELINE_DAY_SD,
       baselineDeviceSd: BASELINE_DEVICE_SD,
+      aovMean: 75,
+      aovLogSd: AOV_LOG_SD,
+      aovArmSd: AOV_ARM_SD,
       segments: ['device', 'tenure'],
       baselineRate: [0.045, 0.06],
       refundRate: 0.012,

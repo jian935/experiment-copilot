@@ -85,6 +85,21 @@ export const METRIC_DEFS: MetricDef[] = [
     method: '两样本 Bootstrap（BCa，10k 次，固定种子）+ 百分位检验',
     note: '分位数指标没有闭式检验，只能重抽样；容忍度用相对 +5%，因为不同接口基线差异极大。',
   },
+  {
+    key: 'arpu',
+    label: 'ARPU',
+    kind: 'continuous',
+    direction: 'higher_better',
+    unit: '元',
+    formula: 'Σrevenue / Σexposures（每曝光收入，元）',
+    source: 'DailyRow.revenue / DailyRow.exposures',
+    guardrailMargin: null,
+    method: '比值指标 delta method（格子级聚类方差，Welch–Satterthwaite 自由度）+ t 检验',
+    note:
+      'ARPU = 转化率 × 客单价，两个因子可以反向移动（打折拉量：转化率↑、客单价↓），' +
+      '所以必须做因子分解，不能只看总量是涨了还是跌了。收入方差不由均值决定（不像比例），' +
+      '因此不能套 p(1−p)/n；无单位级明细时用格子级聚类方差，区间偏保守。',
+  },
 ];
 
 const BY_KEY = new Map(METRIC_DEFS.map((m) => [m.key, m]));

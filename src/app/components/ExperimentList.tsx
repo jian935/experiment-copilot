@@ -6,10 +6,11 @@ import {
   ARCHETYPE_LABEL,
   DECISION_META,
   REASON_META,
+  fmtDiff,
   fmtNum,
   fmtP,
-  fmtPP,
   fmtPct,
+  fmtLevel,
   liftClass,
   type Tone,
 } from '../lib/format';
@@ -91,13 +92,18 @@ export function ExperimentList({
     });
     const key = (e: Experiment) => analyses.get(e.id)!;
     return list.sort((x, y) => {
-      if (sort === 'p') return key(x).overall.p - key(y).overall.p;
-      if (sort === 'diff') return Math.abs(key(y).overall.diff) - Math.abs(key(x).overall.diff);
+      if (sort === 'p') return key(x).primary.p - key(y).primary.p;
+      // 按相对效应排序：pp 与 元 混在一起时，绝对值不可比，用相对提升才有意义
+      if (sort === 'diff') return Math.abs(key(y).primary.relativeLift) - Math.abs(key(x).primary.relativeLift);
       return x.id.localeCompare(y.id);
     });
   }, [dataset.experiments, analyses, q, decision, archetype, sort]);
 
   const total = dataset.experiments.length;
+  const continuousCount = useMemo(
+    () => dataset.experiments.filter((e) => e.metricType === 'continuous').length,
+    [dataset.experiments],
+  );
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-6 pb-24 pt-8">
@@ -105,7 +111,7 @@ export function ExperimentList({
         <div>
           <h1 className="text-[26px] font-semibold tracking-tight text-ink">实验列表</h1>
           <p className="mt-1 text-[13px] text-muted">
-            {total} 个实验 · 主指标为二值转化 · 结论由确定性引擎计算，非模型生成
+            {total} 个实验 · 主指标 {total ? continuousCount : 0} 个为 ARPU（连续）· 结论由确定性引擎计算，非模型生成
           </p>
         </div>
         <div className="flex items-center gap-2 text-[11px] text-dim">
@@ -218,21 +224,24 @@ export function ExperimentList({
                       <DecisionBadge decision={a.decision} size="sm" />
                       <div className="mt-1 text-[10px] text-dim">{REASON_META[a.reasonCode]}</div>
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-muted">{e.primaryMetric}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted">
+                      {a.primary.label}
+                      <span className="ml-1 text-[10px] text-dim">{a.primary.unit === '元' ? '连续' : '二值'}</span>
+                    </td>
                     <td className="num px-3 py-2.5 text-right text-xs text-muted">
-                      {fmtPct(a.overall.controlRate)}
+                      {fmtLevel(a.primary.controlValue, a.primary.unit)}
                       <span className="mx-1 text-dim">→</span>
-                      {fmtPct(a.overall.treatmentRate)}
+                      {fmtLevel(a.primary.treatmentValue, a.primary.unit)}
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-2">
-                        <MiniCI ci={a.overall.ci95} diff={a.overall.diff} />
-                        <span className={cx('num w-[62px] text-right text-xs font-medium', liftClass(a.overall.diff))}>
-                          {fmtPP(a.overall.diff)}
+                        <MiniCI ci={a.primary.ci95} diff={a.primary.diff} />
+                        <span className={cx('num w-[70px] text-right text-xs font-medium', liftClass(a.primary.diff))}>
+                          {fmtDiff(a.primary.diff, a.primary.unit)}
                         </span>
                       </div>
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-xs text-muted">{fmtP(a.overall.p)}</td>
+                    <td className="num px-3 py-2.5 text-right text-xs text-muted">{fmtP(a.primary.p)}</td>
                     <td className="num px-4 py-2.5 text-right text-xs text-muted">
                       {fmtNum(a.overall.n1 + a.overall.n2)}
                     </td>

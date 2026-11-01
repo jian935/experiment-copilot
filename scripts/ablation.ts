@@ -25,7 +25,7 @@ const QUESTIONS = [
   '样本够不够？',
   '有类似实验吗？',
   '有哪些实验被拦截了？',
-  '这个实验的 ARPU 提升了多少？', // 口径陷阱：实验只测转化率
+  '这个实验的 ARPU 提升了多少？', // 口径陷阱：该实验主指标是转化率，ARPU 只能算副指标
 ];
 
 const EXPS = ['E001', 'E002', 'E004']; // 护栏拦截 / 分层异质 / 无真实效应
@@ -61,7 +61,10 @@ function metrics(rows: Row[]) {
     avgTools: rows.reduce((s, r) => s + r.tools, 0) / n,
     avgChars: Math.round(rows.reduce((s, r) => s + r.chars, 0) / n),
     violationRate: rows.filter((r) => r.violations > 0).length / n,
-    // 只在「口径陷阱」题上统计：问 ARPU，但这些实验只测转化率
+    // 只在「口径陷阱」题上统计：问 ARPU，但这些实验的主指标是转化率。
+    // 正确表现有两种，都算过：① 明确说「主指标是转化率，ARPU 只是副指标/参考」；
+    // ② 说「数据里没有这个口径」。之前只认 ②，而 A3 之后明细里有 revenue，
+    // ARPU 真的算得出来（作为副指标），于是这条指标恒为 0%——那是度量口径失效，不是模型不会。
     noDataRate: (() => {
       const arpu = rows.filter((r) => r.q.includes('ARPU'));
       return arpu.filter((r) => r.answersNoData).length / Math.max(1, arpu.length);
@@ -82,7 +85,9 @@ function toRow(ctx: AgentCtx, q: string, reply: AgentReply): Row {
     tools: reply.calls.length,
     chars: reply.text.length,
     suspiciousList: reply.audit.suspicious,
-    answersNoData: /没有「|数据里没有|未提供|不包含这个口径|不是这个口径|只测了/.test(reply.text),
+    // 口径纪律：要么说清「主指标 vs 副指标」，要么明确说「没有这个口径」
+    answersNoData:
+      /主指标|副指标|只能作为参考|不能当.*结论|数据里没有|未提供|不包含这个口径|不是这个口径|不在口径字典/.test(reply.text),
     text: reply.text,
     violations: reply.violations?.length ?? 0,
   };
@@ -131,7 +136,7 @@ async function main() {
   lines.push(`| 违规率（缺引用/可疑数字） | ${fmt(mr.violationRate)} | ${ml ? fmt(ml.violationRate) : '—'} |`);
   lines.push(`| 平均工具调用 | ${mr.avgTools.toFixed(2)} | ${ml ? ml.avgTools.toFixed(2) : '—'} |`);
   lines.push(`| 平均字数 | ${mr.avgChars} | ${ml ? ml.avgChars : '—'} |`);
-  lines.push(`| 口径陷阱识别率 | ${fmt(mr.noDataRate)} | ${ml ? fmt(ml.noDataRate) : '—'} |`);
+  lines.push(`| 口径陷阱识别率（问 ARPU 时是否说清主/副指标） | ${fmt(mr.noDataRate)} | ${ml ? fmt(ml.noDataRate) : '—'} |`);
   lines.push('');
   const table = (rows: Row[]) => {
     lines.push('| 实验 | 问题 | 工具数 | 引用 | 数字 | 可疑 | 违规 | 可疑数字 |');
@@ -168,7 +173,9 @@ async function main() {
   lines.push('## 怎么读这份报告\n');
   lines.push('- **引用覆盖率**低 = 回答无法核对，等于叫你相信它。');
   lines.push('- **可疑数字率** > 0 = 模型说了引擎没算过的数，这是最危险的失败模式。');
-  lines.push('- **口径陷阱识别率** = 问到实验没测的指标时，是否老实说"没有"。');
+  lines.push(
+    '- **口径陷阱识别率** = 主指标是转化率的实验被问到 ARPU 时，是否说清「ARPU 只是副指标、不能当上线依据」（或明确说没有这个口径）。',
+  );
   lines.push('- 规则模式在这三项上通常是满分，但它的语言生硬、只能回答预设意图——这正是 LLM 的位置：**不是替它判断，是替它说话**。');
 
   writeFileSync('docs/ABLATION.md', lines.join('\n'));

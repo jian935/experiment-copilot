@@ -1,19 +1,51 @@
 {
-  "generatedAt": "2026-11-01T07:57:34.004Z",
+  "generatedAt": "2026-11-01T09:27:48.656Z",
   "seedBase": 20261031,
   "nExperiments": 120,
-  "varReductionMedian": 0.07755398876234998,
-  "varReductionMean": 0.09493064409976444,
-  "varReductionP90": 0.18914086931745033,
-  "rhoMedian": 0.2771537599266188,
-  "dispersionMedian": 1.4196302918840444,
+  "varReductionMedian": 0.07239465666933909,
+  "varReductionMean": 0.09284468498295996,
+  "varReductionP90": 0.1971111964897838,
+  "rhoMedian": 0.27135405578900346,
+  "dispersionMedian": 1.2424471783065922,
   "nCells": 56,
   "detectedCuped": 25,
   "detectedRobust": 25,
   "detectedIid": 25,
   "positiveTotal": 25,
-  "aaFprCuped": 0.05333333333333334,
-  "aaFprRobust": 0.056666666666666664,
-  "aaFprIid": 0.11333333333333333,
-  "aaTrials": 600
+  "aaFprCuped": 0.0635,
+  "aaFprRobust": 0.0615,
+  "aaFprIid": 0.079,
+  "aaTrials": 2000,
+  "varReductionByKind": {
+    "rate": {
+      "n": 80,
+      "median": 0.0700039579464945,
+      "mean": 0.0848207501547251,
+      "rhoMedian": 0.26076828674989394,
+      "dispersionMedian": 1.4086563150752713
+    },
+    "continuous": {
+      "n": 40,
+      "median": 0.10137199119817786,
+      "mean": 0.10889255463942953,
+      "rhoMedian": 0.30542374623447804,
+      "dispersionMedian": 1
+    }
+  },
+  "aaFprByKind": {
+    "rate": {
+      "trials": 1000,
+      "cuped": 0.062,
+      "robust": 0.062,
+      "iid": 0.097,
+      "seCuped": 0.007626008130076967
+    },
+    "continuous": {
+      "trials": 1000,
+      "cuped": 0.065,
+      "robust": 0.061,
+      "iid": 0.061,
+      "seCuped": 0.007795832219846705
+    }
+  }
 }

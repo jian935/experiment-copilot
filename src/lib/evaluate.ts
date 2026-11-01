@@ -12,6 +12,8 @@ export interface EvalRow {
   reasonCode: string;
   p: number;
   diff: number;
+  /** 主指标类型：pp 与 元 混在一张表里时，读数必须知道口径 */
+  metricKind: 'rate' | 'continuous';
   /** 贝叶斯置信度：P(treatment 真正优于 control) */
   confidence: number;
   /** 真实整体效应是否 > 0（校准曲线的观测目标） */
@@ -72,8 +74,11 @@ export function evaluate(dataset: Dataset, analyses: Map<string, Analysis>): Eva
       trueDecision: e.trueDecision,
       predDecision: a.decision,
       reasonCode: a.reasonCode,
-      p: a.overall.p,
-      diff: a.overall.diff,
+      // 用主指标口径（率 or ARPU）而不是恒有的转化率口径：
+      // 主指标是 ARPU 的实验，决策依据是 ARPU 的 p 值，用它分桶才与决策逻辑一致。
+      p: a.primary.p,
+      diff: a.primary.diff,
+      metricKind: a.primary.kind,
       confidence: a.bayes?.probTreatBetter ?? 0.5,
       trueLiftPositive: e.trueLiftOverall > 0,
       correct: a.decision === e.trueDecision,

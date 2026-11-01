@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-11-01T07:57:23.482Z",
+  "generatedAt": "2026-11-01T09:27:15.998Z",
   "seedBase": 20261101,
-  "trials": 1000,
+  "trials": 2000,
   "days": 7,
   "config": {
     "alpha": 0.05,
@@ -10,30 +10,76 @@
     "guardrailMode": "harm_and_practical"
   },
   "decisions": {
-    "ship": 24,
-    "no-ship": 21,
-    "iterate": 5,
-    "inconclusive": 950
+    "ship": 54,
+    "no-ship": 64,
+    "iterate": 9,
+    "inconclusive": 1873
   },
-  "falsePositiveRate": 0.05,
-  "shipRate": 0.024,
-  "noShipRate": 0.021,
-  "iterateRate": 0.005,
+  "falsePositiveRate": 0.0635,
+  "shipRate": 0.027,
+  "noShipRate": 0.032,
+  "iterateRate": 0.0045,
   "srmFlagRate": 0,
-  "guardrailFlagRate": 0.001,
-  "bayesMeanProb": 0.49537402193067964,
-  "bayesProbAbove095": 0.051,
+  "guardrailFlagRate": 0,
+  "bayesMeanProb": 0.4994325534687251,
+  "bayesProbAbove095": 0.053,
   "pValueHistogram": [
-    162,
-    118,
-    102,
-    90,
-    82,
-    88,
-    88,
-    95,
-    89,
-    86
+    232,
+    153,
+    204,
+    195,
+    155,
+    226,
+    209,
+    193,
+    216,
+    217
   ],
-  "meanSamplePerArm": 19601.103
+  "byMetricKind": {
+    "rate": {
+      "trials": 1000,
+      "falsePositive": 62,
+      "rate": 0.062,
+      "se": 0.007626008130076967,
+      "ship": 27,
+      "noShip": 31,
+      "bayesMeanProb": 0.49663515708330863,
+      "bayesProbAbove095": 0.046,
+      "pValueHistogram": [
+        113,
+        70,
+        109,
+        99,
+        83,
+        110,
+        102,
+        97,
+        115,
+        102
+      ]
+    },
+    "continuous": {
+      "trials": 1000,
+      "falsePositive": 65,
+      "rate": 0.065,
+      "se": 0.007795832219846705,
+      "ship": 27,
+      "noShip": 33,
+      "bayesMeanProb": 0.5022299498541419,
+      "bayesProbAbove095": 0.06,
+      "pValueHistogram": [
+        119,
+        83,
+        95,
+        96,
+        72,
+        116,
+        107,
+        96,
+        101,
+        115
+      ]
+    }
+  },
+  "meanSamplePerArm": 19604.6
 }

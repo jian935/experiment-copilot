@@ -1,4 +1,4 @@
-import { mdeTwoProportion, mulberry32, normalInv, twoSidedP } from './stats.ts';
+import { mdeTwoProportion, mulberry32, normalCdf, normalInv, twoSidedP } from './stats.ts';
 
 /**
  * 「还要跑几天」——实验结论时间的预测。
@@ -34,6 +34,14 @@ export interface ForecastInput {
   /** 当前累计曝光 / 转化（treatment） */
   n2: number;
   c2: number;
+  /**
+   * 指标类型。rate = 转化率（走二项抽样 + 两比例功效公式）；
+   * continuous = ARPU 这类连续指标（走 SE ∝ 1/√n 的通用外推，不用二项功效）。
+   * 两条路的「50% 点 ≈ 50% 功效」这一原理性检验都成立，但所用的功效公式不同。
+   */
+  kind?: 'rate' | 'continuous';
+  /** control 的水平值（连续指标用于展示与 MDE 语境；率指标可省略，默认 p1） */
+  baselineValue?: number;
   /** 每臂日均曝光（由日表明细算，不是拍脑袋填的） */
   dailyRate: number;
   /** 实验已经跑了多少天（只用于展示进度） */
@@ -52,6 +60,11 @@ export interface ForecastInput {
 
 export interface ForecastResult {
   observed: {
+    /** 指标类型（决定单位是 pp 还是元） */
+    kind: 'rate' | 'continuous';
+    /** control / treatment 的水平值（率=转化率，连续=ARPU） */
+    controlValue: number;
+    treatmentValue: number;
     controlRate: number;
     treatmentRate: number;
     diff: number;
@@ -88,7 +101,7 @@ export interface ForecastResult {
     horizonDays: number;
   };
   /** 可检出能力随时间改善 */
-  mde: { now: number; atHorizon: number };
+  mde: { now: number; atHorizon: number; unit: 'pp' | '元' };
   verdict: { code: 'done' | 'eta' | 'unlikely'; text: string };
 }
 
@@ -119,6 +132,7 @@ export function forecast(input: ForecastInput): ForecastResult {
   const horizonDays = Math.max(1, Math.round(input.horizonDays ?? 30));
   const sims = Math.max(1, Math.round(input.sims ?? 2000));
   const seed = input.seed ?? 20261101;
+  const kind = input.kind ?? 'rate';
 
   const n1 = Math.max(0, input.n1);
   const n2 = Math.max(0, input.n2);
@@ -133,9 +147,19 @@ export function forecast(input: ForecastInput): ForecastResult {
   const significant = pNow < alpha;
   const nPerArm = Math.min(n1, n2);
   const rate = input.dailyRate > 0 ? input.dailyRate : 0;
+  const za = normalInv(1 - alpha / 2);
+  const zb = normalInv(power);
 
   // ---- A. 点估计外推 ----
-  const required = requiredNPerArm(p1, diff, alpha, power);
+  // 率指标：闭式反解 n（与 mdeTwoProportion 互为反函数）；
+  // 连续指标：SE ∝ 1/√n 是精确关系（用 delta method 也不改变），于是 n_target = n·(SE/SE_target)²，
+  //   其中「到 80% 功效需要多大 SE」= |Δ|/(z₁₋α/₂+z_power)。两条路给出的都是"效应为真时的需要量"。
+  const required =
+    kind === 'continuous'
+      ? Math.abs(diff) > 1e-12 && se > MIN_RATE && nPerArm > 0
+        ? Math.ceil(nPerArm * (se / (Math.abs(diff) / (za + zb))) ** 2)
+        : Infinity
+      : requiredNPerArm(p1, diff, alpha, power);
   const remainingN = Math.max(0, required - nPerArm);
   const remainingDays = rate > 0 && Number.isFinite(remainingN) ? Math.ceil(remainingN / rate) : Infinity;
   const unrealistic = !Number.isFinite(required) || required > 1e9 || remainingDays > 3650;
@@ -151,29 +175,46 @@ export function forecast(input: ForecastInput): ForecastResult {
     sigPerDay.fill(sims);
   } else if (rate > 0) {
     const rng = mulberry32(seed);
-    const pt1 = Math.min(1 - MIN_RATE, Math.max(MIN_RATE, p1));
-    const sd1 = Math.sqrt(rate * pt1 * (1 - pt1));
-    for (let s = 0; s < sims; s++) {
-      // 真实效应后验：以当前观测为均值、当前标准误为尺度（频率派抽样分布口径）
-      const theta = se > MIN_RATE ? diff + se * normalInv(rng()) : diff;
-      const pt2 = Math.min(1 - MIN_RATE, Math.max(MIN_RATE, p1 + theta));
-      const sd2 = Math.sqrt(rate * pt2 * (1 - pt2));
-      let n1t = n1;
-      let c1t = input.c1;
-      let n2t = n2;
-      let c2t = input.c2;
-      // 每个 sim 逐日推进，每天都独立判一次「第 d 天时 p < α」。
-      // 不做「一旦显著就永久算显著」的粘滞：那等于把早期偶然的显著锁死，
-      // 曲线的 50% 点会明显早于真实功效点（实测早到 37% 功效处），是 peeking 的变种。
-      for (let d = 1; d <= horizonDays; d++) {
-        n1t += rate;
-        n2t += rate;
-        c1t += rate * pt1 + sd1 * normalInv(rng());
-        c2t += rate * pt2 + sd2 * normalInv(rng());
-        const q1 = Math.min(1, Math.max(0, c1t / n1t));
-        const q2 = Math.min(1, Math.max(0, c2t / n2t));
-        const seD = Math.sqrt((q1 * (1 - q1)) / n1t + (q2 * (1 - q2)) / n2t);
-        if (seD > MIN_RATE && twoSidedP((q2 - q1) / seD) < alpha) sigPerDay[d] += 1;
+    if (kind === 'continuous') {
+      // 连续指标：抽「真实效应 θ*」→ 第 d 天的标准误按 1/√n 缩小 →
+      // 该天显著的概率解析算（对 θ* 的抽样分布积分），而不是再抽一次观测值。
+      // 这样每个 sim 贡献的是「显著概率」而不是 0/1，方差更小，期望值完全相同。
+      for (let s = 0; s < sims; s++) {
+        const theta = se > MIN_RATE ? diff + se * normalInv(rng()) : diff;
+        for (let d = 1; d <= horizonDays; d++) {
+          const nD = nPerArm + rate * d;
+          const seD = se * Math.sqrt(nPerArm / nD);
+          if (seD <= MIN_RATE) continue;
+          const zz = theta / seD;
+          // P(|Δ̂| > z·SE) = Φ(θ/SE − z) + Φ(−θ/SE − z)
+          sigPerDay[d] += normalCdf(zz - za) + normalCdf(-zz - za);
+        }
+      }
+    } else {
+      const pt1 = Math.min(1 - MIN_RATE, Math.max(MIN_RATE, p1));
+      const sd1 = Math.sqrt(rate * pt1 * (1 - pt1));
+      for (let s = 0; s < sims; s++) {
+        // 真实效应后验：以当前观测为均值、当前标准误为尺度（频率派抽样分布口径）
+        const theta = se > MIN_RATE ? diff + se * normalInv(rng()) : diff;
+        const pt2 = Math.min(1 - MIN_RATE, Math.max(MIN_RATE, p1 + theta));
+        const sd2 = Math.sqrt(rate * pt2 * (1 - pt2));
+        let n1t = n1;
+        let c1t = input.c1;
+        let n2t = n2;
+        let c2t = input.c2;
+        // 每个 sim 逐日推进，每天都独立判一次「第 d 天时 p < α」。
+        // 不做「一旦显著就永久算显著」的粘滞：那等于把早期偶然的显著锁死，
+        // 曲线的 50% 点会明显早于真实功效点（实测早到 37% 功效处），是 peeking 的变种。
+        for (let d = 1; d <= horizonDays; d++) {
+          n1t += rate;
+          n2t += rate;
+          c1t += rate * pt1 + sd1 * normalInv(rng());
+          c2t += rate * pt2 + sd2 * normalInv(rng());
+          const q1 = Math.min(1, Math.max(0, c1t / n1t));
+          const q2 = Math.min(1, Math.max(0, c2t / n2t));
+          const seD = Math.sqrt((q1 * (1 - q1)) / n1t + (q2 * (1 - q2)) / n2t);
+          if (seD > MIN_RATE && twoSidedP((q2 - q1) / seD) < alpha) sigPerDay[d] += 1;
+        }
       }
     }
   }
@@ -194,12 +235,20 @@ export function forecast(input: ForecastInput): ForecastResult {
   const p80Days = dayAt(0.8);
 
   // ---- MDE 随时间改善 ----
-  const mdeNow = mdeTwoProportion(p1, Math.max(1, nPerArm), alpha, power);
-  const mdeAtHorizon = mdeTwoProportion(p1, Math.max(1, nPerArm + rate * horizonDays), alpha, power);
+  const mdeNow =
+    kind === 'continuous'
+      ? (za + zb) * se
+      : mdeTwoProportion(p1, Math.max(1, nPerArm), alpha, power);
+  const mdeAtHorizon =
+    kind === 'continuous'
+      ? (za + zb) * se * Math.sqrt(nPerArm / Math.max(1, nPerArm + rate * horizonDays))
+      : mdeTwoProportion(p1, Math.max(1, nPerArm + rate * horizonDays), alpha, power);
 
   // 口心一致的判定：先说「现在到底能不能收」，再说「要等多久」
   let verdict: ForecastResult['verdict'];
   const pctFmt = (v: number) => `${Math.round(v * 100)}%`;
+  const unit = kind === 'continuous' ? '元' : 'pp';
+  const fmtMde = (v: number) => (kind === 'continuous' ? `${v.toFixed(3)}元` : `${(v * 100).toFixed(2)}pp`);
   if (significant) {
     verdict = {
       code: 'done',
@@ -228,12 +277,15 @@ export function forecast(input: ForecastInput): ForecastResult {
       code: 'eta',
       text:
         `再跑到第 ${medianDays} 天时，约 50% 的模拟能得出结论（20%–80% 分位：${p20Days ?? '—'}–${p80Days ?? '>' + horizonDays} 天）；` +
-        `同期可检出的最小差异会从 ${(mdeNow * 100).toFixed(2)}pp 收窄到 ${(mdeAtHorizon * 100).toFixed(2)}pp。`,
+        `同期可检出的最小差异会从 ${fmtMde(mdeNow)} 收窄到 ${fmtMde(mdeAtHorizon)}。`,
     };
   }
 
   return {
     observed: {
+      kind,
+      controlValue: input.baselineValue ?? p1,
+      treatmentValue: (input.baselineValue ?? p1) + diff,
       controlRate: p1,
       treatmentRate: p2,
       diff,
@@ -250,7 +302,7 @@ export function forecast(input: ForecastInput): ForecastResult {
       unrealistic,
     },
     sim: { medianDays, p20Days, p80Days, stuck, curve, sims, seed, horizonDays },
-    mde: { now: mdeNow, atHorizon: mdeAtHorizon },
+    mde: { now: mdeNow, atHorizon: mdeAtHorizon, unit },
     verdict,
   };
 }
@@ -284,3 +336,7 @@ export const FORECAST_ASSUMPTIONS = [
   '未来转化按正态近似抽样（日曝光量级 ≥ 数百时足够）',
   '只预测「首次 p < α」，不预测护栏是否会把结论翻掉',
 ] as const;
+
+/** 连续指标（ARPU）额外的一条假设，UI 里跟上面 4 条一起展示 */
+export const FORECAST_ASSUMPTION_CONTINUOUS =
+  '连续指标（ARPU）按「标准误 ∝ 1/√n」外推，等价于假设收入分布的离散程度不随样本变化';

@@ -10,6 +10,30 @@ export function fmtPP(v: number, digits = 2): string {
   return `${v > 0 ? '+' : ''}${s}pp`;
 }
 
+/** 指标单位：率指标用 pp，ARPU 这类连续指标用元 */
+export type MetricUnit = 'pp' | '元';
+
+/**
+ * 差值格式化（按单位）。
+ * 这个函数存在的理由：0.42 元 和 +42pp 是完全不同的两件事，
+ * 以前全站硬编码 fmtPP，接上 ARPU 后每一处都会写错口径。
+ */
+export function fmtDiff(v: number, unit: MetricUnit, digits = 2): string {
+  const s = unit === '元' ? v.toFixed(digits) : (v * 100).toFixed(digits);
+  return `${v > 0 ? '+' : ''}${s}${unit}`;
+}
+
+/** 指标本身的水平值（control / treatment 各自的绝对值） */
+export function fmtLevel(v: number, unit: MetricUnit, digits = 2): string {
+  return unit === '元' ? `${v.toFixed(digits)}元` : `${(v * 100).toFixed(digits)}%`;
+}
+
+/** 差值区间：单位跟着指标走 */
+export function fmtCI(ci: [number, number], unit: MetricUnit, digits = 2): string {
+  const f = (v: number) => (unit === '元' ? v.toFixed(digits) : (v * 100).toFixed(digits));
+  return `[${f(ci[0])}, ${f(ci[1])}]${unit}`;
+}
+
 export function fmtP(p: number): string {
   if (!Number.isFinite(p)) return '—';
   // erfc 在大 |z| 时会下溢到 0，直接显示 <1e-16 比 0.00e+0 更诚实

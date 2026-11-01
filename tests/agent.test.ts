@@ -22,7 +22,7 @@ const heteroCtx = ctxOf('E002');
 describe('Agent 工具（M4）', () => {
   it('全部工具都能调用，且引用的证据编号都真实存在', () => {
     // 数量硬编码在这里，是为了让「加了一个工具却忘了注册 schema / 忘加标签」必然报错
-    expect(TOOL_NAMES.length).toBe(11);
+    expect(TOOL_NAMES.length).toBe(12);
     const valid = new Set(guardrailCtx.analysis.evidence.map((e) => e.id));
     for (const name of TOOL_NAMES) {
       const call = runTool(name, guardrailCtx, name === 'segment_breakdown' ? { dimension: 'device' } : {});
@@ -88,10 +88,12 @@ describe('规则模式的回答', () => {
   });
 
   it('问到实验没测的指标时，必须明确说没有这个口径', () => {
-    const r = answerQuestion('这个实验的 ARPU 提升了多少？', guardrailCtx);
+    // ARPU 在 M10 之后已经登记进口径字典，所以这里改用真正没登记的 GMV：
+    // 「拒答字典外指标」这条铁律必须继续有测试压着，不能因为指标变多就悄悄失效。
+    const r = answerQuestion('这个实验的 GMV 提升了多少？', guardrailCtx);
     expect(r.intent).toBe('metric_scope');
     expect(r.text).toContain('没有');
-    expect(r.text).toContain('ARPU');
+    expect(r.text).toContain('GMV');
     expect(r.audit.suspicious).toEqual([]);
   });
 
@@ -114,11 +116,20 @@ describe('规则模式的回答', () => {
   });
 
   it('问到字典外的指标：明说没有，不自己定义', () => {
-    const r = answerQuestion('ARPU 的口径是什么', guardrailCtx);
+    const r = answerQuestion('留存的口径是什么', guardrailCtx);
     expect(r.intent).toBe('metric_scope');
     expect(r.text).toContain('不在口径字典里');
     expect(r.text).toContain('支付转化率');
-    expect(r.text).not.toContain('ARPU（');
+    expect(r.text).not.toContain('留存（');
+    expect(r.audit.suspicious).toEqual([]);
+  });
+
+  it('ARPU 已登记进口径字典：问它时必须能答，不许再拒答', () => {
+    const r = answerQuestion('ARPU 的口径怎么算', guardrailCtx);
+    expect(r.intent).toBe('metric');
+    expect(r.text).toContain('ARPU');
+    expect(r.text).toContain('Σrevenue / Σexposures');
+    expect(r.text).not.toContain('不在口径字典里');
     expect(r.audit.suspicious).toEqual([]);
   });
 

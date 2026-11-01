@@ -367,7 +367,7 @@ export function EvalScreen({
           </>
         ) : (
           <div className="px-4 py-6 text-center text-[11px] text-dim">
-            运行 <code className="rounded bg-white/10 px-1">npm run aa</code> 生成 A/A 自校准报告（1000 次零效应实验）
+            运行 <code className="rounded bg-white/10 px-1">npm run aa</code> 生成 A/A 自校准报告（2000 次零效应实验，按主指标口径分开报）
           </div>
         )}
       </Panel>

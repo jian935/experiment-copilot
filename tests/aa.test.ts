@@ -7,7 +7,7 @@ import type { Dataset } from '../src/lib/types.ts';
 /**
  * A/A 自校准：真值就是"零效应"，引擎报了多少次显著，是纯粹的统计性质。
  * 这是「引擎在无效应时不乱报」的硬证据，比决策准确率更难被质疑。
- * 完整报告由 `npm run aa`（1000 次）产出并写进 data/aa_report.json；
+ * 完整报告由 `npm run aa`（2000 次）产出并写进 data/aa_report.json；
  * 单测这里跑 300 次守住上界，保证 CI 里也守得住。
  */
 // 240 次 A/A 只跑一次，多个断言共用（每次约 1.2s，别在单测里重复跑）

@@ -19,6 +19,9 @@ import {
   ARCHETYPE_LABEL,
   DECISION_META,
   REASON_META,
+  fmtCI,
+  fmtDiff,
+  fmtLevel,
   fmtNum,
   fmtP,
   fmtPP,
@@ -88,33 +91,28 @@ export function ExperimentDetail({
 
   const meta = DECISION_META[analysis.decision];
   const tone = meta.tone as Tone;
+  const P = analysis.primary;
 
   const forestRows = useMemo<ForestRow[]>(() => {
-    const rowsOut: ForestRow[] = [
+    const seg = (s: Analysis['segments']['tenure'][number]) => ({
+      label: `分层 · ${s.label}`,
+      sublabel: `q=${s.q.toFixed(2)}`,
+      diff: s.diff,
+      ci: s.ci95,
+      p: s.p,
+    });
+    return [
       {
         label: '整体',
         sublabel: `n=${fmtNum(analysis.overall.n1 + analysis.overall.n2)}`,
-        diff: analysis.overall.diff,
-        ci: analysis.overall.ci95,
-        p: analysis.overall.p,
+        diff: analysis.primary.diff,
+        ci: analysis.primary.ci95,
+        p: analysis.primary.p,
         emphasized: true,
       },
-      ...analysis.segments.tenure.map((s) => ({
-        label: `分层 · ${s.label}`,
-        sublabel: `q=${s.q.toFixed(2)}`,
-        diff: s.test.diff,
-        ci: s.test.ci95,
-        p: s.test.p,
-      })),
-      ...analysis.segments.device.map((s) => ({
-        label: `分层 · ${s.label}`,
-        sublabel: `q=${s.q.toFixed(2)}`,
-        diff: s.test.diff,
-        ci: s.test.ci95,
-        p: s.test.p,
-      })),
+      ...analysis.segments.tenure.map(seg),
+      ...analysis.segments.device.map(seg),
     ];
-    return rowsOut;
   }, [analysis]);
 
   function runRecalc() {
@@ -123,8 +121,8 @@ export function ExperimentDetail({
     const ms = performance.now() - t0;
     const same =
       again.decision === analysis.decision &&
-      Math.abs(again.overall.diff - analysis.overall.diff) < 1e-12 &&
-      Math.abs(again.overall.p - analysis.overall.p) < 1e-12 &&
+      Math.abs(again.primary.diff - analysis.primary.diff) < 1e-12 &&
+      Math.abs(again.primary.p - analysis.primary.p) < 1e-12 &&
       again.evidence.length === analysis.evidence.length;
     setRecalc({ ok: same, ms, n: again.evidence.length });
   }
@@ -154,7 +152,9 @@ export function ExperimentDetail({
               {exp.startDate} → {exp.endDate}
             </span>
             <span>分流 {exp.trafficSplit}</span>
-            <span>主指标 {exp.primaryMetric}（二值）</span>
+            <span>
+              主指标 {P.label}（{P.kind === 'continuous' ? '连续 / 元' : '二值'}）
+            </span>
             <span>护栏 {exp.guardrailMetrics.join(' / ')}</span>
             <span className="font-mono">seed {exp.seed}</span>
           </div>
@@ -199,6 +199,13 @@ export function ExperimentDetail({
         </div>
       )}
 
+      {analysis.metricFallback && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-iterate/40 bg-iterate/10 px-3 py-2 text-[11.5px] leading-5 text-iterate">
+          <CircleHelp size={13} className="mt-0.5 shrink-0" />
+          <span>{analysis.metricFallback}</span>
+        </div>
+      )}
+
       {/* 结论卡 */}
       <Panel
         className="mt-4 overflow-hidden"
@@ -232,8 +239,8 @@ export function ExperimentDetail({
           <p className="min-w-[260px] flex-1 text-[13px] leading-6 text-ink/90">{analysis.reason}</p>
 
           <div className="grid grid-cols-3 gap-4 border-l border-line pl-5">
-            <Metric label="绝对差值" value={fmtPP(analysis.overall.diff)} cls={liftClass(analysis.overall.diff)} />
-            <Metric label="p 值" value={fmtP(analysis.overall.p)} />
+            <Metric label="绝对差值" value={fmtDiff(P.diff, P.unit)} cls={liftClass(P.diff)} />
+            <Metric label="p 值" value={fmtP(P.p)} />
             <Metric
               label="总样本"
               value={fmtNum(analysis.overall.n1 + analysis.overall.n2)}
@@ -251,10 +258,10 @@ export function ExperimentDetail({
             detail={`相对偏差 ${(analysis.srm.relImb * 100).toFixed(2)}%，p=${fmtP(analysis.srm.p)}`}
           />
           <Check
-            ok={analysis.overall.p < 0.05}
+            ok={P.p < 0.05}
             icon={<Sparkles size={13} />}
             title="主指标显著性"
-            detail={`95% CI [${(analysis.overall.ci95[0] * 100).toFixed(2)}, ${(analysis.overall.ci95[1] * 100).toFixed(2)}]pp`}
+            detail={`${P.label} 95% CI ${fmtCI(P.ci95, P.unit)}`}
           />
           <Check
             ok={!analysis.guardrails.some((g) => g.gating && g.worse)}
@@ -273,10 +280,14 @@ export function ExperimentDetail({
       <Panel className="mt-4">
         <PanelHead
           title="贝叶斯视角"
-          hint="在频率派结论之外，把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率与可信区间"
+          hint={
+            P.kind === 'continuous'
+              ? '连续指标没有「计数/样本量」结构，共轭先验是正态而不是 Beta；公式与 Beta 版逐字对应，两种口径的概率可以直接横向比'
+              : '在频率派结论之外，把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率与可信区间'
+          }
           right={
             <span className="rounded-md border border-line bg-panel2/60 px-2 py-0.5 font-mono text-[10px] text-dim">
-              Beta-Binomial 后验
+              {P.kind === 'continuous' ? '正态后验 N(Δ, SE²)' : 'Beta-Binomial 后验'}
             </span>
           }
         />
@@ -286,17 +297,17 @@ export function ExperimentDetail({
             value={fmtProb(analysis.bayes.probTreatBetter)}
             cls={analysis.bayes.probTreatBetter > 0.95 ? 'text-ship' : analysis.bayes.probTreatBetter < 0.5 ? 'text-noship' : 'text-ink'}
           />
-          <BayesCell label="95% 可信区间" value={`[${fmtPP(analysis.bayes.credLow)}, ${fmtPP(analysis.bayes.credHigh)}]`} />
-          <BayesCell label="后验均值差" value={fmtPP(analysis.bayes.meanDiff)} cls={liftClass(analysis.bayes.meanDiff)} />
+          <BayesCell label="95% 可信区间" value={fmtCI([analysis.bayes.credLow, analysis.bayes.credHigh], P.unit)} />
+          <BayesCell label="后验均值差" value={fmtDiff(analysis.bayes.meanDiff, P.unit)} cls={liftClass(analysis.bayes.meanDiff)} />
           <BayesCell
             label="期望损失（误上）"
-            value={`${fmtPP(analysis.bayes.expectedLoss)}pp`}
-            cls={analysis.bayes.expectedLoss > 0.002 ? 'text-iterate' : 'text-muted'}
+            value={fmtDiff(analysis.bayes.expectedLoss, P.unit)}
+            cls={analysis.bayes.expectedLoss > (P.unit === '元' ? 0.05 : 0.002) ? 'text-iterate' : 'text-muted'}
           />
         </div>
         <p className="px-4 py-2.5 text-[11px] leading-5 text-dim">
           P(B&gt;A) 是「treatment 真的比 control 好」的<b className="text-ink">后验概率</b>，与频率派的 p 值口径不同但结论互补；
-          期望损失 = 若误判上线、treatment 实际更差时，平均会损失多少个百分点。
+          期望损失 = 若误判上线、treatment 实际更差时，平均会损失多少{P.unit === '元' ? '元（每曝光）' : '个百分点'}。
           {analysis.cuped && analysis.cuped.dispersion > 1.1 && (
             <>
               {' '}本实验过离散因子 φ = {analysis.cuped.dispersion.toFixed(2)}，后验已按有效样本量 n/φ 折算——
@@ -326,16 +337,16 @@ export function ExperimentDetail({
             />
             <BayesCell
               label="SE 变化"
-              value={`${fmtPP(analysis.cuped.seRaw)} → ${fmtPP(analysis.cuped.seAdj)}`}
+              value={`${fmtDiff(analysis.cuped.seRaw, P.unit)} → ${fmtDiff(analysis.cuped.seAdj, P.unit)}`}
             />
             <BayesCell
               label="差值变化"
-              value={`${fmtPP(analysis.cuped.diffRaw)} → ${fmtPP(analysis.cuped.diffAdj)}`}
+              value={`${fmtDiff(analysis.cuped.diffRaw, P.unit)} → ${fmtDiff(analysis.cuped.diffAdj, P.unit)}`}
               cls={liftClass(analysis.cuped.diffAdj)}
             />
             <BayesCell
               label="过离散因子 φ"
-              value={analysis.cuped.dispersion.toFixed(2)}
+              value={P.kind === 'continuous' ? '不适用' : analysis.cuped.dispersion.toFixed(2)}
               cls={analysis.cuped.dispersion > 1.2 ? 'text-iterate' : 'text-muted'}
             />
           </div>
@@ -347,9 +358,18 @@ export function ExperimentDetail({
             {analysis.primary.via === 'cuped' ? (
               <>
                 {' '}当前决策<b className="text-ink">采用 CUPED 口径</b>。
-                注意：φ = {analysis.cuped.dispersion.toFixed(2)} &gt; 1 说明格子级基线存在漂移，
-                标准误是<b className="text-ink">从格子间离散程度直接估的</b>，不是 p(1−p)/n——
-                修好误报率的是这一步，CUPED 的功劳是把它收窄的区间又赚回来一点。
+                {P.kind === 'continuous' ? (
+                  <>
+                    {' '}ARPU 的协变量是<b className="text-ink">同一批人在实验前的收入</b>（preRevenue），
+                    连续指标没有二项过离散，所以 φ 固定为 1。
+                  </>
+                ) : (
+                  <>
+                    {' '}注意：φ = {analysis.cuped.dispersion.toFixed(2)} &gt; 1 说明格子级基线存在漂移，
+                    标准误是<b className="text-ink">从格子间离散程度直接估的</b>，不是 p(1−p)/n——
+                    修好误报率的是这一步，CUPED 的功劳是把它收窄的区间又赚回来一点。
+                  </>
+                )}
               </>
             ) : (
               ' 当前决策未采用 CUPED 口径（可在设置页开启）。'
@@ -359,24 +379,37 @@ export function ExperimentDetail({
       )}
 
       {/* 还要跑几天 */}
-      <ForecastPanel rows={rows} diff={analysis.primary.diff} se={analysis.primary.se} />
+      <ForecastPanel
+        rows={rows}
+        diff={P.diff}
+        se={P.se}
+        kind={P.kind}
+        baselineValue={P.controlValue}
+      />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
         <Panel>
           <PanelHead
             title="差值 95% 置信区间"
-            hint="点 = 差值，横线 = Newcombe 95% CI；线跨过 0 即为不显著"
+            hint={
+              P.kind === 'continuous'
+                ? '点 = ARPU 差值，横线 = delta method 的 t 区间；线跨过 0 即为不显著'
+                : '点 = 差值，横线 = Newcombe 95% CI；线跨过 0 即为不显著'
+            }
             right={<span className="text-[10px] text-dim">n = {fmtNum(analysis.overall.n1 + analysis.overall.n2)}</span>}
           />
           <div className="px-3 py-2">
-            <Forest rows={forestRows} />
+            <Forest rows={forestRows} unit={P.unit} />
           </div>
         </Panel>
 
         <Panel>
-          <PanelHead title="分日趋势" hint="按曝光加权的日转化率（control vs treatment）" />
+          <PanelHead
+            title="分日趋势"
+            hint={P.kind === 'continuous' ? '按曝光加权的日 ARPU（control vs treatment）' : '按曝光加权的日转化率（control vs treatment）'}
+          />
           <div className="px-2 py-2">
-            <Trend rows={rows} />
+            <Trend rows={rows} kind={P.kind} />
           </div>
         </Panel>
       </div>
@@ -387,18 +420,18 @@ export function ExperimentDetail({
           hint="所有数值由统计引擎计算；点击右上角「证据链」可查看每条结论的公式与来源"
           right={
             <span className="rounded-md border border-line bg-panel2/60 px-2 py-0.5 font-mono text-[10px] text-dim">
-              α = 0.05 · q = 0.10
+              α = 0.05 · q = 0.10 · 口径 {P.via}
             </span>
           }
         />
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] border-collapse text-left text-xs">
+          <table className="w-full min-w-[620px] border-collapse text-left text-xs">
             <thead>
               <tr className="border-b border-line text-[11px] text-dim">
-                <th className="px-4 py-2 font-medium">变体</th>
+                <th className="px-4 py-2 font-medium">指标 / 变体</th>
                 <th className="px-3 py-2 text-right font-medium">样本</th>
-                <th className="px-3 py-2 text-right font-medium">转化</th>
-                <th className="px-3 py-2 text-right font-medium">转化率</th>
+                <th className="px-3 py-2 text-right font-medium">分子</th>
+                <th className="px-3 py-2 text-right font-medium">水平</th>
                 <th className="px-3 py-2 text-right font-medium">绝对差值</th>
                 <th className="px-3 py-2 text-right font-medium">95% CI</th>
                 <th className="px-3 py-2 text-right font-medium">相对提升</th>
@@ -406,36 +439,61 @@ export function ExperimentDetail({
               </tr>
             </thead>
             <tbody className="num">
-              <tr className="border-b border-line/60">
-                <td className="px-4 py-2 text-muted">control</td>
-                <td className="px-3 py-2 text-right text-muted">{fmtNum(analysis.overall.n1)}</td>
-                <td className="px-3 py-2 text-right text-muted">{fmtNum(analysis.overall.c1)}</td>
-                <td className="px-3 py-2 text-right text-ink">{fmtPct(analysis.overall.controlRate, 3)}</td>
-                <td className="px-3 py-2 text-right text-dim">—</td>
-                <td className="px-3 py-2 text-right text-dim">—</td>
-                <td className="px-3 py-2 text-right text-dim">—</td>
-                <td className="px-4 py-2 text-right text-dim">—</td>
-              </tr>
-              <tr>
-                <td className="px-4 py-2 text-brand2">treatment</td>
-                <td className="px-3 py-2 text-right text-muted">{fmtNum(analysis.overall.n2)}</td>
-                <td className="px-3 py-2 text-right text-muted">{fmtNum(analysis.overall.c2)}</td>
-                <td className="px-3 py-2 text-right text-ink">{fmtPct(analysis.overall.treatmentRate, 3)}</td>
-                <td className={cx('px-3 py-2 text-right font-medium', liftClass(analysis.overall.diff))}>
-                  {fmtPP(analysis.overall.diff)}
-                </td>
-                <td className="px-3 py-2 text-right text-muted">
-                  [{(analysis.overall.ci95[0] * 100).toFixed(2)}, {(analysis.overall.ci95[1] * 100).toFixed(2)}]pp
-                </td>
-                <td className={cx('px-3 py-2 text-right', liftClass(analysis.overall.diff))}>
-                  {(analysis.overall.relativeLift * 100).toFixed(2)}%
-                </td>
-                <td className="px-4 py-2 text-right text-ink">{fmtP(analysis.overall.p)}</td>
-              </tr>
+              <MetricRows
+                title={`主指标 · ${P.label}`}
+                unit={P.unit}
+                rows={[
+                  { v: 'control', n: analysis.overall.n1, num: analysis.overall.c1, level: P.controlValue },
+                  { v: 'treatment', n: analysis.overall.n2, num: analysis.overall.c2, level: P.treatmentValue },
+                ]}
+                diff={P.diff}
+                ci={P.ci95}
+                rel={P.relativeLift}
+                p={P.p}
+                numLabel={P.kind === 'continuous' ? '收入(元)' : '转化'}
+                numFmt={(v) => (P.kind === 'continuous' ? v.toFixed(0) : fmtNum(v))}
+              />
+              {analysis.arpu && P.kind === 'rate' && (
+                <MetricRows
+                  title="副指标 · ARPU（不参与决策）"
+                  unit="元"
+                  rows={[
+                    { v: 'control', n: analysis.arpu.n1, num: analysis.arpu.sum1, level: analysis.arpu.controlValue },
+                    { v: 'treatment', n: analysis.arpu.n2, num: analysis.arpu.sum2, level: analysis.arpu.treatmentValue },
+                  ]}
+                  diff={analysis.arpu.diff}
+                  ci={analysis.arpu.ci95}
+                  rel={analysis.arpu.relativeLift}
+                  p={analysis.arpu.p}
+                  numLabel="收入(元)"
+                  numFmt={(v) => v.toFixed(0)}
+                />
+              )}
+              {analysis.arpu && P.kind === 'continuous' && (
+                <MetricRows
+                  title="副指标 · 支付转化率"
+                  unit="pp"
+                  rows={[
+                    { v: 'control', n: analysis.overall.n1, num: analysis.overall.c1, level: analysis.overall.controlRate },
+                    { v: 'treatment', n: analysis.overall.n2, num: analysis.overall.c2, level: analysis.overall.treatmentRate },
+                  ]}
+                  diff={analysis.overall.diff}
+                  ci={analysis.overall.ci95}
+                  rel={analysis.overall.relativeLift}
+                  p={analysis.overall.p}
+                  numLabel="转化"
+                  numFmt={(v) => fmtNum(v)}
+                />
+              )}
             </tbody>
           </table>
         </div>
       </Panel>
+
+      {/* ARPU 因子分解：ARPU 变了，是「更多人买」还是「单笔更贵」 */}
+      {analysis.arpuBreakdown && (
+        <ArpuPanel analysis={analysis} />
+      )}
 
       {/* Tabs：分层 / 护栏 / 计算过程 */}
       <Panel className="mt-4 overflow-hidden">
@@ -462,8 +520,8 @@ export function ExperimentDetail({
 
         {tab === 'segments' && (
           <div className="grid gap-px bg-line md:grid-cols-2">
-            <SegmentBlock title="按新老用户" rows={analysis.segments.tenure} />
-            <SegmentBlock title="按设备" rows={analysis.segments.device} />
+            <SegmentBlock title="按新老用户" rows={analysis.segments.tenure} unit={P.unit} />
+            <SegmentBlock title="按设备" rows={analysis.segments.device} unit={P.unit} />
           </div>
         )}
 
@@ -652,9 +710,11 @@ function Check({
 function SegmentBlock({
   title,
   rows,
+  unit,
 }: {
   title: string;
   rows: Analysis['segments']['tenure'];
+  unit: 'pp' | '元';
 }) {
   return (
     <div className="min-w-0 bg-panel">
@@ -676,10 +736,10 @@ function SegmentBlock({
           {rows.map((s) => (
             <tr key={s.key} className="border-t border-line/50">
               <td className="px-4 py-1.5 text-muted">{s.label}</td>
-              <td className="px-2 py-1.5 text-right text-muted">{fmtPct(s.test.controlRate)}</td>
-              <td className="px-2 py-1.5 text-right text-muted">{fmtPct(s.test.treatmentRate)}</td>
-              <td className={cx('px-2 py-1.5 text-right font-medium', liftClass(s.test.diff))}>{fmtPP(s.test.diff)}</td>
-              <td className="px-2 py-1.5 text-right text-dim">{fmtP(s.test.p)}</td>
+              <td className="px-2 py-1.5 text-right text-muted">{fmtLevel(s.controlValue, unit)}</td>
+              <td className="px-2 py-1.5 text-right text-muted">{fmtLevel(s.treatmentValue, unit)}</td>
+              <td className={cx('px-2 py-1.5 text-right font-medium', liftClass(s.diff))}>{fmtDiff(s.diff, unit)}</td>
+              <td className="px-2 py-1.5 text-right text-dim">{fmtP(s.p)}</td>
               <td className={cx('px-4 py-1.5 text-right', s.q <= 0.1 ? 'text-brand2' : 'text-dim')}>
                 {s.q.toFixed(3)}
               </td>
@@ -689,6 +749,151 @@ function SegmentBlock({
       </table>
       </div>
     </div>
+  );
+}
+
+/** 指标明细里的一个指标组（主指标 / 副指标共用同一套列） */
+function MetricRows({
+  title,
+  unit,
+  rows,
+  diff,
+  ci,
+  rel,
+  p,
+  numLabel,
+  numFmt,
+}: {
+  title: string;
+  unit: 'pp' | '元';
+  rows: { v: string; n: number; num: number; level: number }[];
+  diff: number;
+  ci: [number, number];
+  rel: number;
+  p: number;
+  numLabel: string;
+  numFmt: (v: number) => string;
+}) {
+  return (
+    <>
+      <tr className="border-b border-line/60 bg-panel2/40">
+        <td colSpan={8} className="px-4 py-1.5 text-[10.5px] font-medium text-muted">
+          {title} · 分子列 = {numLabel}
+        </td>
+      </tr>
+      <tr className="border-b border-line/60">
+        <td className="px-4 py-2 pl-7 text-muted">control</td>
+        <td className="px-3 py-2 text-right text-muted">{fmtNum(rows[0].n)}</td>
+        <td className="px-3 py-2 text-right text-muted">{numFmt(rows[0].num)}</td>
+        <td className="px-3 py-2 text-right text-ink">{fmtLevel(rows[0].level, unit, 3)}</td>
+        <td className="px-3 py-2 text-right text-dim">—</td>
+        <td className="px-3 py-2 text-right text-dim">—</td>
+        <td className="px-3 py-2 text-right text-dim">—</td>
+        <td className="px-4 py-2 text-right text-dim">—</td>
+      </tr>
+      <tr className="border-b border-line/60">
+        <td className="px-4 py-2 pl-7 text-brand2">treatment</td>
+        <td className="px-3 py-2 text-right text-muted">{fmtNum(rows[1].n)}</td>
+        <td className="px-3 py-2 text-right text-muted">{numFmt(rows[1].num)}</td>
+        <td className="px-3 py-2 text-right text-ink">{fmtLevel(rows[1].level, unit, 3)}</td>
+        <td className={cx('px-3 py-2 text-right font-medium', liftClass(diff))}>{fmtDiff(diff, unit)}</td>
+        <td className="px-3 py-2 text-right text-muted">{fmtCI(ci, unit)}</td>
+        <td className={cx('px-3 py-2 text-right', liftClass(diff))}>{(rel * 100).toFixed(2)}%</td>
+        <td className="px-4 py-2 text-right text-ink">{fmtP(p)}</td>
+      </tr>
+    </>
+  );
+}
+
+/**
+ * ARPU 因子分解面板。
+ *
+ * 这是 ARPU 作为主指标时最值钱的一块：ARPU 涨了不等于「用户更愿意买」，
+ * 打折拉量会让转化率↑、客单价↓，两者相抵后 ARPU 可能纹丝不动。
+ * 三条贡献是恒等式（严格相加等于总差值），不是事后解释。
+ */
+function ArpuPanel({ analysis }: { analysis: Analysis }) {
+  const b = analysis.arpuBreakdown!;
+  const total = b.total;
+  const parts = [
+    { k: '转化率', v: b.fromCvr, why: `AOV_c·ΔCVR` },
+    { k: '客单价', v: b.fromAov, why: `CVR_c·ΔAOV` },
+    { k: '交叉项', v: b.fromInteraction, why: `ΔCVR·ΔAOV` },
+  ];
+  const scale = Math.max(...parts.map((x) => Math.abs(x.v)), Math.abs(total), 1e-9);
+  return (
+    <Panel className="mt-4">
+      <PanelHead
+        title="ARPU 因子分解"
+        hint="ARPU = 转化率 × 客单价。两条路径可以反向抵消，只看 ARPU 总量会看不出到底发生了什么"
+        right={
+          <span className="rounded-md border border-line bg-panel2/60 px-2 py-0.5 font-mono text-[10px] text-dim">
+            Δ = AOV·ΔCVR + CVR·ΔAOV + ΔCVR·ΔAOV
+          </span>
+        }
+      />
+      <div className="grid gap-px bg-line sm:grid-cols-2">
+        <div className="bg-panel px-4 py-2.5">
+          <div className="text-[10.5px] text-dim">两个因子各自的变化</div>
+          <div className="num mt-1 space-y-1 text-[12px]">
+            <div className="flex justify-between gap-3">
+              <span className="text-muted">转化率</span>
+              <span className="text-ink">
+                {fmtPct(b.controlCvr, 3)} → {fmtPct(b.treatmentCvr, 3)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3">
+              <span className="text-muted">客单价</span>
+              <span className="text-ink">
+                {b.controlAov.toFixed(2)}元 → {b.treatmentAov.toFixed(2)}元
+              </span>
+            </div>
+            <div className="flex justify-between gap-3 border-t border-line/60 pt-1">
+              <span className="text-muted">ARPU 合计</span>
+              <span className={cx('font-medium', liftClass(total))}>
+                {total >= 0 ? '+' : ''}
+                {total.toFixed(3)}元
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="bg-panel px-4 py-2.5">
+          <div className="text-[10.5px] text-dim">各自贡献（元 / 曝光）</div>
+          <div className="mt-1.5 space-y-1.5">
+            {parts.map((x) => (
+              <div key={x.k}>
+                <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                  <span className="text-muted">
+                    {x.k} <span className="font-mono text-[9.5px] text-dim">{x.why}</span>
+                  </span>
+                  <span className={cx('num font-medium', liftClass(x.v))}>
+                    {x.v >= 0 ? '+' : ''}
+                    {x.v.toFixed(3)}
+                  </span>
+                </div>
+                <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-panel2">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.min(100, (Math.abs(x.v) / scale) * 100)}%`,
+                      background: x.v >= 0 ? '#15803d' : '#be123c',
+                      opacity: 0.75,
+                    }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      <p className="px-4 py-2.5 text-[11px] leading-5 text-dim">
+        三项相加<b className="text-ink">严格等于</b> ARPU 总差值（恒等式，不是近似拟合）。
+        {b.fromCvr * b.fromAov < 0
+          ? ' 注意这里两块贡献方向相反——只看 ARPU 总量会误判成「没什么变化」，' +
+            '实际是「更多人买」和「单笔更便宜」相互抵消，业务含义完全不同。'
+          : ' 两块贡献同向，说明是「更多人买」与「单笔更贵」共同发力。'}
+      </p>
+    </Panel>
   );
 }
 

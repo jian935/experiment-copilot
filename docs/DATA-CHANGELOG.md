@@ -65,7 +65,7 @@
 | 缺什么 | 影响 | 处理 |
 |---|---|---|
 | 只有 6 个实验 | 评测要 120 例，样本不够 | 用生成器按同分布扩到 120；这 6 个当 seed + 演示 |
-| 无连续指标（`metric_sum`） | 做不了 Welch t / CUPED | v1 先做二值指标；v2 再加 ARPU/GMV |
+| 无连续指标（`metric_sum`） | 做不了 Welch t / CUPED | **已在合成数据集里补上（见 §七），这 6 个 seed 文件未改** |
 | 维度只有设备 × 新老 | 分层故事少一层 | P1 再加 channel |
 | 只有 7 天 | 新颖效应/长期效应做不了 | 演示够用；评测可生成 14/28 天 |
 | 无用户级明细 | 不能做个体 bootstrap | 计数型可用参数法近似，够用 |
@@ -77,3 +77,20 @@
 - **v1 演示数据**：直接读 `experiments` + `daily_metrics`（`notes` 是说明书，不进应用）。
 - **评测集**：用 `scripts/gen_experiments.py`（待写）按 v2 的参数分布扩到 120 例，并注入已知真值。
 - **不要在公开仓库提交原始导出**：v2 是模拟数据，可以提交；真实业务数据一律放 `.local/`（已 gitignore）。
+
+---
+
+## 七、合成数据集（`data/experiments.json` / `daily_metrics.csv`）的版本变更
+
+> 上面 §一~§六 记的是用户给的 6 个 seed（xlsx，未改动）。这一节记的是 `scripts/gen_experiments.ts`
+> 生成的那 120 个评测实验——它的字段与统计口径也随版本改过，评测数字必须能对应到具体版本。
+
+| 版本 | 变更 | 为什么 | 影响 |
+|---|---|---|---|
+| M10-A1 | `daily` 加 `preExposures / preConversions`；基线加日效应、设备效应、**按臂漂移** | CUPED 需要前周期；不加按臂漂移，i.i.d. 假设就不会破，A/A 误报率也不会暴露 | 全部评测数字重测 |
+| M12-M9 | `daily` 加 `refunds / complaints / latencyP95` 的格子级波动 | 让护栏也有真实噪声，而不是常数 | 护栏族一致率 |
+| **M10-A3** | `daily` 加 `revenue / preRevenue`；`experiments` 加 `metricType: binary\|continuous`；`spec` 记 `aovMean / aovLogSd / aovArmSd` | 主指标要支持 ARPU；收入用对数正态（σ_log=0.45）生成，方差不由均值决定 | **随机流改变 → 全部数字重测**（见 `docs/EVAL.md`） |
+| **M10-A3 修正** | ARPU 实验的分配从 `i % 3` 改为「按 6 个一循环轮转」 | 实验类型是 6 个一循环铺的，`i % 3` 让连续口径**只落在 negative + srm** 两类上——ARPU 永远没有正效应、永远不过护栏，评测测的是半个决策路径 | 40 个 ARPU 实验覆盖全 6 类，其中 11 个有真实正效应；`tests/simulate.test.ts` 锁住「口径与类型正交」 |
+
+> 纪律：**改数据生成器就重测全部数字**，不允许新代码引用旧数字。
+> `npm run gen && npm run calibrate && npm run aa && npm run cuped && npm run forecast && npm run ablation` 一条龙。

@@ -16,7 +16,8 @@
     "ablation": "tsx scripts/ablation.ts",
     "aa": "tsx scripts/aa_test.ts",
     "cuped": "tsx scripts/cuped_report.ts",
-    "forecast": "tsx scripts/forecast_report.ts"
+    "forecast": "tsx scripts/forecast_report.ts",
+    "smoke": "node scripts/smoke_ui.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

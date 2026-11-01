@@ -1,6 +1,6 @@
 import type { Analysis } from '../../lib/decide.ts';
 import type { Experiment } from '../../lib/types.ts';
-import { DECISION_META, REASON_META, fmtNum, fmtP, fmtPP, fmtPct, type Tone } from './format';
+import { DECISION_META, REASON_META, fmtCI, fmtDiff, fmtLevel, fmtNum, fmtP, fmtPP, fmtPct, type Tone } from './format';
 
 const W = 880;
 const H = 600;
@@ -55,11 +55,12 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
   const color = TONE_HEX[tone];
 
   const srmOk = !a.srm.flagged;
-  const sigOk = a.overall.p < 0.05;
+  const P = a.primary;
+  const sigOk = P.p < 0.05;
   const gate = a.guardrails.find((g) => g.gating && g.worse);
   const checks: { ok: boolean; label: string; value: string }[] = [
     { ok: srmOk, label: 'SRM 分流', value: `偏差 ${(a.srm.relImb * 100).toFixed(2)}%` },
-    { ok: sigOk, label: '主指标显著性', value: `p = ${fmtP(a.overall.p)}` },
+    { ok: sigOk, label: '主指标显著性', value: `p = ${fmtP(P.p)}` },
     { ok: !gate, label: '硬护栏', value: gate ? `${gate.label} ${fmtPP(gate.diff)}` : '未恶化' },
   ];
 
@@ -67,9 +68,9 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
   const shift = (3 - reasonLines.length) * 24;
   const Hd = H - shift;
   const metrics = [
-    { k: '绝对差值', v: fmtPP(a.overall.diff), c: a.overall.diff > 0 ? '#15803d' : '#be123c' },
-    { k: '95% 置信区间', v: `[${(a.overall.ci95[0] * 100).toFixed(2)}, ${(a.overall.ci95[1] * 100).toFixed(2)}]pp`, c: '#241a12' },
-    { k: 'p 值', v: fmtP(a.overall.p), c: '#241a12' },
+    { k: `绝对差值（${P.unit}）`, v: fmtDiff(P.diff, P.unit), c: P.diff > 0 ? '#15803d' : '#be123c' },
+    { k: '95% 置信区间', v: fmtCI(P.ci95, P.unit), c: '#241a12' },
+    { k: 'p 值', v: fmtP(P.p), c: '#241a12' },
     { k: '总样本', v: fmtNum(a.overall.n1 + a.overall.n2), c: '#241a12' },
   ];
 
@@ -95,7 +96,7 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
   <rect x="40" y="78" width="${Math.max(52, textWidth(exp.id, 11) + 18)}" height="20" rx="5" fill="#fff7ed" stroke="#f2e9df"/>
   <text x="${40 + Math.max(52, textWidth(exp.id, 11) + 18) / 2}" y="92" text-anchor="middle" font-family="SFMono-Regular, Consolas, monospace" font-size="11" fill="#6f5f50">${esc(exp.id)}</text>
   <text x="40" y="136" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="26" font-weight="600" fill="#241a12">${esc(exp.name)}</text>
-  <text x="40" y="160" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12" fill="#9d8b7a">${esc(exp.primaryMetric)}（二值） · ${esc(exp.startDate)} → ${esc(exp.endDate)} · ${esc(exp.trafficSplit)}</text>
+  <text x="40" y="160" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12" fill="#9d8b7a">${esc(P.label)}（${P.kind === 'continuous' ? '连续 · 元' : '二值'}） · ${esc(exp.startDate)} → ${esc(exp.endDate)} · ${esc(exp.trafficSplit)}</text>
 
   <!-- decision -->
   <text x="40" y="222" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="42" font-weight="700" fill="${color}">${esc(dm.label)}</text>
@@ -137,7 +138,7 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
   <line x1="40" y1="${512 - shift}" x2="${W - 40}" y2="${512 - shift}" stroke="#f2e9df"/>
   <text x="40" y="${540 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#a89684">统计与决策全部由确定性引擎计算，模型不参与任何数值；合成数据 seed ${esc(meta.seed)}</text>
   <text x="${W - 40}" y="${540 - shift}" text-anchor="end" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="11" fill="#a89684">作者：jian935</text>
-  <text x="40" y="${566 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="10.5" fill="#a89684">control ${fmtPct(a.overall.controlRate, 3)} → treatment ${fmtPct(a.overall.treatmentRate, 3)} · n₁=${fmtNum(a.overall.n1)} / n₂=${fmtNum(a.overall.n2)}</text>
+  <text x="40" y="${566 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="10.5" fill="#a89684">${esc(P.label)} · control ${esc(fmtLevel(P.controlValue, P.unit, 3))} → treatment ${esc(fmtLevel(P.treatmentValue, P.unit, 3))} · n₁=${fmtNum(a.overall.n1)} / n₂=${fmtNum(a.overall.n2)}</text>
 </svg>`;
 }
 

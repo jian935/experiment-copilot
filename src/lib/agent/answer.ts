@@ -7,6 +7,10 @@ const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
 const pp = (v: number, d = 2) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}pp`;
 const pv = (p: number) => (p < 1e-16 ? '<1e-16' : p < 0.001 ? p.toExponential(1) : p.toFixed(3));
 
+type Unit = 'pp' | '元';
+const fmtDiff = (v: number, unit: Unit, d = 2) => (unit === '元' ? `${v >= 0 ? '+' : ''}${v.toFixed(d)}元` : pp(v, d));
+const fmtLevel = (v: number, unit: Unit, d = 2) => (unit === '元' ? `${v.toFixed(d)}元` : pct(v, d));
+
 const DECISION_CN: Record<string, string> = {
   ship: '建议上线',
   'no-ship': '不建议上线',
@@ -27,8 +31,10 @@ function citesOf(calls: ToolCall[]): string[] {
 /** 贝叶斯视角一句话（带 metric 引用，便于审计溯源） */
 function bayesLine(ctx: AgentCtx): { call: ToolCall; text: string } {
   const b = runTool('bayesian_view', ctx);
-  const d = b.data as { probPP: number; credLowPP: number; credHighPP: number };
-  const text = `贝叶斯视角：treatment 有 ${d.probPP}% 的概率优于 control（95% 可信区间 [${d.credLowPP}, ${d.credHighPP}]pp）`;
+  const d = b.data as { probPct: number; credText: string; unit: string; posterior: string };
+  const text =
+    `贝叶斯视角（${d.posterior === 'normal' ? '正态' : 'Beta'}后验）：treatment 有 ${d.probPct}% 的概率优于 control` +
+    `（95% 可信区间 ${d.credText}）`;
   return { call: b, text: withCites(text, b.cites) };
 }
 
@@ -69,11 +75,14 @@ const INTENTS: IntentDef[] = [
 
   {
     key: 'metric_scope',
-    test: /arpu|客单价|人均收入|gmv|交易额|成交额|留存|retention|dau|mau|日活|月活|ctr|点击率|营收|收入|付费率/i,
+    // 注意：ARPU 已经登记进口径字典，不再属于「字典外指标」。
+    // 这里只兜住真正没登记的东西（GMV / 留存 / DAU / CTR…），
+    // 否则会把「已经算过的指标」也拒答掉，那是比答错更糟的体验。
+    test: /gmv|交易额|成交额|留存|retention|dau|mau|日活|月活|ctr|点击率|付费率/i,
     run: (ctx) => {
       // 以口径字典为唯一真源：字典里没有的指标一律拒答，不在代码里另维护一份"已知指标"清单
       const q = ctx.question ?? '';
-      const asked = q.match(/arpu|客单价|人均收入|gmv|交易额|成交额|留存|retention|dau|mau|日活|月活|ctr|点击率|营收|收入|付费率/i)?.[0] ?? '这个指标';
+      const asked = q.match(/gmv|交易额|成交额|留存|retention|dau|mau|日活|月活|ctr|点击率|付费率/i)?.[0] ?? '这个指标';
       const registered = METRIC_LABELS.join('、');
       const cites = citeOf(ctx, 'metric');
       return {
@@ -84,6 +93,39 @@ const INTENTS: IntentDef[] = [
             cites,
           ) + `如果确实要评估 ${asked}，需要先在数据里补上对应字段并登记进口径字典，或者用一个以它为指标的实验。`,
       };
+    },
+  },
+
+  {
+    key: 'decompose',
+    test: /分解|客单价|aov|是转化率还是|涨在哪|靠什么|为什么.*(涨|跌|提升|下降|变化)|收入.*(涨|跌|变)/,
+    run: (ctx) => {
+      const dec = runTool('metric_decompose', ctx);
+      const d = dec.data as {
+        available: boolean;
+        reason?: string;
+        totalText?: string;
+        fromCvrText?: string;
+        fromAovText?: string;
+        fromInteractionText?: string;
+        cvrText?: string;
+        aovText?: string;
+        dominant?: string;
+        oppositeSigns?: boolean;
+      };
+      if (!d.available) {
+        return {
+          calls: [dec],
+          text: `这份数据没有收入字段（${d.reason}），所以 ARPU 和客单价都算不出来——我不能用转化率去推一个没有采集过的口径`,
+        };
+      }
+      const head =
+        `ARPU 变化 ${d.totalText} 可以拆成两块：转化率 ${d.cvrText}（贡献 ${d.fromCvrText}）、` +
+        `客单价 ${d.aovText}（贡献 ${d.fromAovText}），交叉项 ${d.fromInteractionText}`;
+      const tail = d.oppositeSigns
+        ? `两块方向相反——只看 ARPU 总量会以为「没什么变化」，实际是「更多人买」和「单笔更便宜」在互相抵消，业务上该按两条线分别判断。`
+        : `主要由${d.dominant}驱动，两块同向，不存在互相抵消。`;
+      return { calls: [dec], text: `${withCites(head, dec.cites)}${tail}` };
     },
   },
 
@@ -124,14 +166,15 @@ const INTENTS: IntentDef[] = [
       const dim = /设备|ios|安卓/i.test(ctx.question ?? '') ? 'device' : 'tenure';
       const t = runTool('segment_breakdown', ctx, { dimension: dim });
       const d = runTool('segment_breakdown', ctx, { dimension: 'device' });
-      const { rows, interaction } = t.data as {
-        rows: { label: string; diff: number; p: number; q: number }[];
+      const { rows, interaction, unit } = t.data as {
+        rows: { label: string; diff: number; diffText: string; p: number; q: number }[];
         interaction: { diffDiff: number; p: number } | null;
+        unit: Unit;
       };
       const sig = rows.filter((r) => r.q <= 0.1);
-      const head = rows.map((r) => `${r.label} ${pp(r.diff)}（q=${r.q.toFixed(3)}）`).join('、');
+      const head = rows.map((r) => `${r.label} ${r.diffText}（q=${r.q.toFixed(3)}）`).join('、');
       const interactionText = interaction
-        ? `两层效应差 ${pp(interaction.diffDiff)}，交互检验 p=${pv(interaction.p)}${interaction.p < 0.01 ? '，说明差异不是噪声' : '，差异可能来自抽样波动'}`
+        ? `两层效应差 ${fmtDiff(interaction.diffDiff, unit)}，交互检验 p=${pv(interaction.p)}${interaction.p < 0.01 ? '，说明差异不是噪声' : '，差异可能来自抽样波动'}`
         : '';
       const hetero = ctx.analysis.reasonCode === 'HETEROGENEOUS';
       const tail = hetero
@@ -188,12 +231,12 @@ const INTENTS: IntentDef[] = [
       const head = `引擎按固定优先级逐条判断，第 ${idx + 1} 条「${hit.code}」先命中（条件：${hit.condition}）`;
       const passed = passing.length ? `它前面的 ${passing.join('、')} 都没有触发，` : '';
       const body = `${passed}命中依据是 ${hit.detail}。`;
-      const metric = ctx.analysis.overall;
+      const p = ctx.analysis.primary;
       const bayes = bayesLine(ctx);
       return {
         calls: [r, o, bayes.call],
         text: `${withCites(head, r.cites)}${withCites(
-          `主指标 ${pp(metric.diff)}（p=${pv(metric.p)}，95% CI ${pp(metric.ci95[0])} ~ ${pp(metric.ci95[1])}）`,
+          `主指标 ${p.label} ${fmtDiff(p.diff, p.unit)}（p=${pv(p.p)}，95% CI ${fmtDiff(p.ci95[0], p.unit)} ~ ${fmtDiff(p.ci95[1], p.unit)}）`,
           runTool('run_test', ctx).cites,
         )}${body}${bayes.text}`,
       };
@@ -205,17 +248,27 @@ const INTENTS: IntentDef[] = [
     test: /样本|mde|功效|power|够不够|需要多少|样本量|检不出/,
     run: (ctx) => {
       const m = runTool('compute_mde', ctx);
-      const d = m.data as { baseline: number; nPerArm: number; mde: number; power: number; observedDiff: number };
+      const d = m.data as {
+        metricKind: 'rate' | 'continuous';
+        baseline?: number;
+        nPerArm: number;
+        mde: number;
+        mdeText: string;
+        power: number;
+        observedDiff: number;
+        observedDiffText: string;
+      };
       const enough = Math.abs(d.observedDiff) >= d.mde;
+      const context =
+        d.metricKind === 'continuous'
+          ? `按每组 ${d.nPerArm.toLocaleString('en-US')} 个样本、当前标准误算，80% 功效的最小可检出 ARPU 差异是 ${d.mdeText}`
+          : `按每组 ${d.nPerArm.toLocaleString('en-US')} 个样本、基线 ${pct(d.baseline ?? 0)}（α=0.05、功效 80%）算，最小可检出差异是 ${d.mdeText}`;
       return {
         calls: [m],
-        text: `${withCites(
-          `按每组 ${d.nPerArm.toLocaleString('en-US')} 个样本、基线 ${pct(d.baseline)}（α=0.05、功效 80%）算，最小可检出差异是 ${pp(d.mde)}`,
-          m.cites,
-        )}${
+        text: `${withCites(context, m.cites)}${
           enough
-            ? `本次观测到的 ${pp(d.observedDiff)} 大于这个门槛，所以「没效果」不是样本不足造成的。`
-            : `本次观测到的 ${pp(d.observedDiff)} 小于这个门槛，因此「不显著」有可能只是样本不够，不能当作「无效」的证据。`
+            ? `本次观测到的 ${d.observedDiffText} 大于这个门槛，所以「没效果」不是样本不足造成的。`
+            : `本次观测到的 ${d.observedDiffText} 小于这个门槛，因此「不显著」有可能只是样本不够，不能当作「无效」的证据。`
         }`,
       };
     },
@@ -234,8 +287,8 @@ const INTENTS: IntentDef[] = [
         p80Days: number | null;
         stuckPP: number;
         requiredNPerArm: number | null;
-        mdeNowPP: number;
-        mdeAtHorizonPP: number;
+        mdeNowText: string;
+        mdeAtHorizonText: string;
         p: number;
         via: string;
       };
@@ -268,7 +321,7 @@ const INTENTS: IntentDef[] = [
           withCites(
             `预计第 ${d.medianDays} 天能下结论，第 ${d.p80Days ?? '—'} 天有 80% 把握（20% 分位是第 ${d.p20Days ?? '—'} 天）；` +
               samples +
-              `同期可检出的最小差异会从 ${d.mdeNowPP.toFixed(2)}pp 收窄到 ${d.mdeAtHorizonPP.toFixed(2)}pp`,
+              `同期可检出的最小差异会从 ${d.mdeNowText} 收窄到 ${d.mdeAtHorizonText}`,
             fc.cites,
           ) +
           `这个预测用的是${d.via === 'cuped' ? 'CUPED 调整后' : '当前'}的差值与标准误，前提是流量和效应都不变。`,
@@ -281,10 +334,10 @@ const INTENTS: IntentDef[] = [
     test: /类似|相似|历史|其他实验|横向|对比|同类/,
     run: (ctx) => {
       const s = runTool('find_similar', ctx, { limit: 5 });
-      const rows = s.data as { id: string; name: string; decision: string; diff: number }[];
+      const rows = s.data as { id: string; name: string; decision: string; diffText: string; primaryMetric: string }[];
       const text = rows.length
         ? `同类实验有 ${rows.length} 个：${rows
-            .map((r) => `${r.id} ${r.name}（${DECISION_CN[r.decision]}，${pp(r.diff)}）`)
+            .map((r) => `${r.id} ${r.name}（${DECISION_CN[r.decision]}，${r.primaryMetric} ${r.diffText}）`)
             .join('；')}。它们在同一个引擎下走的是同一套规则，可以直接横向看。`
         : '数据集中没有主指标或类型相同的实验，暂时无法横向对比。';
       return { calls: [s], text };
@@ -296,20 +349,27 @@ const INTENTS: IntentDef[] = [
     test: /显著|有效|效果|提升|转化|p ?值|差值|置信|区间/,
     run: (ctx) => {
       const t = runTool('run_test', ctx);
-      const o = ctx.analysis.overall;
-      const srm = ctx.analysis.srm;
-      const sig = o.p < 0.05;
+      const a = ctx.analysis;
+      const p = a.primary;
+      const srm = a.srm;
+      const sig = p.p < 0.05;
       const bayes = bayesLine(ctx);
+      // 主指标是 ARPU 时，顺手把转化率口径也报一句：两者同源，读者会问「那转化率呢」
+      const cross =
+        p.kind === 'continuous'
+          ? `同期支付转化率 ${pct(a.overall.controlRate, 3)} → ${pct(a.overall.treatmentRate, 3)}（${pp(a.overall.diff)}，p=${pv(a.overall.p)}），作为交叉验证。`
+          : '';
       return {
         calls: [t, bayes.call],
         text:
           withCites(
-            `主指标 control ${pct(o.controlRate, 3)} → treatment ${pct(o.treatmentRate, 3)}，差值 ${pp(o.diff)}，95% CI ${pp(o.ci95[0])} ~ ${pp(o.ci95[1])}，p=${pv(o.p)}`,
+            `主指标 ${p.label}：${fmtLevel(p.controlValue, p.unit, 3)} → ${fmtLevel(p.treatmentValue, p.unit, 3)}，差值 ${fmtDiff(p.diff, p.unit)}，95% CI ${fmtDiff(p.ci95[0], p.unit)} ~ ${fmtDiff(p.ci95[1], p.unit)}，p=${pv(p.p)}`,
             t.cites,
           ) +
           (sig
             ? `区间不跨 0，差异在统计上成立（SRM 相对偏差 ${(srm.relImb * 100).toFixed(2)}%，分流正常）。`
             : `区间跨过 0，这点差异还不足以说明有效果——更准确的说法是「没能证明有差异」。`) +
+          cross +
           bayes.text,
       };
     },
@@ -324,12 +384,13 @@ const FALLBACK: IntentDef = {
     const t = runTool('run_test', ctx);
     const bayes = bayesLine(ctx);
     const data = o.data as { decision: string; reasonCode: string; reason: string };
+    const p = ctx.analysis.primary;
     return {
       calls: [o, t, bayes.call],
       text: `${withCites(
         `这个实验的结论是「${DECISION_CN[data.decision]}」，规则 ${data.reasonCode}`,
         o.cites,
-      )}主指标差值 ${pp(ctx.analysis.overall.diff)}，p=${pv(ctx.analysis.overall.p)}。${bayes.text}可以继续问我：为什么是这个结论、新老用户有没有差异、护栏有没有恶化、样本够不够、还要跑几天。`,
+      )}主指标 ${p.label} 差值 ${fmtDiff(p.diff, p.unit)}，p=${pv(p.p)}。${bayes.text}可以继续问我：为什么是这个结论、新老用户有没有差异、护栏有没有恶化、样本够不够、还要跑几天。`,
     };
   },
 };
@@ -346,6 +407,7 @@ export const INTENT_LABEL: Record<string, string> = {
   list: '实验清单',
   metric: '指标口径',
   metric_scope: '指标是否在口径内',
+  decompose: 'ARPU 因子分解',
   overview: '整体结论',
 };
 
@@ -366,6 +428,7 @@ const TOPIC_SEED: Record<string, string> = {
   list: '有哪些 列出',
   metric: '口径 指标定义 怎么算',
   metric_scope: '口径 指标定义',
+  decompose: '分解 客单价 转化率贡献',
   overview: '结论',
 };
 
@@ -475,16 +538,17 @@ export function systemPrompt(ctx: AgentCtx): string {
     '1. 不许自己算数。所有数值只能来自工具返回结果，禁止心算、禁止四舍五入改写、禁止推测未提供的数字。',
     '2. 每个数字后面必须带证据编号引用，格式如 [E2]；引用只能用工具返回的 cites 里的编号。',
     '3. 证据不足就说不知道：如果工具没有返回所需信息，直接说「这一点数据里没有」，不要编。',
-    '4. 口径变化必须显式说明：如果用户问的口径与当前实验不同（例如问 ARPU 但实验只测转化率），先说明口径差异。',
+    '4. 口径必须说清：每个差值都要带单位（百分点写 pp，ARPU 写元）。' +
+      '主指标是 ARPU 时，支付转化率只是副指标，不能拿副指标当结论依据；反过来也一样。',
     '5. 不许编造历史实验或行业基准；需要对比时只能调用 find_similar / list_experiments。',
-    '6. 数字照抄工具给的格式化字段（如 diffPP、pText、summary），小数最多两位；禁止把 16 位浮点原样写进回答。',
-    `7. 只能引用口径字典里登记过的指标（${METRIC_LABELS.join('、')}）。用户问到字典外的指标（如 ARPU、留存），` +
+    '6. 数字照抄工具给的格式化字段（如 diffText / pText / summary / mdeNowText），小数最多两位；禁止把 16 位浮点原样写进回答。',
+    `7. 只能引用口径字典里登记过的指标（${METRIC_LABELS.join('、')}）。用户问到字典外的指标（如 GMV、留存），` +
       '必须先说「这个指标不在口径字典里，引擎没算过」，禁止自行定义口径或换算。',
     '8. 多轮对话：历史消息只用来理解指代（「那新老用户呢」「还有呢」「它呢」），**不能当作证据来源**。' +
       '历史里出现过的数字必须重新调用工具确认后才能再写一次，禁止直接复述历史里的数字——' +
       '那些数字可能来自不同的实验或不同的口径。',
     '',
-    `当前实验：${ctx.exp.id} ${ctx.exp.name}；主指标 ${ctx.exp.primaryMetric}；数据为固定种子合成数据。`,
+    `当前实验：${ctx.exp.id} ${ctx.exp.name}；主指标 ${a.primary.label}（${a.primary.kind === 'continuous' ? '连续指标，单位元' : '率指标，单位 pp'}）；数据为固定种子合成数据。`,
     `引擎结论：${a.decision}（规则 ${a.reasonCode}）。`,
     '回答用中文，简洁、结论先行，最多 5 句话。',
   ].join('\n');

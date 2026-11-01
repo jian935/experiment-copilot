@@ -44,6 +44,19 @@ export interface CupedReport {
   detectedCuped: number;
   detectedRobust: number;
   detectedIid: number;
+  /**
+   * 按主指标口径拆开的方差缩减与 A/A 误报。
+   * 为什么必须拆：ARPU 的方差来自收入分布的离散度，转化率的方差来自 p(1−p)，
+   * 两者可缩减的空间本来就不同；混在一起报一个中位数会掩盖其中一侧。
+   */
+  varReductionByKind: Record<
+    'rate' | 'continuous',
+    { n: number; median: number; mean: number; rhoMedian: number; dispersionMedian: number }
+  >;
+  aaFprByKind: Record<
+    'rate' | 'continuous',
+    { trials: number; cuped: number; robust: number; iid: number; seCuped: number }
+  >;
 }
 
 function byExp(ds: Dataset) {
@@ -56,13 +69,17 @@ function byExp(ds: Dataset) {
   return m;
 }
 
-export function runCupedReport(seedBase = 20261031, aaTrials = 400): CupedReport {
+export function runCupedReport(seedBase = 20261031, aaTrials = 2000): CupedReport {
   const ds = generateDataset(seedBase, 7);
   const rows = byExp(ds);
 
   const reductions: number[] = [];
   const rhos: number[] = [];
   const disps: number[] = [];
+  const byKindVals: Record<'rate' | 'continuous', { red: number[]; rho: number[]; disp: number[] }> = {
+    rate: { red: [], rho: [], disp: [] },
+    continuous: { red: [], rho: [], disp: [] },
+  };
   let cells = 0;
 
   const positives = ds.experiments.filter((e) => e.archetype === 'positive');
@@ -78,6 +95,10 @@ export function runCupedReport(seedBase = 20261031, aaTrials = 400): CupedReport
       rhos.push(a.cuped.rho);
       disps.push(a.cuped.dispersion);
       cells = a.cuped.nCells;
+      const k = a.primary.kind;
+      byKindVals[k].red.push(a.cuped.varReduction);
+      byKindVals[k].rho.push(a.cuped.rho);
+      byKindVals[k].disp.push(a.cuped.dispersion);
     }
     if (e.archetype === 'positive') {
       if (analyze(e, r, { useCuped: true, seMode: 'robust' }).primary.p < 0.05) dCuped++;
@@ -101,6 +122,17 @@ export function runCupedReport(seedBase = 20261031, aaTrials = 400): CupedReport
     return s[Math.min(s.length - 1, Math.floor(s.length * 0.9))];
   };
 
+  const kindStats = (kind: 'rate' | 'continuous') => {
+    const v = byKindVals[kind];
+    return {
+      n: v.red.length,
+      median: med(v.red),
+      mean: v.red.reduce((s, x) => s + x, 0) / (v.red.length || 1),
+      rhoMedian: med(v.rho),
+      dispersionMedian: med(v.disp),
+    };
+  };
+
   return {
     generatedAt: new Date().toISOString(),
     seedBase,
@@ -119,6 +151,25 @@ export function runCupedReport(seedBase = 20261031, aaTrials = 400): CupedReport
     aaFprRobust: aaRobust.falsePositiveRate,
     aaFprIid: aaIid.falsePositiveRate,
     aaTrials,
+    varReductionByKind: { rate: kindStats('rate'), continuous: kindStats('continuous') },
+    // 三次 runAa 各自内部已按口径分好桶（同一批种子、同一批实验），直接取来对齐，
+    // 不再单独跑一遍——否则多跑的那遍会用不同随机流，和上面的总数对不上。
+    aaFprByKind: {
+      rate: {
+        trials: aaCuped.byMetricKind.rate.trials,
+        cuped: aaCuped.byMetricKind.rate.rate,
+        robust: aaRobust.byMetricKind.rate.rate,
+        iid: aaIid.byMetricKind.rate.rate,
+        seCuped: aaCuped.byMetricKind.rate.se,
+      },
+      continuous: {
+        trials: aaCuped.byMetricKind.continuous.trials,
+        cuped: aaCuped.byMetricKind.continuous.rate,
+        robust: aaRobust.byMetricKind.continuous.rate,
+        iid: aaIid.byMetricKind.continuous.rate,
+        seCuped: aaCuped.byMetricKind.continuous.se,
+      },
+    },
   };
 }
 
@@ -127,7 +178,7 @@ const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
 const isDirect = (process.argv[1] ?? '').replace(/\\/g, '/').endsWith('scripts/cuped_report.ts');
 if (isDirect) {
   const t0 = Date.now();
-  const r = runCupedReport(20261031, Number(process.argv[2] ?? 400));
+  const r = runCupedReport(20261031, Number(process.argv[2] ?? 2000));
   const json = `${JSON.stringify(r, null, 2)}\n`;
   writeFileSync('data/cuped_report.json', json);
   try {
@@ -143,11 +194,30 @@ if (isDirect) {
   console.log(`  方差缩减（中位）             ${pct(r.varReductionMedian)}`);
   console.log(`  方差缩减（均值 / p90）       ${pct(r.varReductionMean)} / ${pct(r.varReductionP90)}`);
   console.log('');
+  console.log('  按主指标口径拆开（协变量与方差来源都不同，不能混算中位）：');
+  for (const k of ['rate', 'continuous'] as const) {
+    const b = r.varReductionByKind[k];
+    const label = k === 'rate' ? '率口径（转化率）' : '连续口径（ARPU）  ';
+    console.log(
+      `    ${label} n=${String(b.n).padStart(3)}  方差缩减 ${pct(b.median).padStart(7)}（均值 ${pct(b.mean)}）` +
+        `  ρ ${b.rhoMedian.toFixed(3)}  φ ${b.dispersionMedian.toFixed(2)}`,
+    );
+  }
+  console.log('');
   console.log(`  真实正效应实验               ${r.positiveTotal} 个`);
   console.log(`  检出：CUPED / 稳健 / i.i.d.  ${r.detectedCuped} / ${r.detectedRobust} / ${r.detectedIid}`);
   console.log('');
   console.log(`  A/A 误报率（i.i.d. 标准误）  ${pct(r.aaFprIid)}   （${r.aaTrials} 次，名义 5%）← 基线，明显失控`);
   console.log(`  A/A 误报率（稳健标准误）     ${pct(r.aaFprRobust)}   ← 换标准误就修好了`);
   console.log(`  A/A 误报率（稳健 + CUPED）   ${pct(r.aaFprCuped)}   ← CUPED 在此基础上不破坏校准`);
+  console.log('  按口径拆开（同上，两边方差机制不同）：');
+  for (const k of ['rate', 'continuous'] as const) {
+    const b = r.aaFprByKind[k];
+    const label = k === 'rate' ? '率口径（转化率）' : '连续口径（ARPU）  ';
+    console.log(
+      `    ${label} n=${String(b.trials).padStart(4)}  i.i.d. ${pct(b.iid).padStart(7)} / 稳健 ${pct(b.robust).padStart(7)}` +
+        ` / 稳健+CUPED ${pct(b.cuped).padStart(7)}±${(1.96 * b.seCuped * 100).toFixed(2)}pp`,
+    );
+  }
   console.log(`\n  耗时 ${Date.now() - t0}ms → data/cuped_report.json\n`);
 }
