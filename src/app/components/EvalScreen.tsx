@@ -7,6 +7,25 @@ import { ARCHETYPE_LABEL, DECISION_META, fmtP, fmtPP, liftClass } from '../lib/f
 import { DecisionBadge, Panel, PanelHead, cx } from './ui';
 import { C } from '../lib/palette';
 
+interface AaReport {
+  generatedAt: string;
+  seedBase: number;
+  trials: number;
+  days: number;
+  config: { alpha: number; srmAlpha: number; guardrailAlpha: number; guardrailMode: string };
+  decisions: Record<string, number>;
+  falsePositiveRate: number;
+  shipRate: number;
+  noShipRate: number;
+  iterateRate: number;
+  srmFlagRate: number;
+  guardrailFlagRate: number;
+  bayesMeanProb: number;
+  bayesProbAbove095: number;
+  pValueHistogram: number[];
+  meanSamplePerArm: number;
+}
+
 interface Ablation {
   generatedAt: string;
   questions: number;
@@ -29,6 +48,7 @@ export function EvalScreen({
 }) {
   const r = useMemo(() => evaluate(dataset, analyses), [dataset, analyses]);
   const [ablation, setAblation] = useState<Ablation | null>(null);
+  const [aa, setAa] = useState<AaReport | null>(null);
   const noTruth = dataset.groundTruth === false;
 
   useEffect(() => {
@@ -36,6 +56,10 @@ export function EvalScreen({
     fetch(`${import.meta.env.BASE_URL}data/ablation.json`)
       .then((res) => (res.ok ? res.json() : null))
       .then((d) => alive && setAblation(d as Ablation))
+      .catch(() => {});
+    fetch(`${import.meta.env.BASE_URL}data/aa_report.json`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => alive && setAa(d as AaReport))
       .catch(() => {});
     return () => {
       alive = false;
@@ -287,6 +311,69 @@ export function EvalScreen({
 
       <Panel className="mt-4">
         <PanelHead
+          title="A/A 自校准：零效应时会不会乱报"
+          hint="用同一套生成器造 N 个「两臂同分布」的实验跑引擎；真值就是 0，报了多少次显著一目了然"
+          right={
+            aa ? (
+              <span className="font-mono text-[10px] text-dim">
+                {aa.trials} 次 · seed {aa.seedBase}
+              </span>
+            ) : (
+              <span className="text-[10px] text-dim">未运行</span>
+            )
+          }
+        />
+        {aa ? (
+          <>
+            <div className="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
+              <AaCell
+                label="总误报率"
+                value={`${(aa.falsePositiveRate * 100).toFixed(2)}%`}
+                nominal={`名义 α = ${(aa.config.alpha * 100).toFixed(0)}%`}
+                good={aa.falsePositiveRate <= aa.config.alpha * 1.4}
+              />
+              <AaCell
+                label="正向误报 ship"
+                value={`${(aa.shipRate * 100).toFixed(2)}%`}
+                nominal={`名义 α/2 = 2.5%`}
+                good={aa.shipRate <= 0.04}
+              />
+              <AaCell
+                label="SRM 误报"
+                value={`${(aa.srmFlagRate * 100).toFixed(2)}%`}
+                nominal={`名义 ${(aa.config.srmAlpha * 100).toFixed(1)}%`}
+                good={aa.srmFlagRate <= 0.01}
+              />
+              <AaCell
+                label="硬护栏误报"
+                value={`${(aa.guardrailFlagRate * 100).toFixed(2)}%`}
+                nominal={`名义 ${(aa.config.guardrailAlpha * 100).toFixed(1)}%（单侧）`}
+                good={aa.guardrailFlagRate <= 0.02}
+              />
+            </div>
+            <div className="border-t border-line px-4 py-3.5">
+              <div className="mb-2 text-[10.5px] text-muted">
+                主指标 p 值分布（A/A 下应近似均匀；左偏说明检验保守，右偏说明漏判）
+              </div>
+              <AaPHist hist={aa.pValueHistogram} trials={aa.trials} />
+              <p className="mt-3 text-[10.5px] leading-4 text-dim">
+                贝叶斯视角：A/A 下 P(B&gt;A) 均值 {aa.bayesMeanProb.toFixed(4)}（理论 0.5），
+                其中 &gt;0.95 的占 {(aa.bayesProbAbove095 * 100).toFixed(1)}%（理论约 5%）——
+                说明后验概率没有被系统性推向某一侧。
+                每臂平均 {Math.round(aa.meanSamplePerArm).toLocaleString('en-US')} 样本、{aa.days} 天。
+                复现：<code className="rounded bg-white/10 px-1">npm run aa</code>。
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="px-4 py-6 text-center text-[11px] text-dim">
+            运行 <code className="rounded bg-white/10 px-1">npm run aa</code> 生成 A/A 自校准报告（1000 次零效应实验）
+          </div>
+        )}
+      </Panel>
+
+      <Panel className="mt-4">
+        <PanelHead
           title="Agent ablation：规则模板 vs 大模型"
           hint="同一批问题跑两种回答方式，比引用覆盖率、可疑数字率、口径识别"
           right={
@@ -421,6 +508,67 @@ function CalibrationChart({ calibration }: { calibration: { probMid: number; n: 
       <text x={12} y={H / 2} textAnchor="middle" fontSize={10} fill={C.muted} transform={`rotate(-90 12 ${H / 2})`}>
         实际 treatment 更优（%）
       </text>
+    </svg>
+  );
+}
+
+/** A/A 单元格：实测值 + 名义值 + 是否受控 */
+function AaCell({
+  label,
+  value,
+  nominal,
+  good,
+}: {
+  label: string;
+  value: string;
+  nominal: string;
+  good: boolean;
+}) {
+  return (
+    <div className="bg-panel px-4 py-3">
+      <div className="text-[10.5px] text-dim">{label}</div>
+      <div className={cx('num mt-1 text-[17px]', good ? 'text-ship' : 'text-noship')}>{value}</div>
+      <div className="mt-0.5 text-[10px] text-dim">{nominal}</div>
+    </div>
+  );
+}
+
+/** p 值直方图：A/A 下应近似均匀，横轴 0→1 分 10 桶，虚线 = 均匀期望 */
+function AaPHist({ hist, trials }: { hist: number[]; trials: number }) {
+  const W = 640;
+  const H = 120;
+  const mL = 34;
+  const mB = 22;
+  const pw = W - mL - 12;
+  const bw = pw / hist.length;
+  const expect = trials / hist.length;
+  const maxV = Math.max(expect * 1.6, ...hist);
+  const y = (v: number) => H - mB - (v / maxV) * (H - mB - 10);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="A/A 下主指标 p 值分布">
+      <line x1={mL} y1={y(expect)} x2={W - 12} y2={y(expect)} stroke={C.muted} strokeWidth={1} strokeDasharray="4 3" />
+      <text x={mL - 4} y={y(expect) + 3} textAnchor="end" fontSize={9} fill={C.dim}>
+        {Math.round(expect)}
+      </text>
+      {hist.map((v, i) => (
+        <g key={i}>
+          <rect
+            x={mL + i * bw + 1}
+            y={y(v)}
+            width={bw - 2}
+            height={Math.max(1, H - mB - y(v))}
+            fill={C.brand}
+            fillOpacity={0.65}
+          >
+            <title>{`p ∈ [${(i / 10).toFixed(1)}, ${((i + 1) / 10).toFixed(1)}) · ${v} 次（期望 ${Math.round(expect)}）`}</title>
+          </rect>
+          <text x={mL + i * bw + bw / 2} y={H - 8} textAnchor="middle" fontSize={8.5} fill={C.dim}>
+            {(i / 10).toFixed(1)}
+          </text>
+        </g>
+      ))}
+      <line x1={mL} y1={H - mB} x2={W - 12} y2={H - mB} stroke={C.line2} strokeWidth={1} />
     </svg>
   );
 }

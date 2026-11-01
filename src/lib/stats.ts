@@ -296,3 +296,443 @@ export function bayesBetaBinomial(c1: number, n1: number, c2: number, n2: number
 
   return { probTreatBetter, meanDiff, credLow, credHigh, expectedLoss };
 }
+
+// ===================== 非劣检验（护栏的正式统计口径） =====================
+// 护栏不该是「差值 > 0.4pp 且 p < 0.01」这种拍脑袋阈值，而是一次非劣检验：
+// 先声明「最多能容忍多少恶化」（margin），再用单侧检验判断恶化有没有超过它。
+// 这样被追问「凭什么是 0.4pp」时，答的是业务容忍度，而不是统计默认值。
+
+export interface NonInferiorityResult {
+  controlRate: number;
+  treatmentRate: number;
+  /** treatment − control（该指标方向；对护栏指标来说正 = 恶化） */
+  diff: number;
+  /** 允许的最大恶化（绝对比例单位） */
+  margin: number;
+  /** 非合并标准误（非劣检验的标准做法） */
+  se: number;
+  /** 95% 置信区间（非合并方差） */
+  ci95: [number, number];
+  /** H0「恶化 ≥ margin」的单侧 p；p 小 → 有把握恶化仍在容忍度内（非劣成立） */
+  pNonInferior: number;
+  /** H0「恶化 ≤ margin」的单侧 p；p 小 → 确认恶化已超过容忍度 */
+  pWorse: number;
+  /** 非劣成立（有把握恶化仍在 margin 之内） */
+  nonInferior: boolean;
+  /** 确认恶化超过 margin（最严的一种判定） */
+  worse: boolean;
+  /** 「有任何恶化」的单侧 p（H0: Δ ≤ 0），与 margin 无关 */
+  pHarm: number;
+  /** 恶化在统计上显著（pHarm < α） */
+  harmSignificant: boolean;
+  /** 恶化达到实际显著性（Δ > margin） */
+  practical: boolean;
+  /**
+   * 想让「确认恶化超 margin」成立，观测差值至少要这么大 = margin + z₁₋α·SE。
+   * 这是护栏设计里最容易被忽略的一条：margin 一旦小于 SE 的量级，
+   * "确认恶化超过 margin" 就会因为要求过高而漏掉真实伤害。
+   */
+  detectableDelta: number;
+  /** 当前样本量下 margin 至少要多大才有意义（= z₁₋α·SE） */
+  minDetectableMargin: number;
+  verdict: 'non_inferior' | 'worse' | 'inconclusive';
+}
+
+/** 护栏的三种正式判定口径（都基于同一次非劣/单侧检验，只是触发条件不同） */
+export type GuardrailMode =
+  /** 只要"统计上确有恶化"且"恶化达到 margin"就拦（统计显著性 ∧ 实际显著性） */
+  | 'harm_and_practical'
+  /** 必须"确认恶化已超过 margin"才拦（最严，要求 margin + z·SE 都被跨过） */
+  | 'confirm_beyond_margin'
+  /** 非劣不成立就拦（最保守：拿不出"损害在容忍度内"的证据就不许上线） */
+  | 'non_inferiority';
+
+/** 按模式给出"该不该拦" */
+export function guardrailBlocks(ni: NonInferiorityResult, mode: GuardrailMode): boolean {
+  if (mode === 'non_inferiority') return !ni.nonInferior;
+  if (mode === 'confirm_beyond_margin') return ni.worse;
+  return ni.harmSignificant && ni.practical;
+}
+
+/**
+ * 两比例非劣检验（护栏口径：Δ 越大越差，margin = 可容忍的最大恶化）。
+ *
+ * 两个方向都用同一个单侧临界值 z_{1−α}，共用非合并方差：
+ * - 确认恶化：H0「Δ ≤ margin」，z = (Δ − margin)/SE，p = 1 − Φ(z)；p < α → 恶化已超容忍度。
+ * - 非劣成立：H0「Δ ≥ margin」，z = (margin − Δ)/SE，p = 1 − Φ(z)；p < α → 有把握恶化在容忍度内。
+ *
+ * 两者互斥（α<0.5 时不可能同时成立），且允许都不成立——那就是 inconclusive：
+ * 既没证据说它坏透了，也没把握说它没问题。护栏只在第一种情况下拦截。
+ */
+export function nonInferiority(
+  c1: number, n1: number,
+  c2: number, n2: number,
+  margin: number,
+  alpha = 0.05,
+): NonInferiorityResult {
+  const p1 = n1 > 0 ? c1 / n1 : 0;
+  const p2 = n2 > 0 ? c2 / n2 : 0;
+  const diff = p2 - p1;
+  const se = Math.sqrt((p1 * (1 - p1)) / n1 + (p2 * (1 - p2)) / n2);
+
+  const zWo = se > 0 ? (diff - margin) / se : diff > margin ? Infinity : -Infinity;
+  const zNi = se > 0 ? (margin - diff) / se : diff < margin ? Infinity : -Infinity;
+  const pWorse = Number.isFinite(zWo) ? 1 - normalCdf(zWo) : zWo > 0 ? 0 : 1;
+  const pNonInferior = Number.isFinite(zNi) ? 1 - normalCdf(zNi) : zNi > 0 ? 0 : 1;
+
+  const halfWidth = 1.96 * se;
+  const worse = pWorse < alpha;
+  const nonInferior = pNonInferior < alpha;
+  const zCrit = normalInv(1 - alpha);
+  const pHarm = se > 0 ? 1 - normalCdf(diff / se) : diff > 0 ? 0 : 1;
+  return {
+    controlRate: p1,
+    treatmentRate: p2,
+    diff,
+    margin,
+    se,
+    ci95: [diff - halfWidth, diff + halfWidth],
+    pNonInferior,
+    pWorse,
+    nonInferior,
+    worse,
+    pHarm,
+    harmSignificant: pHarm < alpha,
+    practical: diff > margin,
+    detectableDelta: margin + zCrit * se,
+    minDetectableMargin: zCrit * se,
+    // 「确认恶化」优先于「非劣成立」：区间整体落在 margin 之上时，结论是恶化而非非劣
+    verdict: worse ? 'worse' : nonInferior ? 'non_inferior' : 'inconclusive',
+  };
+}
+
+// ===================== 蒙特卡洛（固定种子，完全可复现） =====================
+// 用途：CI 覆盖率模拟、Bootstrap、A/A 自校准。所有随机数只走 mulberry32，
+// 同种子逐位可复现，所以模拟结果可以写进文档当硬证据，而不是"跑一次看看"。
+
+/** mulberry32：32 位确定性 PRNG，周期 2³²，分布均匀性足够做蒙特卡洛 */
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** 二项抽样（逐次 Bernoulli，开销 O(n)；模拟里按需取 n） */
+export function binomialSample(n: number, p: number, rng: () => number): number {
+  if (!(n > 0) || p <= 0) return 0;
+  if (p >= 1) return n;
+  let c = 0;
+  for (let i = 0; i < n; i++) if (rng() < p) c++;
+  return c;
+}
+
+export interface CoverageResult {
+  trials: number;
+  /** 区间包含真值的比例（标称 0.95） */
+  coverage: number;
+  /** 覆盖率的标准误 √(p(1−p)/trials) */
+  se: number;
+  /** 平均区间宽度 */
+  meanWidth: number;
+  /** 命中次数，便于复算 */
+  hits: number;
+}
+
+/** 两比例差值 CI（Newcombe）的覆盖率模拟 */
+export function simulateDiffCiCoverage(opts: {
+  p1: number;
+  p2: number;
+  nPerArm: number;
+  trials?: number;
+  seed?: number;
+  z?: number;
+}): CoverageResult {
+  const { p1, p2, nPerArm, trials = 2000, seed = 20261101, z = 1.96 } = opts;
+  const rng = mulberry32(seed);
+  const trueDiff = p2 - p1;
+  let hits = 0;
+  let width = 0;
+  for (let i = 0; i < trials; i++) {
+    const c1 = binomialSample(nPerArm, p1, rng);
+    const c2 = binomialSample(nPerArm, p2, rng);
+    const [l, u] = newcombeDiffCI(c1, nPerArm, c2, nPerArm, z);
+    if (l <= trueDiff && trueDiff <= u) hits++;
+    width += u - l;
+  }
+  const coverage = hits / trials;
+  return {
+    trials,
+    coverage,
+    se: Math.sqrt((coverage * (1 - coverage)) / trials),
+    meanWidth: width / trials,
+    hits,
+  };
+}
+
+/** 单比例 Wilson CI 的覆盖率模拟 */
+export function simulateWilsonCoverage(opts: {
+  p: number;
+  n: number;
+  trials?: number;
+  seed?: number;
+  z?: number;
+}): CoverageResult {
+  const { p, n, trials = 2000, seed = 20261102, z = 1.96 } = opts;
+  const rng = mulberry32(seed);
+  let hits = 0;
+  let width = 0;
+  for (let i = 0; i < trials; i++) {
+    const c = binomialSample(n, p, rng);
+    const [l, u] = wilson(n > 0 ? c / n : 0, n, z);
+    if (l <= p && p <= u) hits++;
+    width += u - l;
+  }
+  const coverage = hits / trials;
+  return {
+    trials,
+    coverage,
+    se: Math.sqrt((coverage * (1 - coverage)) / trials),
+    meanWidth: width / trials,
+    hits,
+  };
+}
+
+// ===================== Bootstrap（固定种子，可复现） =====================
+// 比值指标（人均订单数）、连续指标（ARPU）、分位数（P95）的稳健区间只能靠重抽样。
+// 用百分位法（percentile），不做 BCa：BCa 需要 jackknife 加速常数，多一层实现风险，
+// 而百分位法在本项目的用途（给区间、看宽度）上已经够用，且更好解释。
+
+export type BootstrapMethod = 'bca' | 'percentile';
+
+export interface BootstrapResult {
+  /** 原始样本上的统计量 */
+  estimate: number;
+  ciLow: number;
+  ciHigh: number;
+  /** Bootstrap 分布的标准差，即标准误估计 */
+  se: number;
+  reps: number;
+  alpha: number;
+  /** 实际使用的方法：退化时会自动从 bca 回落成 percentile */
+  method: BootstrapMethod;
+  /** BCa 偏差校正 z₀；percentile 法下为 0 */
+  z0: number;
+  /** BCa 加速常数 a（jackknife 偏度）；percentile 法下为 0 */
+  accel: number;
+  /**
+   * Bootstrap 百分位检验的 p 值：比例{θ* ≤ threshold}（仅传了 threshold 时给出）。
+   * 不回传重抽样数组本身——那会把上万个数字带进 Analysis，既撑爆内存，
+   * 也会污染 Agent 的数字白名单（白名单变宽 = 幻觉审查变松）。
+   */
+  pBelow?: number;
+}
+
+export interface BootstrapOptions {
+  reps?: number;
+  alpha?: number;
+  seed?: number;
+  method?: BootstrapMethod;
+  /** 给 Bootstrap 百分位检验用的阈值：算出 P*(θ ≤ threshold) */
+  threshold?: number;
+}
+
+const EMPTY_BOOT: BootstrapResult = {
+  estimate: NaN, ciLow: NaN, ciHigh: NaN, se: NaN, reps: 0, alpha: 0.05, method: 'percentile', z0: 0, accel: 0,
+};
+
+/**
+ * Bootstrap 单侧 p 值（百分位检验）：把重抽样分布当作抽样分布的估计，
+ * H0「真值 ≤ threshold」的 p = 比例{θ* ≤ threshold}。p 小 → 有证据认为真值已超过 threshold。
+ * 没有闭式检验的统计量（分位数、比值、P95）就用它。
+ */
+export function bootstrapP(values: number[], threshold: number): number {
+  const n = values.length;
+  if (n === 0) return 1;
+  let below = 0;
+  for (const v of values) if (v <= threshold) below++;
+  return below / n;
+}
+
+/**
+ * BCa（bias-corrected and accelerated）区间——旗舰统计库的默认做法。
+ * 百分位法只做"照搬分位数"，BCa 额外修正两件事：
+ *   1. z₀ 偏差校正：Bootstrap 分布相对点估计偏了多少；
+ *   2. a 加速常数：统计量对样本扰动的敏感度随位置变化（由 jackknife 偏度给出）。
+ * 所以偏态统计量（比值、分位数、P95）在区间形状上明显更准，不只是"能用"。
+ * 退化条件（reps 太少 / jackknife 全等 / z₀ 或 a 非有限）自动回落百分位法，并在 method 里标明。
+ */
+function bcaSummary(
+  estimate: number,
+  vals: number[],
+  reps: number,
+  alpha: number,
+  jack: number[] | null,
+  wantBca: boolean,
+  threshold?: number,
+): BootstrapResult {
+  const sorted = vals.slice().sort((x, y) => x - y);
+  let mean = 0;
+  for (const v of sorted) mean += v;
+  mean /= reps;
+  let ss = 0;
+  for (const v of sorted) ss += (v - mean) ** 2;
+  const se = reps > 1 ? Math.sqrt(ss / (reps - 1)) : NaN;
+
+  const pct = (q: number) => quantileSorted(sorted, q);
+  const base: BootstrapResult = {
+    estimate,
+    ciLow: pct(alpha / 2),
+    ciHigh: pct(1 - alpha / 2),
+    se,
+    reps,
+    alpha,
+    method: 'percentile',
+    z0: 0,
+    accel: 0,
+    ...(threshold === undefined ? {} : { pBelow: bootstrapP(sorted, threshold) }),
+  };
+  if (!wantBca || reps < 200 || !jack || jack.length < 3 || !Number.isFinite(se) || se === 0) return base;
+
+  // ① 偏差校正 z₀ = Φ⁻¹( 比例{θ* < θ̂} )
+  let below = 0;
+  for (const v of sorted) if (v < estimate) below++;
+  const prop = below / reps;
+  if (prop <= 0 || prop >= 1) return base; // 点估计落在分布外，BCa 不适用
+  const z0 = normalInv(prop);
+
+  // ② 加速常数 a = Σ(θ̄₍.₎ − θ₍ᵢ₎)³ / 6[Σ(θ̄₍.₎ − θ₍ᵢ₎)²]^{3/2}
+  let jm = 0;
+  for (const v of jack) jm += v;
+  jm /= jack.length;
+  let num = 0;
+  let den = 0;
+  for (const v of jack) {
+    num += (jm - v) ** 3;
+    den += (jm - v) ** 2;
+  }
+  const accel = den > 0 ? num / (6 * Math.pow(den, 1.5)) : 0;
+  if (!Number.isFinite(z0) || !Number.isFinite(accel)) return base;
+
+  // ③ 校正后的两端分位点
+  const zLo = normalInv(alpha / 2);
+  const zHi = normalInv(1 - alpha / 2);
+  const a1 = normalCdf(z0 + (z0 + zLo) / (1 - accel * (z0 + zLo)));
+  const a2 = normalCdf(z0 + (z0 + zHi) / (1 - accel * (z0 + zHi)));
+  if (!(a1 > 0 && a1 < 1) || !(a2 > 0 && a2 < 1)) return base;
+
+  return {
+    estimate,
+    ciLow: pct(a1),
+    ciHigh: pct(a2),
+    se,
+    reps,
+    alpha,
+    method: 'bca',
+    z0,
+    accel,
+    ...(threshold === undefined ? {} : { pBelow: bootstrapP(sorted, threshold) }),
+  };
+}
+
+/** 已排序数组的分位数（线性插值，R type-7） */
+function quantileSorted(sorted: number[], q: number): number {
+  const n = sorted.length;
+  if (n === 0) return NaN;
+  if (n === 1) return sorted[0];
+  const h = (n - 1) * Math.min(1, Math.max(0, q));
+  const lo = Math.floor(h);
+  const hi = Math.ceil(h);
+  return sorted[lo] + (h - lo) * (sorted[hi] - sorted[lo]);
+}
+
+/** jackknife：逐次去掉一个观测后的统计量，用于 BCa 的加速常数 */
+function jackknife(sample: number[], stat: (xs: number[]) => number): number[] | null {
+  const n = sample.length;
+  if (n < 3 || n > 300) return null; // O(n²)；n 大了不划算，直接回落百分位法
+  const sub = new Array<number>(n - 1);
+  const out = new Array<number>(n);
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < i; k++) sub[k] = sample[k];
+    for (let k = i + 1; k < n; k++) sub[k - 1] = sample[k];
+    out[i] = stat(sub);
+  }
+  return out;
+}
+
+/** 单样本 Bootstrap 区间（默认 BCa）。stat 不得持有传入数组（每轮复用同一块缓冲） */
+export function bootstrapCI(
+  sample: number[],
+  stat: (xs: number[]) => number,
+  opts: BootstrapOptions = {},
+): BootstrapResult {
+  const { reps, alpha, rng } = bootOpts(opts);
+  const n = sample.length;
+  const estimate = n > 0 ? stat(sample) : NaN;
+  if (n === 0 || reps <= 0) return { ...EMPTY_BOOT, estimate, reps, alpha };
+
+  const buf = new Array<number>(n);
+  const vals = new Array<number>(reps);
+  for (let r = 0; r < reps; r++) {
+    for (let i = 0; i < n; i++) buf[i] = sample[(rng() * n) | 0];
+    vals[r] = stat(buf);
+  }
+  const wantBca = (opts.method ?? 'bca') === 'bca';
+  return bcaSummary(
+    estimate, vals, reps, alpha,
+    wantBca ? jackknife(sample, stat) : null,
+    wantBca,
+    opts.threshold,
+  );
+}
+
+/** 两样本 Bootstrap：两组独立重抽样，stat 取两组的函数（如差值、比值） */
+export function bootstrapTwoSample(
+  a: number[],
+  b: number[],
+  stat: (a: number[], b: number[]) => number,
+  opts: BootstrapOptions = {},
+): BootstrapResult {
+  const { reps, alpha, rng } = bootOpts(opts);
+  const na = a.length;
+  const nb = b.length;
+  const estimate = na > 0 && nb > 0 ? stat(a, b) : NaN;
+  if (na === 0 || nb === 0 || reps <= 0) return { ...EMPTY_BOOT, estimate, reps, alpha };
+
+  const ba = new Array<number>(na);
+  const bb = new Array<number>(nb);
+  const vals = new Array<number>(reps);
+  for (let r = 0; r < reps; r++) {
+    for (let i = 0; i < na; i++) ba[i] = a[(rng() * na) | 0];
+    for (let i = 0; i < nb; i++) bb[i] = b[(rng() * nb) | 0];
+    vals[r] = stat(ba, bb);
+  }
+  const wantBca = (opts.method ?? 'bca') === 'bca';
+  // 两样本的 jackknife：对哪一组做都不对称，这里对两组都做、取合并后的加速常数
+  let jack: number[] | null = null;
+  if (wantBca) {
+    const ja = jackknife(a, (x) => stat(x, b));
+    const jb = jackknife(b, (x) => stat(a, x));
+    if (ja && jb) jack = ja.concat(jb);
+  }
+  return bcaSummary(estimate, vals, reps, alpha, jack, wantBca, opts.threshold);
+}
+
+function bootOpts(opts: BootstrapOptions): { reps: number; alpha: number; rng: () => number } {
+  return {
+    reps: opts.reps ?? 10000,
+    alpha: opts.alpha ?? 0.05,
+    rng: mulberry32(opts.seed ?? 20261101),
+  };
+}
+
+/** 分位数（线性插值，R type-7），给 P95 之类分位数指标的 Bootstrap 用 */
+export function quantile(xs: number[], q: number): number {
+  const n = xs.length;
+  if (n === 0) return NaN;
+  if (n === 1) return xs[0];
+  return quantileSorted(xs.slice().sort((x, y) => x - y), q);
+}

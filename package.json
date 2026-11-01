@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "gen": "tsx scripts/gen_experiments.ts",
     "calibrate": "tsx scripts/check_calibration.ts",
-    "ablation": "tsx scripts/ablation.ts"
+    "ablation": "tsx scripts/ablation.ts",
+    "aa": "tsx scripts/aa_test.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

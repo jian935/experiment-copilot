@@ -131,13 +131,20 @@ describe('证据链的推导（M3）', () => {
     expect(ev.calc![3].value).toContain((hi * 100).toFixed(2));
   });
 
-  it('延迟护栏没有 PropTest，推导走加权均值 + 5% 阈值', () => {
+  it('延迟护栏没有 PropTest，推导走 Bootstrap 区间 + 相对容忍度', () => {
     const exp = mkExp();
     const a = analyze(exp, mkRows(exp.id, POSITIVE));
     const lat = a.guardrails.find((g) => g.key === 'latency_p95')!;
+    // P95 是分位数指标，没有闭式检验 → 不给 propTest，改给 Bootstrap 结果
     expect(lat.propTest).toBeUndefined();
+    expect(lat.bootstrap).toBeDefined();
+    expect(lat.bootstrap!.reps).toBeGreaterThan(0);
+    expect(lat.bootstrap!.ciLow).toBeLessThanOrEqual(lat.bootstrap!.ciHigh);
     const ev = a.evidence.find((e) => e.label.includes('P95'))!;
-    expect(ev.calc!.some((s) => s.formula.includes('1.05'))).toBe(true);
+    // 推导必须写明容忍度从哪来，且是真的重抽样（不再是硬编码 sd 的假 t 检验）
+    expect(ev.calc!.some((s) => s.title.includes('Bootstrap'))).toBe(true);
+    expect(ev.calc!.some((s) => s.formula.includes('margin'))).toBe(true);
+    expect(ev.calc!.some((s) => s.formula.includes('重抽样'))).toBe(true);
   });
 });
 

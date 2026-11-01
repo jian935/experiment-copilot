@@ -1,8 +1,10 @@
 import type { DailyRow, Decision, Experiment, Variant } from './types.ts';
 import {
-  bayesBetaBinomial, bhAdjust, srmChi2, twoProportionZ, twoSidedP, welchTest, wilson,
-  type BayesResult, type PropTest, type SrmResult,
+  bayesBetaBinomial, bhAdjust, bootstrapP, bootstrapTwoSample, guardrailBlocks, nonInferiority,
+  srmChi2, twoProportionZ, twoSidedP, wilson,
+  type BayesResult, type BootstrapResult, type NonInferiorityResult, type PropTest, type SrmResult,
 } from './stats.ts';
+import { DEFAULT_CONFIG, mergeConfig, type DecisionConfig } from './config.ts';
 
 export interface VariantAgg {
   n: number;
@@ -30,6 +32,15 @@ export interface GuardrailResult {
   gating: boolean;
   /** 率类护栏的原始检验结果（延迟指标没有），用于逐步代入时复用真实 z / CI */
   propTest?: PropTest;
+  /**
+   * 非劣检验结果（率类护栏）。护栏不再是「差值 > X 且 p < Y」的拍脑袋阈值，
+   * 而是先声明容忍度 margin，再做单侧检验：只有确认恶化超过 margin 才算 worse。
+   */
+  nonInferiority?: NonInferiorityResult;
+  /** 延迟类护栏的 Bootstrap 区间（P95 是分位数指标，只有重抽样才站得住） */
+  bootstrap?: BootstrapResult;
+  /** 本次判定使用的容忍度（展示用，让"凭什么是 0.4pp"有出处） */
+  marginLabel?: string;
 }
 
 /** 证据条目里的「逐步代入」：把公式和实际数字摊开，任何一步都能手算核对 */
@@ -82,6 +93,19 @@ function ep(p: number): string {
   if (p >= 0.001) return p.toFixed(3);
   return p.toExponential(2);
 }
+
+/** 护栏判定口径的人话解释（展示用，与 stats::guardrailBlocks 一一对应） */
+const GUARDRAIL_MODE_LABEL: Record<string, string> = {
+  harm_and_practical: '统计显著 ∧ 达到 margin',
+  confirm_beyond_margin: '确认恶化超过 margin',
+  non_inferiority: '非劣不成立即拦',
+};
+
+const GUARDRAIL_MODE_FORMULA: Record<string, string> = {
+  harm_and_practical: '拦截 = 单侧 p(Δ>0) < α 且 Δ > margin',
+  confirm_beyond_margin: '拦截 = 单侧 p(Δ>margin) < α（即 Δ − z₁₋α·SE > margin）',
+  non_inferiority: '拦截 = 不能证明 Δ < margin（即 Δ + z₁₋α·SE ≥ margin）',
+};
 
 const p4 = (v: number) => `${(v * 100).toFixed(4)}%`;
 const pp2 = (v: number) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}pp`;
@@ -143,7 +167,12 @@ function propSteps(t: PropTest, unit: 'rate' | 'count' = 'rate'): CalcStep[] {
   ];
 }
 
-function scanDimension(rows: DailyRow[], dim: 'tenure' | 'device', labels: Record<string, string>): SegmentTest[] {
+function scanDimension(
+  rows: DailyRow[],
+  dim: 'tenure' | 'device',
+  labels: Record<string, string>,
+  fdr: number,
+): SegmentTest[] {
   const keys = Array.from(new Set(rows.map((r) => String(r[dim]))));
   const raw = keys.map((key) => {
     const sub = rows.filter((r) => String(r[dim]) === key);
@@ -151,11 +180,12 @@ function scanDimension(rows: DailyRow[], dim: 'tenure' | 'device', labels: Recor
     const t = aggregate(sub, 'treatment');
     return { key, label: labels[key] || key, test: twoProportionZ(c.c, c.n, t.c, t.n) };
   });
-  const { qvals } = bhAdjust(raw.map((x) => x.test.p), 0.1);
+  const { qvals } = bhAdjust(raw.map((x) => x.test.p), fdr);
   return raw.map((x, i) => ({ ...x, q: qvals[i] }));
 }
 
-export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
+export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Partial<DecisionConfig>): Analysis {
+  const cfg = mergeConfig(cfgOverride);
   const rows = allRows.filter((r) => r.expId === exp.id);
   const c = aggregate(rows, 'control');
   const t = aggregate(rows, 'treatment');
@@ -164,11 +194,11 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
   // 贝叶斯视角：把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率
   const bayes = bayesBetaBinomial(c.c, c.n, t.c, t.n);
 
-  const srm = srmChi2([c.n, t.n], [0.5, 0.5]);
+  const srm = srmChi2([c.n, t.n], [0.5, 0.5], cfg.srmAlpha, cfg.srmMaxRelImb);
 
   const segments = {
-    tenure: scanDimension(rows, 'tenure', { new: '新用户', old: '老用户' }),
-    device: scanDimension(rows, 'device', { iOS: 'iOS', Android: 'Android' }),
+    tenure: scanDimension(rows, 'tenure', { new: '新用户', old: '老用户' }, cfg.segmentFdr),
+    device: scanDimension(rows, 'device', { iOS: 'iOS', Android: 'Android' }, cfg.segmentFdr),
   };
 
   // 分层交互：新老效应差是否显著
@@ -181,11 +211,15 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     interaction = { diffDiff, se, z: se > 0 ? diffDiff / se : 0, p: se > 0 ? twoSidedP(diffDiff / se) : 1 };
   }
 
+  // ---- 护栏：全部改成「声明容忍度 → 检验有没有超过它」 ----
+  // 退款 / 投诉是率指标 → 非劣检验（margin 是业务声明的最大可容忍恶化）；
+  // P95 延迟是分位数指标 → Bootstrap（拿日级 P95 做两样本重抽样），
+  // 而不是像 v1 那样硬编码 sd=50 假装做了个 t 检验。
   const guardrails: GuardrailResult[] = [];
   if (c.n > 0 && t.n > 0) {
-    // v1 只让「退款率」做硬护栏：alpha 0.01 + 实际阈值 0.4pp
-    // （1.2% 基线 → 相对 +33% 才算实质恶化；避免低基数指标随机波动导致误报）
     const refundTest = twoProportionZ(c.refunds, c.n, t.refunds, t.n);
+    const rg = cfg.guardrails.refundRate;
+    const refundNi = nonInferiority(c.refunds, c.n, t.refunds, t.n, rg.margin, rg.alpha);
     guardrails.push({
       key: 'refund_rate',
       label: '退款率',
@@ -193,11 +227,16 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
       treatmentRate: t.refunds / t.n,
       diff: refundTest.diff,
       p: refundTest.p,
-      worse: refundTest.diff > 0.004 && refundTest.p < 0.01,
-      gating: true,
+      worse: guardrailBlocks(refundNi, rg.mode),
+      gating: rg.gating,
       propTest: refundTest,
+      nonInferiority: refundNi,
+      marginLabel: `≤ ${(rg.margin * 100).toFixed(2)}pp`,
     });
+
     const complaintTest = twoProportionZ(c.complaints, c.n, t.complaints, t.n);
+    const cg = cfg.guardrails.complaintRate;
+    const complaintNi = nonInferiority(c.complaints, c.n, t.complaints, t.n, cg.margin, cg.alpha);
     guardrails.push({
       key: 'complaint_rate',
       label: '投诉率',
@@ -205,21 +244,38 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
       treatmentRate: t.complaints / t.n,
       diff: complaintTest.diff,
       p: complaintTest.p,
-      worse: complaintTest.diff > 0 && complaintTest.p < 0.01,
-      gating: false, // 低基数、噪声大，v1 仅展示
+      worse: guardrailBlocks(complaintNi, cg.mode),
+      gating: cg.gating, // 低基数、噪声大，仅提示不拦截
       propTest: complaintTest,
+      nonInferiority: complaintNi,
+      marginLabel: cg.margin > 0 ? `≤ ${(cg.margin * 100).toFixed(3)}pp` : '任何确认的上升都要提示',
     });
+
     const lc = c.latencyWeighted / c.n;
     const lt = t.latencyWeighted / t.n;
+    const lg = cfg.guardrails.latencyP95;
+    const latC = rows.filter((r) => r.variant === 'control').map((r) => r.latencyP95);
+    const latT = rows.filter((r) => r.variant === 'treatment').map((r) => r.latencyP95);
+    const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+    const latMargin = lc * lg.relativeMargin;
+    const latBoot = bootstrapTwoSample(latC, latT, (x, y) => mean(y) - mean(x), {
+      reps: cfg.bootstrapReps,
+      seed: cfg.simSeed,
+      // Bootstrap 百分位检验：p = 比例{θ* ≤ margin}，p 小 → 有证据认为恶化已超过容忍度
+      threshold: latMargin,
+    });
+    const latP = latBoot.pBelow ?? 1;
     guardrails.push({
       key: 'latency_p95',
       label: 'P95 延迟',
       controlRate: lc,
       treatmentRate: lt,
       diff: lt - lc,
-      p: welchTest(lc, 50, c.n, lt, 50, t.n).p,
-      worse: lt > lc * 1.05,
-      gating: false, // v1 只展示，不参与决策
+      p: latP,
+      worse: latP < lg.alpha,
+      gating: lg.gating, // 延迟噪声大且与损失非线性，v1 仅展示
+      bootstrap: latBoot,
+      marginLabel: `≤ +${(lg.relativeMargin * 100).toFixed(0)}%（${latMargin.toFixed(1)}ms）`,
     });
   }
 
@@ -252,13 +308,13 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
       },
       {
         title: '③ p 值与判定',
-        formula: 'p = erfc(√(χ²/2))；异常 = p < 0.001 且 相对偏差 > 2%',
+        formula: `p = erfc(√(χ²/2))；异常 = p < ${cfg.srmAlpha} 且 相对偏差 > ${(cfg.srmMaxRelImb * 100).toFixed(0)}%`,
         value: `p = ${ep(srm.p)}，相对偏差 ${(srm.relImb * 100).toFixed(3)}% → ${srm.flagged ? '判定异常' : '判定通过'}`,
       },
       {
         title: '④ 为什么还要看相对偏差',
         formula: '大样本下 p 值会过度敏感',
-        value: `本实验样本 ${c.n + t.n}；仅 1.6% 的不均衡也可能算出 p<0.001，所以加了 2% 的实际阈值`,
+        value: `本实验样本 ${c.n + t.n}；仅 ${(cfg.srmMaxRelImb * 100).toFixed(0)}% 以下的不均衡也可能算出 p<${cfg.srmAlpha}，所以加了实际阈值`,
       },
     ],
   );
@@ -277,14 +333,14 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     add(
       'segment',
       `分层：${s.label}`,
-      `差值 ${(s.test.diff * 100).toFixed(2)}pp，p=${ep(s.test.p)}，BH q=${s.q.toFixed(3)}${s.q <= 0.1 ? ' → 显著' : ''}`,
+      `差值 ${(s.test.diff * 100).toFixed(2)}pp，p=${ep(s.test.p)}，BH q=${s.q.toFixed(3)}${s.q <= cfg.segmentFdr ? ' → 显著' : ''}`,
       s.test.p,
       [
         ...propSteps(s.test),
         {
           title: '⑤ 多重比较校正（BH）',
           formula: 'q = min_{k≥rank} ( p_(k) · m / k )，m = 该维度分层数',
-          value: `m = ${segments.tenure.length}，原始 p = ${ep(s.test.p)} → q = ${s.q.toFixed(4)}（阈值 q ≤ 0.10）`,
+          value: `m = ${segments.tenure.length}，原始 p = ${ep(s.test.p)} → q = ${s.q.toFixed(4)}（阈值 q ≤ ${cfg.segmentFdr}）`,
         },
       ],
     );
@@ -310,8 +366,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
         },
         {
           title: '③ 交互检验',
-          formula: 'z = ΔΔ / SE，p = erfc(|z|/√2)，p<0.01 视为效应异质',
-          value: `z = ${interaction.z.toFixed(3)}，p = ${ep(interaction.p)} → ${interaction.p < 0.01 ? '判定异质' : '判定同质'}`,
+          formula: `z = ΔΔ / SE，p = erfc(|z|/√2)，p<${cfg.interactionAlpha} 视为效应异质`,
+          value: `z = ${interaction.z.toFixed(3)}，p = ${ep(interaction.p)} → ${interaction.p < cfg.interactionAlpha ? '判定异质' : '判定同质'}`,
         },
       ],
     );
@@ -324,36 +380,65 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     const fmtDiff = (v: number) => (isMs ? `${v >= 0 ? '+' : ''}${v.toFixed(0)}ms` : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}pp`);
     let calc: CalcStep[];
     if (isMs) {
+      // P95 是分位数指标，没有闭式检验：用两样本 Bootstrap（BCa）给区间，
+      // 再用 Bootstrap 百分位检验给 p 值——而不是 v1 那样硬编码 sd 假装做了个 t 检验。
+      const b = g.bootstrap!;
       calc = [
         {
           title: '① 两变体加权均值',
           formula: '均值 = Σ(P95ᵢ × 曝光ᵢ) / Σ曝光ᵢ',
-          value: `control ${g.controlRate.toFixed(1)}ms，treatment ${g.treatmentRate.toFixed(1)}ms`,
+          value: `control ${g.controlRate.toFixed(1)}ms，treatment ${g.treatmentRate.toFixed(1)}ms，差值 ${fmtDiff(g.diff)}`,
         },
         {
-          title: '② 判定规则',
-          formula: '恶化 = treatment > control × 1.05',
-          value: `${g.treatmentRate.toFixed(1)} vs ${(g.controlRate * 1.05).toFixed(1)}ms → ${g.worse ? '超阈值' : '未超阈值'}`,
+          title: '② 声明容忍度',
+          formula: `margin = control × ${(cfg.guardrails.latencyP95.relativeMargin * 100).toFixed(0)}%`,
+          value: `${g.controlRate.toFixed(1)}ms × ${(cfg.guardrails.latencyP95.relativeMargin * 100).toFixed(0)}% = ${(g.controlRate * cfg.guardrails.latencyP95.relativeMargin).toFixed(1)}ms（${g.marginLabel}）`,
         },
         {
-          title: '③ 说明',
-          formula: 'v1 中 P95 仅展示，不参与决策',
-          value: '延迟噪声大且与业务损失非线性，先积累再纳入硬门槛',
+          title: `③ Bootstrap 区间（${b.reps.toLocaleString('en-US')} 次重抽样，${b.method === 'bca' ? 'BCa' : '百分位'}法）`,
+          formula: '对两组的日级 P95 分别有放回重抽样，取均值差',
+          value:
+            `差值 ${fmtDiff(b.estimate)}，95% CI [${b.ciLow.toFixed(1)}, ${b.ciHigh.toFixed(1)}]ms` +
+            (b.method === 'bca' ? `（z₀=${b.z0.toFixed(3)}，a=${b.accel.toFixed(3)}）` : ''),
+        },
+        {
+          title: '④ 判定',
+          formula: `Bootstrap 百分位检验：p = 比例{θ* ≤ margin}，p < ${cfg.guardrails.latencyP95.alpha} → 确认恶化`,
+          value: `p = ${ep(g.p)} → ${g.worse ? '确认恶化超容忍度' : '不能确认恶化超容忍度'}${g.gating ? '' : '（仅展示，不参与决策）'}`,
         },
       ];
     } else {
       const label = g.key === 'refund_rate' ? '退款率' : '投诉率';
+      const ni = g.nonInferiority!;
+      const ga = g.key === 'refund_rate' ? cfg.guardrails.refundRate : cfg.guardrails.complaintRate;
       calc = [
         ...propSteps(g.propTest!, 'count'),
         {
-          title: '⑤ 判定规则',
-          formula:
-            g.key === 'refund_rate'
-              ? '恶化 = 绝对差值 > 0.4pp 且 p < 0.01（硬门槛）'
-              : '恶化 = 差值为正 且 p < 0.01（仅提示，不拦截）',
-          value: `${label} 差值 ${fmtDiff(g.diff)}，p = ${ep(g.p)} → ${g.worse ? '判定恶化' : '未恶化'}${
-            g.gating ? '' : '（不参与决策）'
-          }`,
+          title: '⑤ 声明容忍度（margin）',
+          formula: 'margin = 业务可接受的最大恶化（绝对比例）',
+          value: `${label} margin = ${ga.margin > 0 ? `${(ga.margin * 100).toFixed(2)}pp` : '0（任何确认的上升都要提示）'}；基线 ${(ni.controlRate * 100).toFixed(2)}%`,
+        },
+        {
+          title: '⑥ 非劣检验（单侧，非合并方差）',
+          formula: 'SE = √(p₁(1−p₁)/n₁ + p₂(1−p₂)/n₂)；z = (Δ − margin)/SE；p = 1 − Φ(z)',
+          value: `SE = ${ni.se.toFixed(6)}，z = ${((ni.diff - ni.margin) / ni.se).toFixed(4)}，p = ${ep(ni.pWorse)}`,
+        },
+        {
+          title: '⑦ 判定',
+          formula: `口径「${GUARDRAIL_MODE_LABEL[ga.mode]}」：${GUARDRAIL_MODE_FORMULA[ga.mode]}`,
+          value:
+            `恶化 p = ${ep(ni.pHarm)}（显著 ${ni.harmSignificant ? '是' : '否'}）· 实际 ${pp2(ni.diff)} vs margin ${pp2(ni.margin)}（达阈值 ${ni.practical ? '是' : '否'}）→ ` +
+            `${g.worse ? '判定恶化' : '未判定恶化'}${g.gating ? '' : '（不参与决策）'}`,
+        },
+        {
+          title: '⑧ 这个 margin 在当前样本量下可不可判',
+          formula: '「确认恶化超 margin」需要观测差值 > margin + z₁₋α·SE',
+          value:
+            `SE = ${(ni.se * 100).toFixed(3)}pp → 至少需要 ${(ni.detectableDelta * 100).toFixed(3)}pp 才能确认；` +
+            `本实验观测 ${pp2(ni.diff)}。` +
+            (ni.margin < ni.minDetectableMargin
+              ? '⚠ margin 小于噪声地板（z₁₋α·SE），最严口径会漏判真实伤害，所以默认用"统计显著 ∧ 达阈值"。'
+              : 'margin 高于噪声地板，最严口径可用。'),
         },
       ];
     }
@@ -368,12 +453,12 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
 
   // ---- 规则判定（按固定优先级） ----
   const worseGuardrail = guardrails.find((g) => g.gating && g.worse);
-  const posSegments = segments.tenure.filter((s) => s.q <= 0.1 && s.test.diff > 0);
+  const posSegments = segments.tenure.filter((s) => s.q <= cfg.segmentFdr && s.test.diff > 0);
   const bestPos = posSegments.sort((a, b) => b.test.diff - a.test.diff)[0];
   const flatSegment = bestPos
-    ? segments.tenure.find((s) => s.key !== bestPos.key && s.test.p > 0.1 && Math.abs(s.test.diff) < 0.5 * Math.abs(bestPos.test.diff))
+    ? segments.tenure.find((s) => s.key !== bestPos.key && s.test.p > cfg.alpha && Math.abs(s.test.diff) < 0.5 * Math.abs(bestPos.test.diff))
     : undefined;
-  const heterogeneous = !!interaction && interaction.p < 0.01 && !!bestPos && !!flatSegment;
+  const heterogeneous = !!interaction && interaction.p < cfg.interactionAlpha && !!bestPos && !!flatSegment;
 
   let decision: Decision;
   let reasonCode: Analysis['reasonCode'];
@@ -387,7 +472,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     decision = 'no-ship';
     reasonCode = 'GUARDRAIL';
     reason = `主指标${overall.diff > 0 ? '正向' : '负向'}，但${worseGuardrail.label}显著恶化（${(worseGuardrail.diff * 100).toFixed(2)}pp，p=${ep(worseGuardrail.p)}），护栏不通过。`;
-  } else if (overall.p < 0.05 && overall.diff < 0) {
+  } else if (overall.p < cfg.alpha && overall.diff < 0) {
     decision = 'no-ship';
     reasonCode = 'NEGATIVE';
     reason = `主指标显著负向（${(overall.diff * 100).toFixed(2)}pp，p=${ep(overall.p)}），不建议上线。`;
@@ -395,7 +480,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     decision = 'iterate';
     reasonCode = 'HETEROGENEOUS';
     reason = `效应集中在「${bestPos.label}」（${(bestPos.test.diff * 100).toFixed(2)}pp），「${flatSegment.label}」基本无效（${(flatSegment.test.diff * 100).toFixed(2)}pp，p=${ep(flatSegment.test.p)}），交互 p=${ep(interaction?.p ?? 1)}；建议定向上线，仅对「${bestPos.label}」放开。`;
-  } else if (overall.p >= 0.05) {
+  } else if (overall.p >= cfg.alpha) {
     decision = 'inconclusive';
     reasonCode = 'NOT_SIG';
     reason = `主指标差值 ${(overall.diff * 100).toFixed(2)}pp，95% CI 跨 0，p=${overall.p.toFixed(2)}，证据不足。`;
@@ -409,30 +494,30 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     {
       code: 'SRM',
       label: '分流异常',
-      condition: 'p < 0.001 且 相对偏差 > 2%',
+      condition: `p < ${cfg.srmAlpha} 且 相对偏差 > ${(cfg.srmMaxRelImb * 100).toFixed(0)}%`,
       hit: srm.flagged,
       detail: `相对偏差 ${(srm.relImb * 100).toFixed(2)}%，p = ${ep(srm.p)}`,
     },
     {
       code: 'GUARDRAIL',
       label: '护栏拦截',
-      condition: '硬护栏（退款率）恶化 > 0.4pp 且 p < 0.01',
+      condition: `硬护栏（退款率）确认恶化超过 margin ${(cfg.guardrails.refundRate.margin * 100).toFixed(2)}pp（单侧 p < ${cfg.guardrails.refundRate.alpha}）`,
       hit: !!worseGuardrail,
       detail: worseGuardrail
-        ? `${worseGuardrail.label} ${pp2(worseGuardrail.diff)}，p = ${ep(worseGuardrail.p)}`
-        : '硬护栏未恶化',
+        ? `${worseGuardrail.label} ${pp2(worseGuardrail.diff)}，p = ${ep(worseGuardrail.p)}${worseGuardrail.nonInferiority ? `（非劣 p=${ep(worseGuardrail.nonInferiority.pWorse)}，margin ${pp2(worseGuardrail.nonInferiority.margin)}）` : ''}`
+        : '硬护栏未确认恶化',
     },
     {
       code: 'NEGATIVE',
       label: '主指标负向',
-      condition: 'p < 0.05 且 差值为负',
-      hit: overall.p < 0.05 && overall.diff < 0,
+      condition: `p < ${cfg.alpha} 且 差值为负`,
+      hit: overall.p < cfg.alpha && overall.diff < 0,
       detail: `差值 ${pp2(overall.diff)}，p = ${ep(overall.p)}`,
     },
     {
       code: 'HETEROGENEOUS',
       label: '效应异质',
-      condition: '交互 p < 0.01，且一个分层显著为正、另一个无效',
+      condition: `交互 p < ${cfg.interactionAlpha}，且一个分层显著为正、另一个无效`,
       hit: heterogeneous,
       detail: heterogeneous
         ? `交互 p = ${ep(interaction?.p ?? 1)}；${bestPos.label} ${pp2(bestPos.test.diff)}、${flatSegment!.label} ${pp2(flatSegment!.test.diff)}`
@@ -443,15 +528,15 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     {
       code: 'NOT_SIG',
       label: '证据不足',
-      condition: 'p ≥ 0.05（差值 95% CI 跨 0）',
-      hit: overall.p >= 0.05,
+      condition: `p ≥ ${cfg.alpha}（差值 95% CI 跨 0）`,
+      hit: overall.p >= cfg.alpha,
       detail: `p = ${ep(overall.p)}，CI [${pp2(overall.ci95[0])}, ${pp2(overall.ci95[1])}]`,
     },
     {
       code: 'POSITIVE',
       label: '显著正向',
-      condition: 'p < 0.05、差值为正，且以上均未触发',
-      hit: overall.p < 0.05 && overall.diff > 0,
+      condition: `p < ${cfg.alpha}、差值为正，且以上均未触发`,
+      hit: overall.p < cfg.alpha && overall.diff > 0,
       detail: `差值 ${pp2(overall.diff)}，p = ${ep(overall.p)}`,
     },
   ];

@@ -1,14 +1,5 @@
 import type { Archetype, DailyRow, Dataset, Decision, Device, Experiment, Tenure } from './types.ts';
-
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+import { mulberry32 } from './stats.ts';
 
 function randn(rng: () => number): number {
   let u = 0, v = 0;
@@ -74,6 +65,116 @@ function isoDate(start: Date, offsetDays: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * 单个实验的完整生成（元信息 + 明细行）。
+ * 抽出来是为了 A/A 自校准能复用同一套生成逻辑：同一份代码造出来的"无效应"数据，
+ * 才谈得上拿它检验引擎在无效应时会不会乱报。
+ */
+export function buildExperiment(
+  id: string,
+  archetype: Archetype,
+  seed: number,
+  days: number,
+  opts: { startDate?: Date; nameIndex?: number } = {},
+): { exp: Experiment; rows: DailyRow[] } {
+  const startDate = opts.startDate ?? new Date('2026-09-01T00:00:00Z');
+  const nameIndex = opts.nameIndex ?? 0;
+  const rng = mulberry32(seed);
+  const cfg = CFG[archetype];
+  const p0 = 0.045 + 0.015 * rng();
+  const refundBase = 0.012;
+  const complaintBase = 0.0012;
+  const latencyMean = 820;
+  const rows: DailyRow[] = [];
+
+  const trueLiftOverall = cfg.liftNew * cfg.newShare + cfg.liftOld * (1 - cfg.newShare);
+  const exp: Experiment = {
+    id,
+    name: NAMES[nameIndex % NAMES.length],
+    hypothesis: HYPOTHESES[nameIndex % HYPOTHESES.length],
+    startDate: isoDate(startDate, 0),
+    endDate: isoDate(startDate, days - 1),
+    variants: ['control', 'treatment'],
+    trafficSplit: `${Math.round((1 - cfg.ratio) * 100)}/${Math.round(cfg.ratio * 100)}`,
+    primaryMetric: '支付转化率',
+    metricType: 'binary',
+    guardrailMetrics: ['退款率', '投诉率'],
+    archetype,
+    trueLift: archetype === 'heterogeneous' ? cfg.liftNew : trueLiftOverall,
+    trueLiftScope: archetype === 'heterogeneous' ? 'new_users' : 'overall',
+    trueLiftOverall,
+    trueDecision: cfg.decision,
+    seed,
+  };
+
+  const devices: Device[] = ['iOS', 'Android'];
+  const tenures: Tenure[] = ['new', 'old'];
+  for (let d = 0; d < days; d++) {
+    for (const device of devices) {
+      for (const tenure of tenures) {
+        const mult = tenure === 'new' ? cfg.newShare * 2 : (1 - cfg.newShare) * 2;
+        const base = Math.round(1400 * mult * (0.85 + 0.3 * rng()));
+        for (const variant of ['control', 'treatment'] as const) {
+          const share = variant === 'control' ? 1 - cfg.ratio : cfg.ratio;
+          const n = Math.max(1, Math.round(base * share));
+          const lift = tenure === 'new' ? cfg.liftNew : cfg.liftOld;
+          const p = Math.min(0.95, Math.max(0.001, p0 + (variant === 'treatment' ? lift : 0)));
+          const c = binomial(n, p, rng);
+          const refundP = Math.min(0.2, refundBase + (variant === 'treatment' ? cfg.refundDiff : 0));
+          const refunds = binomial(n, refundP, rng);
+          const complaints = poisson(n * complaintBase, rng);
+          rows.push({
+            expId: id,
+            date: isoDate(startDate, d),
+            variant,
+            device,
+            tenure,
+            exposures: n,
+            conversions: c,
+            refunds,
+            complaints,
+            latencyP95: Math.round(latencyMean + 18 * randn(rng)),
+          });
+        }
+      }
+    }
+  }
+  return { exp, rows };
+}
+
+/** A/A 自校准数据集：count 个「两臂同分布、零效应」的实验，不进主数据集 */
+export function generateAA(count = 1000, seedBase = 20261101, days = 7): Dataset {
+  const experiments: Experiment[] = [];
+  const daily: DailyRow[] = [];
+  for (let i = 0; i < count; i++) {
+    const { exp, rows } = buildExperiment(
+      `AA${String(i + 1).padStart(4, '0')}`,
+      'null',
+      seedBase + (i + 1) * 7919,
+      days,
+      { nameIndex: i },
+    );
+    experiments.push(exp);
+    daily.push(...rows);
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    seedBase,
+    groundTruth: true,
+    spec: {
+      days,
+      segments: ['device', 'tenure'],
+      baselineRate: [0.045, 0.06],
+      refundRate: 0.012,
+      complaintRate: 0.0012,
+      latencyMean: 820,
+      latencySd: 18,
+    },
+    experiments,
+    daily,
+  };
+}
+
 export function generateDataset(seedBase = 20261031, days = 7): Dataset {
   const experiments: Experiment[] = [];
   const daily: DailyRow[] = [];
@@ -97,67 +198,10 @@ export function generateDataset(seedBase = 20261031, days = 7): Dataset {
 
   order.forEach((archetype, i) => {
     const seed = seedBase + (i + 1) * 7919;
-    const rng = mulberry32(seed);
-    const cfg = CFG[archetype];
     const id = `E${String(i + 1).padStart(3, '0')}`;
-    const p0 = 0.045 + 0.015 * rng();
-    const refundBase = 0.012;
-    const complaintBase = 0.0012;
-    const latencyMean = 820;
-
-    const trueLiftOverall = cfg.liftNew * cfg.newShare + cfg.liftOld * (1 - cfg.newShare);
-    const exp: Experiment = {
-      id,
-      name: NAMES[i % NAMES.length],
-      hypothesis: HYPOTHESES[i % HYPOTHESES.length],
-      startDate: isoDate(start, 0),
-      endDate: isoDate(start, days - 1),
-      variants: ['control', 'treatment'],
-      trafficSplit: `${Math.round((1 - cfg.ratio) * 100)}/${Math.round(cfg.ratio * 100)}`,
-      primaryMetric: '支付转化率',
-      metricType: 'binary',
-      guardrailMetrics: ['退款率', '投诉率'],
-      archetype,
-      trueLift: archetype === 'heterogeneous' ? cfg.liftNew : trueLiftOverall,
-      trueLiftScope: archetype === 'heterogeneous' ? 'new_users' : 'overall',
-      trueLiftOverall,
-      trueDecision: cfg.decision,
-      seed,
-    };
+    const { exp, rows } = buildExperiment(id, archetype, seed, days, { startDate: start, nameIndex: i });
     experiments.push(exp);
-
-    const devices: Device[] = ['iOS', 'Android'];
-    const tenures: Tenure[] = ['new', 'old'];
-    for (let d = 0; d < days; d++) {
-      for (const device of devices) {
-        for (const tenure of tenures) {
-          const mult = tenure === 'new' ? cfg.newShare * 2 : (1 - cfg.newShare) * 2;
-          const base = Math.round(1400 * mult * (0.85 + 0.3 * rng()));
-          for (const variant of ['control', 'treatment'] as const) {
-            const share = variant === 'control' ? 1 - cfg.ratio : cfg.ratio;
-            const n = Math.max(1, Math.round(base * share));
-            const lift = tenure === 'new' ? cfg.liftNew : cfg.liftOld;
-            const p = Math.min(0.95, Math.max(0.001, p0 + (variant === 'treatment' ? lift : 0)));
-            const c = binomial(n, p, rng);
-            const refundP = Math.min(0.2, refundBase + (variant === 'treatment' ? cfg.refundDiff : 0));
-            const refunds = binomial(n, refundP, rng);
-            const complaints = poisson(n * complaintBase, rng);
-            daily.push({
-              expId: id,
-              date: isoDate(start, d),
-              variant,
-              device,
-              tenure,
-              exposures: n,
-              conversions: c,
-              refunds,
-              complaints,
-              latencyP95: Math.round(latencyMean + 18 * randn(rng)),
-            });
-          }
-        }
-      }
-    }
+    daily.push(...rows);
   });
 
   return {
