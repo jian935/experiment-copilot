@@ -1,7 +1,7 @@
 # Experiment Copilot · 实验结论官
 
 > 状态：**M13 打磨与交付（UI 侧完成：导入持久化 / 实验对比 / ⌘K 全局搜索 / 深浅主题 / 去图表库）** ｜ 2026-11-01 ｜ 剩余：GitHub Pages 部署（用户要求最后做）
-> 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ 实测记录：[`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
+> 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ 实测记录：[`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md) ｜ **为什么是这个口径：[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)**
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
 统计与决策全部由确定性引擎完成，模型只负责解释与追问——**每个数字都能点开看公式、样本量与数据版本，并能一键复算。**
@@ -75,8 +75,8 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 330 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
-npm run eval       # 评测报告：分层 F1 + 1960 条 Agent 问答的幻觉数字率（写 data/agent_eval.json 给看板）
+npm test           # 340 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 方法论对账 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
+npm run eval       # 评测报告：分层 F1 + 2200 条 Agent 问答的幻觉数字率（写 data/agent_eval.json 给看板）
 npm run eval:check # 与 eval/baseline.json 逐指标比对，任何漂移 exit 1（CI 用的就是它）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
@@ -93,6 +93,7 @@ npm run novelty    # 新颖效应：A/A 校准 + 注入衰减的检出率
 npm run fwer       # 多重比较：全零族的 FWER 模拟 + 120 个实验的 Holm/BH 校正
 npm run loss       # 期望损失：门禁 + 净价值与频率派规则的事后真实净价值对比
 npm run forecast   # 「还要跑几天」在 120 个实验上的批量预测
+npm run method     # 方法论长文里的每个数字：覆盖率 / 多重比较 / 正态近似误差 / 护栏口径
 ```
 
 打开后：⌘K / Ctrl+K 打开全局搜索；列表页点任意实验 → 详情页 → 右上角「证据链」→ 底部「一键复算」。
@@ -169,11 +170,11 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  330 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
+tests/                  340 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
                         + 口径字典/阈值可配/多轮上下文 + 分层 F1/基线比对器自测）
-eval/baseline.json      回归基线：84 个指标 + 数据指纹（npm run eval -- --write 更新）
+eval/baseline.json      回归基线：86 个指标 + 数据指纹（npm run eval -- --write 更新）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
-docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
+docs/                   蓝图 / 方法论长文 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```
 
 ## 已完成
@@ -332,22 +333,37 @@ CUPED 的功劳是在区间已经诚实的前提下再收窄 7.24%。这两件�
 |---|---|---|
 | 分层检测 F1 | 对**检测器**打分，不对决策打分：真值 = 生成器注入的「新老效应不同」，预测 = `analysis.heterogeneity`。实测 F1 **0.857**（P 0.923 / R 0.800，15 个正例），95% CI 0.67–0.97 | `npm run eval` |
 | 放宽口径对照 | 只要求交互显著时 F1 反而掉到 **0.788**：召回只多 1 条，假阳性从 1 涨到 5 → 「一个分层显著为正、另一个无效」这层合取是净收益，不是多余条件 | 同上 |
-| 幻觉数字率自动测 | 规则模式 **1960 条问答 / 11521 个数字**，可疑 **0** 个；17 道题覆盖全部 14 个工具，每题只在该实验答得出来时才问（否则引用覆盖率会被无证据的题稀释） | `npm run eval` |
+| 幻觉数字率自动测 | 规则模式 **2200 条问答 / 13546 个数字**，可疑 **0** 个；18 道题覆盖全部 **16** 个工具（引用覆盖率分母只算「有证据可引」的 1840 条），每题只在该实验答得出来时才问 | `npm run eval` |
 | 接进统一口径 | `evaluate(ds, analyses, { agent })` 一个出口；看板 fetch `data/agent_eval.json`，设置页改过阈值时显式提示「这份评测已过期，重跑 npm run eval」 | `src/lib/agentEval.ts` |
-| 回归基线 | `eval/baseline.json` 84 个指标 + 数据指纹；`npm run eval:check` 漂移即 `exit 1`，并打印 `✗ accuracy 93.33% → 91.67%（-1.67pp）` 这种可直接定位的一行 | `npm run eval:check` |
+| 回归基线 | `eval/baseline.json` 86 个指标 + 数据指纹；`npm run eval:check` 漂移即 `exit 1`，并打印 `✗ accuracy 93.33% → 91.67%（-1.67pp）` 这种可直接定位的一行 | `npm run eval:check` |
 | CI | typecheck → test → 基线比对 → **重建数据后再比对**（证明同代码出同数据）→ A/A 200 次冒烟（`--dry`，不覆盖 2000 次的正式报告） | `.github/workflows/ci.yml` |
-| 单测 | 196 → **330**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条 + 趋势图几何 7 条） | `npm test` |
+| 单测 | 196 → **340**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条 + 趋势图几何 7 条 + **方法论对账 10 条**） | `npm test` |
 
 **顺手抓到的真 bug（在判定器里，不在回答里）**：接进自动评测后，规则模式的「还要跑几天」立刻冒出
 48 个「无法溯源的数字」（0.63 / 0.68 / 20）。查下来是 `audit.ts` 的**白名单只收 number、不收字符串**：
 工具返回的 `mdeNowText: "0.63pp"` 是格式化文本字段，回答照抄它是**合规**的（system prompt 第 6 条就是这么要求的），
-却被判成幻觉。修完后所有回答的可疑数字归零（当时 1720 条，现在题库扩到 1960 条仍是 0）。
+却被判成幻觉。修完后所有回答的可疑数字归零（当时 1720 条，现在题库扩到 2200 条、13546 个数字仍是 0）。
 
 这条最能说明自动评测的价值：那个 bug 在人工 ablation 里躺了很久——因为「规则模式不可能编数字」听起来太合理了，
 没人去查。**只要指标不是自动跑的，它就会停在「我以为它是 0」。**
 
 > 纪律：指标漂移时**先查清原因再更新基线**。`npm run eval -- --write` 是给「有意改口径」用的，
 > 提交信息里必须写清改了什么、为什么。CI 不区分两者——它只负责把漂移变成一次红灯。
+
+### 为什么是这些口径（[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)）
+
+统计实现最容易骗自己的地方不是写错公式，而是「公式没错、但用错了场合」。
+所以每个口径都按同一结构写：**备选是什么 → 它在什么条件下坏 → 坏的代价多大 → 我们选了什么 → 我们的选择在什么条件下也会坏**（最后一条不许省）。
+
+| 口径 | 否决的备选 | 为什么 |
+|---|---|---|
+| 差值区间用 **Newcombe method 10** | Wald | 两臂都 0 次时 Wald 给 `[0, 0]`（宽度 0，等于宣称效应精确为 0）；0.12% 基线、n=30 时 Wald 宽度 0.906pp 对 Newcombe 22.869pp——覆盖率都是 100%，但 Wald 那个区间没有信息量。真实口径（1.19% vs 1.24%、每臂 2 万）下只多 0.002pp 宽度 |
+| 清单用 **Holm**，分层用 **BH q=0.1** | 不校正 / Bonferroni / BH 到处用 | 120 个实验全零时「至少一个显著」= 99.79%（是算术不是运气）；m=2 时 BH(q=0.1) 的最小 p 门槛恰好 = α=0.05，等于白拿一层 FDR 保护 |
+| 护栏只硬判**退款率**，口径 **harm_and_practical** | `non_inferiority` / `confirm_beyond_margin` | 数据集上 `non_inferiority` 误拦 **15** 个（主指标大涨、护栏拿不出证据），`confirm_beyond_margin` 模拟里漏掉 **27.7%** 的真实伤害。投诉率（基线 0.12%）的 SE 是它基线的 29%，任何有业务含义的 margin 都小于 SE，只能不 gating |
+| **P(B>A)** 用正态近似 | 精确 Beta 积分 / MCMC | 每臂 ≥1000 时误差 ≤ **0.08pp**（n=20 时 1.01pp，所以小样本的小数位明写「不可引用」）；闭式可复现，且与可信区间、期望损失**同源**，不会出现「P=97% 但区间跨 0」 |
+
+实测手段也写清了：小样本格点用**精确枚举**（n=30 只有 961 种结果），大样本才用蒙特卡洛；
+`npm run method` 一条命令重跑全部数字，`tests/methodology.test.ts` 锁住「文档引用的 α / margin / q 必须等于 `DEFAULT_CONFIG`」。
 
 ### M12 — 序贯与高级（A2 序贯检验 / A7 新颖效应 / A6 多重比较 / B1 期望损失）
 

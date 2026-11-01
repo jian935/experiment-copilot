@@ -112,7 +112,7 @@
   <div class="chips">
     <span class="chip">120 个实验</span>
     <span class="chip">16 个工具</span>
-    <span class="chip">330 个单测</span>
+    <span class="chip">340 个单测</span>
     <span class="chip">决策准确率 93.3%</span>
     <span class="chip">A/A 误报率 6.35%（名义 5%）</span>
     <span class="chip">转化率 + ARPU 双口径</span>
@@ -123,6 +123,7 @@
     <span class="chip">实验对比：同单位共用一条横轴</span>
     <span class="chip">⌘K 全局搜索 · 深浅主题</span>
     <span class="chip">零图表库（手写 SVG，JS 573KB）</span>
+    <span class="chip">方法论长文：每个口径都写了「我们会坏在哪」</span>
   </div>
 
   <div class="cta">
@@ -216,7 +217,7 @@
       <tr><td>统计全部自研 + 单测对齐 scipy</td><td>直接调 Python 统计包</td><td>要能跑在浏览器里、要能一键复算、要能被单测锁住；p 值与 scipy 相对误差 &lt; 1e-4</td></tr>
       <tr><td>LLM 只做编排与解释</td><td>「AI 直接给结论」的炫技感</td><td>让模型算数就无法承诺可复现；拆开后模型的价值变成「把证据讲成人话」</td></tr>
       <tr><td>用合成数据 + 注入真值</td><td>真实业务数据</td><td>真实数据没有真值，无法量化「判对了没有」；合成数据能给出已知答案，也便于公开复现</td></tr>
-      <tr><td>护栏只让退款率做硬门槛</td><td>投诉率、P95 也拦截</td><td>投诉率基线仅 0.12%，随机波动天天误报；用绝对阈值（0.4pp）+ α=0.01 才分得清「真恶化」和噪声</td></tr>
+      <tr><td>护栏只让退款率做硬门槛</td><td>投诉率、P95 也拦截</td><td>三条理由指向同一结论：退款率基线 1.2% 且容忍度有业务定义（margin 0.4pp ≫ SE 0.11pp）；投诉率基线仅 0.12%，SE 就是基线的 29%，任何有业务含义的 margin 都小于 SE；延迟跨接口不可比、损失非线性。换更严的「非劣不成立即拦」口径会在 120 个实验上误拦 <b>15</b> 个（主指标大涨、护栏拿不出证据）——实测，非估算</td></tr>
     </tbody>
   </table>
 
@@ -239,10 +240,11 @@
       <tr><td>期望损失决策</td><td class="num good">+25.4% / +28.6%</td><td>拿注入真值算事后净价值：硬门禁 + 净价值 <b>20.182</b> vs 频率派规则 15.696（率指标组 +25.4%、ARPU 组 +28.6%）。裸规则更高（23.978）但会上线 15 个护栏已恶化的实验——退款率 1.19%→2.03%，所以门禁是约束不是目标</td></tr>
       <tr><td>Agent 引用覆盖率</td><td class="num good">100%</td><td>自动评测 2200 条（分母 1840，无证据可引的不计入）；智能模式 6 次运行 94.7–100%</td></tr>
       <tr><td>置信度校准 ECE</td><td class="num">20.0% / 5.0%</td><td>全量 20.0% 是「真值精确为 0 却被当负类」的产物；只看真值非零的 70 个实验是 5.0%。两个口径都展示</td></tr>
-      <tr><td>单测</td><td class="num">300 个</td><td>统计 / 决策 / 证据推导 / 结论卡导出 / Agent / 多轮上下文 / 评测口径 / 导入解析 / CUPED / 连续指标 / 分层 F1 / 实验对比 / 森林图定标 / 基线比对器自测</td></tr>
+      <tr><td>口径为什么这么定</td><td class="num good">4 个否决记录</td><td>差值区间弃 Wald（两臂 0 次时宽度为 0；0.12% 基线 n=30 时宽度 0.906pp 对 22.869pp，覆盖率都是 100% 但前者没信息量）、清单用 Holm / 分层用 BH q=0.1（m=2 时门槛恰好 = α）、护栏只硬判退款率、P(B>A) 用正态近似（每臂 ≥1000 时误差 ≤0.08pp）。每个口径都写了「我们也会坏在哪」，例如 p≈0.5、n=30 时 Newcombe 覆盖率 90.8% 比 Wald 94.8% 更差</td></tr>
+      <tr><td>单测</td><td class="num">340 个</td><td>统计 / 决策 / 证据推导 / 结论卡导出 / Agent / 多轮上下文 / 评测口径 / 导入解析 / CUPED / 连续指标 / 分层 F1 / 实验对比 / 森林图定标 / 全局搜索 / 趋势图几何 / 主题对账 / 方法论对账 · 基线比对器自测</td></tr>
     </tbody>
   </table>
-  <p class="cap">复现：<code>npm test</code> 跑 330 个单测；<code>npm run eval</code> 出分层 F1 + 2200 条问答的幻觉数字率（<code>npm run eval:check</code> 与 86 个指标的基线比对，漂移即失败）；<code>npm run calibrate</code> 出混淆矩阵；<code>npm run ablation</code> 出规则 vs 大模型对比；<code>npm run aa</code> 出 A/A 自校准（2000 次零效应实测误报率 6.35%，并按转化率 / ARPU 分口径报）；<code>npm run cuped</code> 出 CUPED 收益（方差缩减 7.24%）；<code>npm run forecast</code> 出 120 个实验的「还要跑几天」预测。</p>
+  <p class="cap">复现：<code>npm test</code> 跑 340 个单测；<code>npm run method</code> 跑方法论长文里的每个数字（小样本精确枚举、大样本蒙特卡洛）；<code>npm run eval</code> 出分层 F1 + 2200 条问答的幻觉数字率（<code>npm run eval:check</code> 与 86 个指标的基线比对，漂移即失败）；<code>npm run calibrate</code> 出混淆矩阵；<code>npm run ablation</code> 出规则 vs 大模型对比；<code>npm run aa</code> 出 A/A 自校准（2000 次零效应实测误报率 6.35%，并按转化率 / ARPU 分口径报）；<code>npm run cuped</code> 出 CUPED 收益（方差缩减 7.24%）；<code>npm run forecast</code> 出 120 个实验的「还要跑几天」预测。</p>
 
   <h2>评测不是一次性的叙事，是每次提交都要跑的东西</h2>
   <p>
