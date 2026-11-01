@@ -15,6 +15,10 @@ export interface DailyRow {
   refunds: number;
   complaints: number;
   latencyP95: number;
+  /** 实验前同口径的曝光数（CUPED 协变量）。没有前周期数据时留空 → 自动退回普通检验 */
+  preExposures?: number;
+  /** 实验前同口径的转化数 */
+  preConversions?: number;
 }
 
 export interface Experiment {
@@ -47,6 +51,11 @@ export interface Dataset {
   groundTruth?: boolean;
   spec: {
     days: number;
+    /** 前周期天数（CUPED 协变量窗口）；0 表示无前周期数据 */
+    preDays?: number;
+    /** 数据里注入的日级 / 设备级基线异质性（相对基线率的标准差，比例单位） */
+    baselineDaySd?: number;
+    baselineDeviceSd?: number;
     segments: string[];
     baselineRate: [number, number];
     refundRate: number;

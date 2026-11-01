@@ -107,7 +107,7 @@
   <div class="chips">
     <span class="chip">120 个实验</span>
     <span class="chip">10 个工具</span>
-    <span class="chip">142 个单测</span>
+    <span class="chip">157 个单测</span>
     <span class="chip">决策准确率 96.7%</span>
     <span class="chip">可疑数字 0</span>
     <span class="chip">零后端 · 静态部署</span>
@@ -177,10 +177,10 @@
       <tr><td>临界区间准确率</td><td class="num bad">0%（0/3）</td><td>p 落在 0.01–0.05 的实验全部判错——α=0.05 的必然代价，如实展示</td></tr>
       <tr><td>Agent 引用覆盖率</td><td class="num good">100%</td><td>24 条问答，凡有证据可引的回答都带证据编号</td></tr>
       <tr><td>Agent 可疑数字</td><td class="num good">0</td><td>回答中每个数字按显示精度回溯到引擎或工具返回值</td></tr>
-      <tr><td>单测</td><td class="num">142 个</td><td>统计 / 决策 / 证据推导 / 结论卡导出 / Agent / 评测口径 / 导入解析</td></tr>
+      <tr><td>单测</td><td class="num">157 个</td><td>统计 / 决策 / 证据推导 / 结论卡导出 / Agent / 评测口径 / 导入解析</td></tr>
     </tbody>
   </table>
-  <p class="cap">复现：<code>npm test</code> 跑 142 个单测；<code>npm run calibrate</code> 出混淆矩阵；<code>npm run ablation</code> 出规则 vs 大模型对比；<code>npm run aa</code> 出 A/A 自校准（1000 次零效应实测误报率 5.30%）。</p>
+  <p class="cap">复现：<code>npm test</code> 跑 157 个单测；<code>npm run calibrate</code> 出混淆矩阵；<code>npm run ablation</code> 出规则 vs 大模型对比；<code>npm run aa</code> 出 A/A 自校准（1000 次零效应实测误报率 5.00%）；<code>npm run cuped</code> 出 CUPED 收益（方差缩减 7.76%）。</p>
 
   <h2>AI 这块到底值不值</h2>
   <p>

@@ -266,13 +266,24 @@ export interface BayesResult {
   expectedLoss: number;
 }
 
-/** Beta-Binomial 贝叶斯：以 Beta(成功+1, 失败+1) 为后验，给频率派结论配一个概率口径 */
-export function bayesBetaBinomial(c1: number, n1: number, c2: number, n2: number): BayesResult {
-  // treatment 后验 Beta(a, b)，control 后验 Beta(cc, d)
-  const a = c2 + 1;
-  const b = n2 - c2 + 1;
-  const cc = c1 + 1;
-  const d = n1 - c1 + 1;
+/**
+ * Beta-Binomial 贝叶斯：以 Beta(成功+1, 失败+1) 为后验，给频率派结论配一个概率口径。
+ *
+ * dispersion（过离散因子，≥1）会把样本量折算成「有效样本量」n/φ、c/φ：
+ * 均值不变，但后验变宽 φ 倍。不做这一步的话，只要数据存在格子级基线漂移，
+ * 后验就会系统性过度自信——实测 A/A 下 P(B>A)>0.95 的比例会到 9.5%（理论 5%）。
+ */
+export function bayesBetaBinomial(
+  c1: number, n1: number,
+  c2: number, n2: number,
+  dispersion = 1,
+): BayesResult {
+  const overdisp = Number.isFinite(dispersion) && dispersion > 1 ? dispersion : 1;
+  // treatment 后验 Beta(a, b)，control 后验 Beta(cc, d)（用有效样本量）
+  const a = c2 / overdisp + 1;
+  const b = (n2 - c2) / overdisp + 1;
+  const cc = c1 / overdisp + 1;
+  const d = (n1 - c1) / overdisp + 1;
 
   const mt = a / (a + b);
   const mc = cc / (cc + d);
@@ -403,6 +414,191 @@ export function nonInferiority(
     minDetectableMargin: zCrit * se,
     // 「确认恶化」优先于「非劣成立」：区间整体落在 margin 之上时，结论是恶化而非非劣
     verdict: worse ? 'worse' : nonInferior ? 'non_inferior' : 'inconclusive',
+  };
+}
+
+// ===================== t 分布（精确，用已有的 betai） =====================
+
+/**
+ * Student-t 上尾概率 P(T > t)，用不完全 Beta 精确计算：
+ *   P(T > t) = ½ · I_{ν/(ν+t²)}(ν/2, ½)
+ * 以前项目里 Welch 检验拿正态近似顶替，df 小的时候会偏乐观；现在有闭式就用闭式。
+ */
+export function studentTSf(t: number, df: number): number {
+  if (!(df > 0)) return twoSidedP(t) / 2;
+  const x = df / (df + t * t);
+  const half = 0.5 * betai(x, df / 2, 0.5);
+  return t > 0 ? half : 1 - half;
+}
+
+/** 双侧 t 检验 p 值 */
+export function studentTTwoSided(t: number, df: number): number {
+  return Math.min(1, 2 * studentTSf(Math.abs(t), df));
+}
+
+// ===================== CUPED（方差缩减） =====================
+
+export interface CupedCell {
+  /** 后周期样本量（同时作为权重） */
+  n: number;
+  /** 后周期转化数 */
+  c: number;
+  /** 前周期样本量 */
+  nPre: number;
+  /** 前周期转化数 */
+  cPre: number;
+  treatment: boolean;
+}
+
+export interface CupedResult {
+  /** CUPED 系数 θ = Cov(X,Y)/Var(X)（按臂内中心化、按样本量加权后合并） */
+  theta: number;
+  /** 前后周期的相关系数 ρ（臂内、加权） */
+  rho: number;
+  /** 未调整的差值（treatment − control） */
+  diffRaw: number;
+  /** CUPED 调整后的差值 */
+  diffAdj: number;
+  /** 未调整的标准误（格子级稳健估计，含过离散） */
+  seRaw: number;
+  /** 调整后的标准误 */
+  seAdj: number;
+  /** 方差缩减比例 = 1 − seAdj²/seRaw² */
+  varReduction: number;
+  /** 等同样本量下"省了多少样本"：达到同样精度需要的样本量下降比例 */
+  sampleSaving: number;
+  /** 格子的过离散因子 φ（1 = 纯二项；>1 说明朴素 i.i.d. 标准误偏乐观） */
+  dispersion: number;
+  /** 自由度（格子数 − 参数数） */
+  df: number;
+  zRaw: number;
+  zAdj: number;
+  pRaw: number;
+  pAdj: number;
+  ciRaw: [number, number];
+  ciAdj: [number, number];
+  nCells: number;
+}
+
+/**
+ * 格子均值的稳健方差（比率估计量形式）。
+ *
+ * 为什么不能直接套 p(1−p)/n：真实数据里每个格子的基线会漂（用户构成、当天的整体水位），
+ * 于是格子率的方差比纯二项更大（过离散）。这一式直接从格子间的离散程度估方差，
+ * 不假设 i.i.d.——朴素二项式标准误在过离散下会系统性偏乐观（实测会把 A/A 误报率推到 11%）。
+ */
+function clusterMeanVar(vals: number[], ws: number[], dofLoss: number): { mean: number; varr: number } {
+  const K = vals.length;
+  const W = ws.reduce((s, v) => s + v, 0);
+  if (K === 0 || W <= 0) return { mean: 0, varr: 0 };
+  let mean = 0;
+  for (let i = 0; i < K; i++) mean += ws[i] * vals[i];
+  mean /= W;
+  let ss = 0;
+  for (let i = 0; i < K; i++) ss += ws[i] * ws[i] * (vals[i] - mean) ** 2;
+  const df = Math.max(1, K - dofLoss);
+  // K/(K−1) 是无偏修正；除以 df 而不是 K 是为了扣掉估计均值/θ 花掉的自由度
+  return { mean, varr: (ss * K) / (K - 1) / (W * W) };
+}
+
+/**
+ * CUPED（Controlled-experiment Using Pre-Experiment Data）。
+ *
+ * 做法：把每个「日期 × 设备 × 新老 × 变体」当作一个格子，
+ *   - Y = 该格子实验期转化率，X = 同一批人在实验前的同口径转化率；
+ *   - θ = 臂内中心化后的加权 Cov(X,Y)/Var(X)；
+ *   - 调整后的差值 = (ȳ_t − ȳ_c) − θ(x̄_t − x̄_c)。
+ * 因为随机分流下 E[x̄_t − x̄_c] = 0，调整后的点估计仍然无偏，
+ * 但把"这批人本来就活跃/不活跃"这部分方差扣掉了，于是区间更窄。
+ *
+ * 关键：**标准误不用 p(1−p)/n，而是从格子间离散程度直接估**（见 clusterMeanVar）。
+ * 否则在过离散数据上，CUPED 带来的"精度提升"会是假的——区间变窄只是因为假设错了。
+ */
+export function cupedAdjust(cells: CupedCell[]): CupedResult | null {
+  const use = cells.filter((x) => x.n > 0 && x.nPre > 0);
+  // 每组至少要有 4 个格子，否则稳健方差的分母太小，估出来的 SE 不可信
+  if (use.length < 8) return null;
+  const nT = use.filter((x) => x.treatment).length;
+  const nC = use.length - nT;
+  if (nT < 4 || nC < 4) return null;
+
+  const y = use.map((x) => x.c / x.n);
+  const x = use.map((x) => x.cPre / x.nPre);
+  const w = use.map((x) => x.n);
+
+  // ---- θ：臂内中心化后合并（避免把组间差异当成协变量的作用）----
+  const meanW = (vals: number[], ws: number[]) => {
+    let s = 0;
+    let W = 0;
+    for (let i = 0; i < vals.length; i++) {
+      s += ws[i] * vals[i];
+      W += ws[i];
+    }
+    return W > 0 ? s / W : 0;
+  };
+  const yT = meanW(y.filter((_, i) => use[i].treatment), w.filter((_, i) => use[i].treatment));
+  const yC = meanW(y.filter((_, i) => !use[i].treatment), w.filter((_, i) => !use[i].treatment));
+  const xT = meanW(x.filter((_, i) => use[i].treatment), w.filter((_, i) => use[i].treatment));
+  const xC = meanW(x.filter((_, i) => !use[i].treatment), w.filter((_, i) => !use[i].treatment));
+
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < use.length; i++) {
+    const dx = x[i] - (use[i].treatment ? xT : xC);
+    const dy = y[i] - (use[i].treatment ? yT : yC);
+    sxy += w[i] * dx * dy;
+    sxx += w[i] * dx * dx;
+    syy += w[i] * dy * dy;
+  }
+  const theta = sxx > 0 ? sxy / sxx : 0;
+  const rho = sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0;
+
+  const diffRaw = yT - yC;
+  const diffAdj = diffRaw - theta * (xT - xC);
+
+  // ---- 稳健标准误：分别对原始值与调整后的值做格子级方差 ----
+  const rawT = clusterMeanVar(y.filter((_, i) => use[i].treatment), w.filter((_, i) => use[i].treatment), 1);
+  const rawC = clusterMeanVar(y.filter((_, i) => !use[i].treatment), w.filter((_, i) => !use[i].treatment), 1);
+  const z = y.map((v, i) => v - theta * x[i]);
+  const adjT = clusterMeanVar(z.filter((_, i) => use[i].treatment), w.filter((_, i) => use[i].treatment), 2);
+  const adjC = clusterMeanVar(z.filter((_, i) => !use[i].treatment), w.filter((_, i) => !use[i].treatment), 2);
+
+  const seRaw = Math.sqrt(Math.max(0, rawT.varr + rawC.varr));
+  const seAdj = Math.sqrt(Math.max(0, adjT.varr + adjC.varr));
+
+  // 过离散因子：格子率的加权离散度 ÷ 二项期望方差
+  let chi = 0;
+  const pAll = use.reduce((s, v) => s + v.c, 0) / use.reduce((s, v) => s + v.n, 0);
+  for (let i = 0; i < use.length; i++) {
+    const pArm = use[i].treatment ? yT : yC;
+    const varr = pArm * (1 - pArm);
+    if (varr > 0) chi += ((y[i] - pArm) ** 2) * use[i].n / varr;
+  }
+  const dispersion = chi / Math.max(1, use.length - 2);
+
+  const df = Math.max(1, use.length - 3);
+  const zRaw = seRaw > 0 ? diffRaw / seRaw : 0;
+  const zAdj = seAdj > 0 ? diffAdj / seAdj : 0;
+  const tCrit = Math.abs(normalInv(0.975));
+  return {
+    theta,
+    rho,
+    diffRaw,
+    diffAdj,
+    seRaw,
+    seAdj,
+    varReduction: seRaw > 0 ? Math.max(0, 1 - (seAdj * seAdj) / (seRaw * seRaw)) : 0,
+    sampleSaving: seRaw > 0 && seAdj > 0 ? Math.max(0, 1 - (seAdj * seAdj) / (seRaw * seRaw)) : 0,
+    dispersion,
+    df,
+    zRaw,
+    zAdj,
+    pRaw: studentTTwoSided(zRaw, df),
+    pAdj: studentTTwoSided(zAdj, df),
+    ciRaw: [diffRaw - tCrit * seRaw, diffRaw + tCrit * seRaw],
+    ciAdj: [diffAdj - tCrit * seAdj, diffAdj + tCrit * seAdj],
+    nCells: use.length,
   };
 }
 

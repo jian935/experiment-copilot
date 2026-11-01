@@ -134,6 +134,8 @@ export function normalizeSettings(raw: unknown): Settings {
     interactionAlpha: num(c.interactionAlpha, DEFAULT_CONFIG.interactionAlpha, 0, 0.5),
     srmAlpha: num(c.srmAlpha, DEFAULT_CONFIG.srmAlpha, 0, 0.5),
     srmMaxRelImb: num(c.srmMaxRelImb, DEFAULT_CONFIG.srmMaxRelImb, 0, 0.5),
+    seMode: c.seMode === 'iid' || c.seMode === 'robust' ? c.seMode : (DEFAULT_CONFIG.seMode ?? 'robust'),
+    useCuped: bool(c.useCuped, DEFAULT_CONFIG.useCuped ?? true),
     bootstrapReps: Math.round(num(c.bootstrapReps, DEFAULT_CONFIG.bootstrapReps, 99, 200001)),
     simSeed: Math.round(num(c.simSeed, DEFAULT_CONFIG.simSeed, 0, Number.MAX_SAFE_INTEGER)),
     guardrails: {

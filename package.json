@@ -14,7 +14,8 @@
     "gen": "tsx scripts/gen_experiments.ts",
     "calibrate": "tsx scripts/check_calibration.ts",
     "ablation": "tsx scripts/ablation.ts",
-    "aa": "tsx scripts/aa_test.ts"
+    "aa": "tsx scripts/aa_test.ts",
+    "cuped": "tsx scripts/cuped_report.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

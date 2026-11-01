@@ -27,6 +27,27 @@ function poisson(lambda: number, rng: () => number): number {
   return Math.max(0, Math.round(lambda + Math.sqrt(lambda) * randn(rng)));
 }
 
+/**
+ * 基线异质性强度（相对基线率的标准差，比例单位）。
+ * 0.0012 / 0.0018 ≈ 基线的 2%–3%：足以让「所有格子同 p」这个 i.i.d. 假设不成立
+ * （于是原来那套二项标准误会偏乐观），又不至于把主指标的相对效应淹没。
+ * 改它必须重跑 A/A 自校准与 CI 覆盖率——见 docs/EVAL.md。
+ */
+export const BASELINE_DAY_SD = 0.0012;
+export const BASELINE_DEVICE_SD = 0.0018;
+/**
+ * 每个「格子 × 变体」各自的基线偏离（比例单位）。
+ *
+ * 物理含义：同一个格子（某天 × 某端 × 某人群）里，control 与 treatment 分到的是
+ * **不同的一批用户**，这批用户的平均倾向天然不同。这个偏离前后周期共享（同一批人），
+ * 所以：
+ *   - 它在两臂之间**不抵消**（不同用户）→ 是真实需要减掉的方差；
+ *   - 它被前周期观测到 → CUPED 正是靠它把精度赚回来。
+ * 量级：0.005 ≈ 二项噪声 sd（sqrt(0.05×0.95/700)≈0.0082）的 60%，
+ * 于是格子率的真实方差比纯二项大约 36%，朴素 i.i.d. 标准误会偏乐观约 17%。
+ */
+export const BASELINE_ARM_SD = 0.005;
+
 const NAMES = [
   '结算页改版', '首页按钮颜色', '推荐算法迭代', '新用户弹窗', '列表加载优化',
   '搜索排序调整', '价格展示方式', '优惠券入口', '购物车交互', '详情页图集',
@@ -82,6 +103,12 @@ export function buildExperiment(
   const rng = mulberry32(seed);
   const cfg = CFG[archetype];
   const p0 = 0.045 + 0.015 * rng();
+  // 日效应 / 设备效应：整段实验内固定、前后周期共享 —— 这正是 CUPED 能减掉的方差来源
+  const dayEffect = Array.from({ length: days }, () => BASELINE_DAY_SD * randn(rng));
+  const devEffect: Record<Device, number> = {
+    iOS: BASELINE_DEVICE_SD * randn(rng),
+    Android: BASELINE_DEVICE_SD * randn(rng),
+  };
   const refundBase = 0.012;
   const complaintBase = 0.0012;
   const latencyMean = 820;
@@ -118,8 +145,21 @@ export function buildExperiment(
           const share = variant === 'control' ? 1 - cfg.ratio : cfg.ratio;
           const n = Math.max(1, Math.round(base * share));
           const lift = tenure === 'new' ? cfg.liftNew : cfg.liftOld;
-          const p = Math.min(0.95, Math.max(0.001, p0 + (variant === 'treatment' ? lift : 0)));
+
+          // 基线 = 实验基准 + 日效应 + 设备效应（前后周期共享）。
+          // 加这一层有两个理由：
+          //   ① 真实数据本来就有星期效应与端差异，以前所有格子共用同一个 p 反而不真实；
+          //   ② 前后周期共享同一段基线，CUPED 才有东西可「借」——否则 rho=0，方差缩减无从谈起。
+          const cellBase = Math.min(0.95, Math.max(0.001, p0 + dayEffect[d] + devEffect[device]));
+          // 该「格子 × 变体」这批用户自己的倾向偏离：前后周期共享，两臂之间不抵消
+          const armShift = BASELINE_ARM_SD * randn(rng);
+          const p = Math.min(0.95, Math.max(0.001, cellBase + armShift + (variant === 'treatment' ? lift : 0)));
           const c = binomial(n, p, rng);
+
+          // 前周期：同口径、同格子、同一批单位的实验前行为（无 lift，共享 cellBase 与 armShift）
+          const nPre = Math.max(1, Math.round(n * (0.9 + 0.2 * rng())));
+          const cPre = binomial(nPre, Math.min(0.95, Math.max(0.001, cellBase + armShift)), rng);
+
           const refundP = Math.min(0.2, refundBase + (variant === 'treatment' ? cfg.refundDiff : 0));
           const refunds = binomial(n, refundP, rng);
           const complaints = poisson(n * complaintBase, rng);
@@ -134,6 +174,8 @@ export function buildExperiment(
             refunds,
             complaints,
             latencyP95: Math.round(latencyMean + 18 * randn(rng)),
+            preExposures: nPre,
+            preConversions: cPre,
           });
         }
       }
@@ -163,6 +205,9 @@ export function generateAA(count = 1000, seedBase = 20261101, days = 7): Dataset
     groundTruth: true,
     spec: {
       days,
+      preDays: days,
+      baselineDaySd: BASELINE_DAY_SD,
+      baselineDeviceSd: BASELINE_DEVICE_SD,
       segments: ['device', 'tenure'],
       baselineRate: [0.045, 0.06],
       refundRate: 0.012,
@@ -210,6 +255,9 @@ export function generateDataset(seedBase = 20261031, days = 7): Dataset {
     groundTruth: true,
     spec: {
       days,
+      preDays: days,
+      baselineDaySd: BASELINE_DAY_SD,
+      baselineDeviceSd: BASELINE_DEVICE_SD,
       segments: ['device', 'tenure'],
       baselineRate: [0.045, 0.06],
       refundRate: 0.012,

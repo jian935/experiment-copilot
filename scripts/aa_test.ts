@@ -11,6 +11,7 @@
  */
 import { writeFileSync } from 'node:fs';
 import { analyze, type Analysis } from '../src/lib/decide.ts';
+import type { DecisionConfig } from '../src/lib/config.ts';
 import { generateAA } from '../src/lib/simulate.ts';
 import { DEFAULT_CONFIG } from '../src/lib/config.ts';
 import type { Dataset, Decision } from '../src/lib/types.ts';
@@ -39,7 +40,7 @@ export interface AaReport {
   meanSamplePerArm: number;
 }
 
-export function runAa(trials = 1000, seedBase = 20261101, days = 7): AaReport {
+export function runAa(trials = 1000, seedBase = 20261101, days = 7, cfg?: Partial<DecisionConfig>): AaReport {
   const ds: Dataset = generateAA(trials, seedBase, days);
   const rowsByExp = new Map<string, (typeof ds.daily)[number][]>();
   for (const r of ds.daily) {
@@ -57,7 +58,7 @@ export function runAa(trials = 1000, seedBase = 20261101, days = 7): AaReport {
   let nSum = 0;
 
   for (const e of ds.experiments) {
-    const a: Analysis = analyze(e, rowsByExp.get(e.id) ?? []);
+    const a: Analysis = analyze(e, rowsByExp.get(e.id) ?? [], cfg);
     decisions[a.decision]++;
     const p = a.overall.p;
     const bucket = Math.min(9, Math.max(0, Math.floor(p * 10)));

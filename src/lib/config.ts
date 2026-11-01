@@ -49,6 +49,21 @@ export interface DecisionConfig {
     latencyP95: GuardrailSpec;
   };
 
+  /**
+   * 主指标标准误的口径：
+   * - 'robust'：从格子间离散程度估（不假设 i.i.d.）。真实数据普遍过离散，
+   *   用 i.i.d. 二项式标准误会系统性偏乐观（实测把 A/A 误报率推到 11%）。默认用它。
+   * - 'iid'：经典 p(1−p)/n。只在确认没有格子级基线漂移时才成立，主要用于对照演示。
+   */
+  seMode?: 'robust' | 'iid';
+
+  /**
+   * 有前周期数据时，主指标是否走 CUPED（方差缩减）口径。
+   * 注意它的收益是「方差缩减」，不是「修误报率」——修误报率靠 seMode=robust。
+   * 这两件事必须分开讲，否则把稳健标准误的功劳算到 CUPED 头上。
+   */
+  useCuped?: boolean;
+
   /** Bootstrap 重抽样次数（蓝图 §8 要求 10k） */
   bootstrapReps: number;
   /** 蒙特卡洛 / Bootstrap 的固定种子：保证结论可复现 */
@@ -80,6 +95,9 @@ export const DEFAULT_CONFIG: DecisionConfig = {
     // 延迟：不同接口基线差异大，用相对 +5%；噪声大且与损失非线性，仍只展示不拦截。
     latencyP95: { margin: 0.05, alpha: 0.05, gating: false, mode: 'harm_and_practical', relative: true },
   },
+
+  seMode: 'robust',
+  useCuped: true,
 
   bootstrapReps: 10000,
   simSeed: 20261101,

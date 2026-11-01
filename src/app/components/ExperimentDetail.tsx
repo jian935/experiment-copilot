@@ -296,8 +296,66 @@ export function ExperimentDetail({
         <p className="px-4 py-2.5 text-[11px] leading-5 text-dim">
           P(B&gt;A) 是「treatment 真的比 control 好」的<b className="text-ink">后验概率</b>，与频率派的 p 值口径不同但结论互补；
           期望损失 = 若误判上线、treatment 实际更差时，平均会损失多少个百分点。
+          {analysis.cuped && analysis.cuped.dispersion > 1.1 && (
+            <>
+              {' '}本实验过离散因子 φ = {analysis.cuped.dispersion.toFixed(2)}，后验已按有效样本量 n/φ 折算——
+              不折算的话后验会过度自信（A/A 下 P(B&gt;A)&gt;95% 的比例实测会到 9.5%，理论应为 5%）。
+            </>
+          )}
         </p>
       </Panel>
+
+      {/* CUPED 方差缩减 */}
+      {analysis.cuped && (
+        <Panel className="mt-4">
+          <PanelHead
+            title="CUPED 方差缩减"
+            hint="用同一批人在实验前的同口径表现做协变量，把「这批人本来就活跃/不活跃」的方差扣掉"
+            right={
+              <span className="rounded-md border border-line bg-panel2/60 px-2 py-0.5 font-mono text-[10px] text-dim">
+                {analysis.cuped.nCells} 个格子 · ρ = {analysis.cuped.rho.toFixed(3)}
+              </span>
+            }
+          />
+          <div className="grid gap-px bg-line sm:grid-cols-4">
+            <BayesCell
+              label="方差缩减"
+              value={`${(analysis.cuped.varReduction * 100).toFixed(1)}%`}
+              cls={analysis.cuped.varReduction > 0.05 ? 'text-ship' : 'text-muted'}
+            />
+            <BayesCell
+              label="SE 变化"
+              value={`${fmtPP(analysis.cuped.seRaw)} → ${fmtPP(analysis.cuped.seAdj)}`}
+            />
+            <BayesCell
+              label="差值变化"
+              value={`${fmtPP(analysis.cuped.diffRaw)} → ${fmtPP(analysis.cuped.diffAdj)}`}
+              cls={liftClass(analysis.cuped.diffAdj)}
+            />
+            <BayesCell
+              label="过离散因子 φ"
+              value={analysis.cuped.dispersion.toFixed(2)}
+              cls={analysis.cuped.dispersion > 1.2 ? 'text-iterate' : 'text-muted'}
+            />
+          </div>
+          <p className="px-4 py-2.5 text-[11px] leading-5 text-dim">
+            θ = {analysis.cuped.theta.toFixed(4)}；
+            未调整 p = {analysis.cuped.pRaw < 0.001 ? '<0.001' : analysis.cuped.pRaw.toFixed(3)}，
+            CUPED p = {analysis.cuped.pAdj < 0.001 ? '<0.001' : analysis.cuped.pAdj.toFixed(3)}
+            （t 分布，df = {analysis.cuped.df}）。
+            {analysis.primary.via === 'cuped' ? (
+              <>
+                {' '}当前决策<b className="text-ink">采用 CUPED 口径</b>。
+                注意：φ = {analysis.cuped.dispersion.toFixed(2)} &gt; 1 说明格子级基线存在漂移，
+                标准误是<b className="text-ink">从格子间离散程度直接估的</b>，不是 p(1−p)/n——
+                修好误报率的是这一步，CUPED 的功劳是把它收窄的区间又赚回来一点。
+              </>
+            ) : (
+              ' 当前决策未采用 CUPED 口径（可在设置页开启）。'
+            )}
+          </p>
+        </Panel>
+      )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
         <Panel>

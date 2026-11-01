@@ -23,8 +23,9 @@ describe('评测口径（M5）', () => {
   it('FPR 分母只算真实无效应（null 40 个），不含 SRM', () => {
     const nullN = ds.experiments.filter((e) => e.archetype === 'null').length;
     expect(r.fpr.n).toBe(nullN);
-    expect(r.fpr.hit).toBe(3);
-    expect(r.fpr.rate).toBeCloseTo(3 / 40, 10);
+    // 加入真实的按臂基线异质性 + 改用格子级稳健标准误后，null 误报从 3/40 降到 2/40
+    expect(r.fpr.hit).toBe(2);
+    expect(r.fpr.rate).toBeCloseTo(2 / 40, 10);
   });
 
   it('正/负效应漏判为 0', () => {

@@ -54,7 +54,7 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 142 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配）
+npm test           # 157 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
@@ -124,7 +124,7 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  142 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A 模拟 + 口径字典/阈值可配）
+tests/                  157 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED 模拟 + 口径字典/阈值可配）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
 docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```
@@ -175,7 +175,9 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 | 数字审计 | 回答里的每个数字都要在白名单（引擎 + 工具返回）里按显示精度对得上；对不上就标红列出 |
 | 引用可点 | 回答里的 `E6` 是按钮，点开直接跳到证据抽屉并展开该条 |
 | Ablation | `npm run ablation`：同一批问题（8 题 × 3 个实验）跑规则/智能两种模式，比较引用覆盖率、可疑数字率、口径识别率 |
-| A/A 自校准 | `npm run aa`：1000 个零效应实验跑引擎，实测总误报率 **5.30%**（名义 α=5%）、SRM/护栏误报 0%、贝叶斯 P(B>A) 均值 0.5017 |
+| A/A 自校准 | `npm run aa`：1000 个零效应实验跑引擎，实测总误报率 **5.00%**（名义 α=5%）、贝叶斯 P(B>A) 均值 0.4954、P>0.95 占 5.10% |
+| CUPED | `npm run cuped`：实测方差缩减中位 **7.76%**（ρ=0.277、φ=1.42）；A/A 误报率 i.i.d. 11.33% → 稳健 5.67% → 稳健+CUPED 5.33% |
+| 稳健标准误 | 主指标不再假设 i.i.d.；标准误从格子间离散程度直接估。朴素 p(1−p)/n 在本数据集上会把 A/A 误报率推到 11.33% |
 
 **实测成绩**（24 条问答 = 8 题 × 3 个实验，`docs/ABLATION.md`）：
 

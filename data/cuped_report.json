@@ -1,0 +1,19 @@
+{
+  "generatedAt": "2026-11-01T07:57:34.004Z",
+  "seedBase": 20261031,
+  "nExperiments": 120,
+  "varReductionMedian": 0.07755398876234998,
+  "varReductionMean": 0.09493064409976444,
+  "varReductionP90": 0.18914086931745033,
+  "rhoMedian": 0.2771537599266188,
+  "dispersionMedian": 1.4196302918840444,
+  "nCells": 56,
+  "detectedCuped": 25,
+  "detectedRobust": 25,
+  "detectedIid": 25,
+  "positiveTotal": 25,
+  "aaFprCuped": 0.05333333333333334,
+  "aaFprRobust": 0.056666666666666664,
+  "aaFprIid": 0.11333333333333333,
+  "aaTrials": 600
+}

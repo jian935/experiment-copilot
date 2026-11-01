@@ -1,8 +1,9 @@
 import type { DailyRow, Decision, Experiment, Variant } from './types.ts';
 import {
-  bayesBetaBinomial, bhAdjust, bootstrapP, bootstrapTwoSample, guardrailBlocks, nonInferiority,
-  srmChi2, twoProportionZ, twoSidedP, wilson,
-  type BayesResult, type BootstrapResult, type NonInferiorityResult, type PropTest, type SrmResult,
+  bayesBetaBinomial, bhAdjust, bootstrapP, bootstrapTwoSample, cupedAdjust, guardrailBlocks,
+  nonInferiority, srmChi2, twoProportionZ, twoSidedP, wilson,
+  type BayesResult, type BootstrapResult, type CupedCell, type CupedResult, type NonInferiorityResult,
+  type PropTest, type SrmResult,
 } from './stats.ts';
 import { DEFAULT_CONFIG, mergeConfig, type DecisionConfig } from './config.ts';
 
@@ -75,6 +76,10 @@ export interface Analysis {
   segments: { tenure: SegmentTest[]; device: SegmentTest[] };
   interaction: { tenure: { diffDiff: number; se: number; z: number; p: number } | null };
   guardrails: GuardrailResult[];
+  /** CUPED：用前周期数据做方差缩减后的检验（无前周期数据时为 undefined） */
+  cuped?: CupedResult;
+  /** 主指标检验的「决策口径」：默认等于 overall；启用 CUPED 且有前周期数据时等于 CUPED 结果 */
+  primary: { diff: number; p: number; ci95: [number, number]; via: 'cuped' | 'robust' | 'ztest' };
   /** 贝叶斯视角（Beta-Binomial 后验）：P(treatment 更优)、可信区间、期望损失 */
   bayes: BayesResult;
   /** 置信度 = P(treatment 真正优于 control)；与频率派 p 值口径不同，但结论互补 */
@@ -191,8 +196,34 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   const t = aggregate(rows, 'treatment');
   const overall = twoProportionZ(c.c, c.n, t.c, t.n);
 
-  // 贝叶斯视角：把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率
-  const bayes = bayesBetaBinomial(c.c, c.n, t.c, t.n);
+  // CUPED：只有明细行带前周期数据时才算（导入的真实数据常常没有，那就自动退回普通检验）
+  const cells: CupedCell[] = [];
+  for (const r of rows) {
+    if (r.preExposures && r.preConversions !== undefined && r.exposures > 0) {
+      cells.push({
+        n: r.exposures,
+        c: r.conversions,
+        nPre: r.preExposures,
+        cPre: r.preConversions,
+        treatment: r.variant === 'treatment',
+      });
+    }
+  }
+  const cuped = cells.length ? cupedAdjust(cells) : null;
+  // 决策口径，按优先级选：
+  //   1) 有前周期 + 开了 CUPED → CUPED 调整后的差值与区间（方差更小）
+  //   2) 有前周期 + seMode=robust → 差值不变，但标准误改用格子级稳健估计（修过离散）
+  //   3) 否则 → 经典两比例 z 检验（要求 i.i.d.，真实数据上会偏乐观）
+  const useCuped = !!cuped && cfg.useCuped !== false;
+  const primary = useCuped
+    ? { diff: cuped!.diffAdj, p: cuped!.pAdj, ci95: cuped!.ciAdj, via: 'cuped' as const }
+    : cuped && (cfg.seMode ?? 'robust') === 'robust'
+      ? { diff: cuped.diffRaw, p: cuped.pRaw, ci95: cuped.ciRaw, via: 'robust' as const }
+      : { diff: overall.diff, p: overall.p, ci95: overall.ci95, via: 'ztest' as const };
+
+  // 贝叶斯视角：把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率。
+  // 用 CUPED 测出的过离散因子折算有效样本量，否则后验会过度自信（与频率派口径不一致）。
+  const bayes = bayesBetaBinomial(c.c, c.n, t.c, t.n, cuped?.dispersion ?? 1);
 
   const srm = srmChi2([c.n, t.n], [0.5, 0.5], cfg.srmAlpha, cfg.srmMaxRelImb);
 
@@ -324,10 +355,52 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   add(
     'metric',
     exp.primaryMetric,
-    `control ${(overall.controlRate * 100).toFixed(2)}% vs treatment ${(overall.treatmentRate * 100).toFixed(2)}%；差值 ${(overall.diff * 100).toFixed(2)}pp，95% CI [${(overall.ci95[0] * 100).toFixed(2)}, ${(overall.ci95[1] * 100).toFixed(2)}]pp，p=${ep(overall.p)}`,
-    overall.p,
+    `control ${(overall.controlRate * 100).toFixed(2)}% vs treatment ${(overall.treatmentRate * 100).toFixed(2)}%；差值 ${(primary.diff * 100).toFixed(2)}pp，95% CI [${(primary.ci95[0] * 100).toFixed(2)}, ${(primary.ci95[1] * 100).toFixed(2)}]pp，p=${ep(primary.p)}` +
+      (useCuped ? `（CUPED 调整后口径）` : ''),
+    primary.p,
     propSteps(overall),
   );
+
+  if (cuped) {
+    add(
+      'metric',
+      'CUPED 方差缩减',
+      `前周期相关系数 ρ=${cuped.rho.toFixed(3)}，θ=${cuped.theta.toFixed(3)}；` +
+        `差值 ${(cuped.diffRaw * 100).toFixed(2)}pp → ${(cuped.diffAdj * 100).toFixed(2)}pp，` +
+        `SE ${(cuped.seRaw * 100).toFixed(3)}pp → ${(cuped.seAdj * 100).toFixed(3)}pp，` +
+        `方差缩减 ${(cuped.varReduction * 100).toFixed(1)}%${useCuped ? '（已作为决策口径）' : '（未启用）'}`,
+      cuped.pAdj,
+      [
+        {
+          title: '① 前后周期同口径对齐',
+          formula: 'X = 前周期转化率，Y = 实验期转化率（同一批单位）',
+          value: `格子数 ${cuped.nCells}；过离散因子 φ = ${cuped.dispersion.toFixed(2)}${cuped.dispersion > 1.2 ? '（>1：朴素 i.i.d. 标准误会偏乐观）' : ''}`,
+        },
+        {
+          title: '② 回归系数 θ',
+          formula: 'θ = Σ w(X−X̄ᵥ)(Y−Ȳᵥ) / Σ w(X−X̄ᵥ)²（臂内中心化后合并）',
+          value: `θ = ${cuped.theta.toFixed(4)}，ρ = ${cuped.rho.toFixed(4)}`,
+        },
+        {
+          title: '③ 调整后的差值',
+          formula: 'Δ_adj = (Ȳ_t − Ȳ_c) − θ(X̄_t − X̄_c)',
+          value: `${pp2(cuped.diffRaw)} − ${cuped.theta.toFixed(4)} × ${pp2(useCuped ? cuped.diffRaw - cuped.diffAdj : 0)} = ${pp2(cuped.diffAdj)}`,
+        },
+        {
+          title: '④ 标准误（格子级稳健估计，不假设 i.i.d.）',
+          formula: 'Var(均值) = Σ wᵢ²(zᵢ − z̄)² / (Σwᵢ)²，z = Y − θX',
+          value:
+            `SE ${(cuped.seRaw * 100).toFixed(3)}pp → ${(cuped.seAdj * 100).toFixed(3)}pp；` +
+            `方差缩减 ${(cuped.varReduction * 100).toFixed(1)}% ≈ 省 ${(cuped.sampleSaving * 100).toFixed(1)}% 样本`,
+        },
+        {
+          title: '⑤ 检验',
+          formula: `z = Δ/SE，p 用 t 分布（df = ${cuped.df}）`,
+          value: `原始 p = ${ep(cuped.pRaw)}；CUPED p = ${ep(cuped.pAdj)} → ${useCuped ? '采用 CUPED 口径' : '未启用，仍用原始口径'}`,
+        },
+      ],
+    );
+  }
 
   // ---- 分层 ----
   for (const s of segments.tenure) {
@@ -472,23 +545,23 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   } else if (worseGuardrail) {
     decision = 'no-ship';
     reasonCode = 'GUARDRAIL';
-    reason = `主指标${overall.diff > 0 ? '正向' : '负向'}，但${worseGuardrail.label}显著恶化（${(worseGuardrail.diff * 100).toFixed(2)}pp，p=${ep(worseGuardrail.p)}），护栏不通过。`;
-  } else if (overall.p < cfg.alpha && overall.diff < 0) {
+    reason = `主指标${primary.diff > 0 ? '正向' : '负向'}，但${worseGuardrail.label}显著恶化（${(worseGuardrail.diff * 100).toFixed(2)}pp，p=${ep(worseGuardrail.p)}），护栏不通过。`;
+  } else if (primary.p < cfg.alpha && primary.diff < 0) {
     decision = 'no-ship';
     reasonCode = 'NEGATIVE';
-    reason = `主指标显著负向（${(overall.diff * 100).toFixed(2)}pp，p=${ep(overall.p)}），不建议上线。`;
+    reason = `主指标显著负向（${(primary.diff * 100).toFixed(2)}pp，p=${ep(primary.p)}），不建议上线。`;
   } else if (heterogeneous) {
     decision = 'iterate';
     reasonCode = 'HETEROGENEOUS';
     reason = `效应集中在「${bestPos.label}」（${(bestPos.test.diff * 100).toFixed(2)}pp），「${flatSegment.label}」基本无效（${(flatSegment.test.diff * 100).toFixed(2)}pp，p=${ep(flatSegment.test.p)}），交互 p=${ep(interaction?.p ?? 1)}；建议定向上线，仅对「${bestPos.label}」放开。`;
-  } else if (overall.p >= cfg.alpha) {
+  } else if (primary.p >= cfg.alpha) {
     decision = 'inconclusive';
     reasonCode = 'NOT_SIG';
-    reason = `主指标差值 ${(overall.diff * 100).toFixed(2)}pp，95% CI 跨 0，p=${overall.p.toFixed(2)}，证据不足。`;
+    reason = `主指标差值 ${(primary.diff * 100).toFixed(2)}pp，95% CI 跨 0，p=${primary.p.toFixed(2)}，证据不足。`;
   } else {
     decision = 'ship';
     reasonCode = 'POSITIVE';
-    reason = `主指标显著正向（${(overall.diff * 100).toFixed(2)}pp，p=${ep(overall.p)}），护栏无显著恶化，建议上线。`;
+    reason = `主指标显著正向（${(primary.diff * 100).toFixed(2)}pp，p=${ep(primary.p)}），护栏无显著恶化，建议上线。`;
   }
 
   const rules: RuleTrace[] = [
@@ -512,8 +585,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       code: 'NEGATIVE',
       label: '主指标负向',
       condition: `p < ${cfg.alpha} 且 差值为负`,
-      hit: overall.p < cfg.alpha && overall.diff < 0,
-      detail: `差值 ${pp2(overall.diff)}，p = ${ep(overall.p)}`,
+      hit: primary.p < cfg.alpha && primary.diff < 0,
+      detail: `差值 ${pp2(primary.diff)}，p = ${ep(primary.p)}`,
     },
     {
       code: 'HETEROGENEOUS',
@@ -530,15 +603,15 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       code: 'NOT_SIG',
       label: '证据不足',
       condition: `p ≥ ${cfg.alpha}（差值 95% CI 跨 0）`,
-      hit: overall.p >= cfg.alpha,
-      detail: `p = ${ep(overall.p)}，CI [${pp2(overall.ci95[0])}, ${pp2(overall.ci95[1])}]`,
+      hit: primary.p >= cfg.alpha,
+      detail: `p = ${ep(primary.p)}，CI [${pp2(primary.ci95[0])}, ${pp2(primary.ci95[1])}]`,
     },
     {
       code: 'POSITIVE',
       label: '显著正向',
       condition: `p < ${cfg.alpha}、差值为正，且以上均未触发`,
-      hit: overall.p < cfg.alpha && overall.diff > 0,
-      detail: `差值 ${pp2(overall.diff)}，p = ${ep(overall.p)}`,
+      hit: primary.p < cfg.alpha && primary.diff > 0,
+      detail: `差值 ${pp2(primary.diff)}，p = ${ep(primary.p)}`,
     },
   ];
 
@@ -551,6 +624,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     segments,
     interaction: { tenure: interaction },
     guardrails,
+    ...(cuped ? { cuped } : {}),
+    primary,
     bayes,
     confidence: bayes.probTreatBetter,
     decision,
