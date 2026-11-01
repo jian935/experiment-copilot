@@ -44,7 +44,8 @@ export type ToolName =
   | 'explain_rules'
   | 'bayesian_view'
   | 'metric_decompose'
-  | 'metric_dictionary';
+  | 'metric_dictionary'
+  | 'peeking_check';
 
 export interface AgentReply {
   /** 最终回答（含 [E1] 这类引用标记） */

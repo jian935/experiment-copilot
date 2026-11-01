@@ -6,6 +6,7 @@ import {
   type PropTest, type RatioCell, type RatioTest, type SrmResult,
 } from './stats.ts';
 import { DEFAULT_CONFIG, mergeConfig, type DecisionConfig } from './config.ts';
+import { buildPeekReport, type LookInput, type PeekReport } from './sequential.ts';
 
 export interface VariantAgg {
   n: number;
@@ -162,6 +163,15 @@ export interface Analysis {
     flatSegment: string | null;
   };
   guardrails: GuardrailResult[];
+  /**
+   * 序贯监控：把「今天已经看了几次」算进阈值。
+   *
+   * 为什么不影响 decision：决策是真值标注与 A/A 校准都在用的主口径，
+   * 一旦改成序贯阈值，历史 120 条的真值标注全部作废（那是改口径迁就引擎）。
+   * 所以它作为**并行口径**给出：同一份数据，naive / OBF / always-valid 三套判定各自怎么说，
+   * 以及差异有多大。真要按序贯口径上线，看 `sequential.obfSig` 而不是 `decision`。
+   */
+  sequential: PeekReport;
   /** CUPED：用前周期数据做方差缩减后的检验（无前周期数据时为 undefined）；口径与主指标一致 */
   cuped?: CupedResult;
   /** 贝叶斯视角：率口径用 Beta-Binomial，连续口径用正态后验 */
@@ -235,6 +245,109 @@ function unpooledSe(t: PropTest): number {
     (t.controlRate * (1 - t.controlRate)) / t.n1 +
     (t.treatmentRate * (1 - t.treatmentRate)) / t.n2,
   );
+}
+
+/**
+ * 决策实际采用的主指标口径。
+ * 序贯监控必须**沿用同一个口径**，否则「换个观察窗口就换了个统计量」，
+ * 那样的 z 轨迹不是鞅，OBF / mSPRT 的保证全部失效。
+ */
+export type PrimaryMode = 'cuped' | 'robust' | 'ztest' | 'delta';
+
+/** 把明细折成 CUPED 需要的格子（协变量与主指标同口径） */
+function cupedCellsOf(rows: DailyRow[], kind: 'rate' | 'continuous'): CupedCell[] {
+  const cells: CupedCell[] = [];
+  for (const r of rows) {
+    if (!(r.preExposures && r.exposures > 0)) continue;
+    if (kind === 'continuous') {
+      if (r.preRevenue === undefined) continue;
+      cells.push({ n: r.exposures, c: r.revenue ?? 0, nPre: r.preExposures, cPre: r.preRevenue, treatment: r.variant === 'treatment' });
+    } else if (r.preConversions !== undefined) {
+      cells.push({ n: r.exposures, c: r.conversions, nPre: r.preExposures, cPre: r.preConversions, treatment: r.variant === 'treatment' });
+    }
+  }
+  return cells;
+}
+
+/**
+ * 在任意行子集上按指定口径估一次「差值 + 标准误」。
+ *
+ * 存在的理由：序贯监控要在第 1 天、第 2 天……各估一次。如果这几处另写一套公式，
+ * 就必然和最终决策口径漂移（历史上 `real_eval` 就因为 `or` 的短路算错过一次）。
+ * 所以这里只做「同一套口径、不同数据量」，并由单测 `estimateAt(全集) === analysis.primary` 钉住。
+ * CUPED 在某天不可用时（前周期格子不够）退回未校正口径，并在 via 里如实标明。
+ */
+/**
+ * 格子级稳健估计（含 CUPED）要求的最低格子数。
+ *
+ * 为什么要设这个门槛：格子级方差是从「格子间离散程度」估的，自由度约 = 格子数。
+ * 第 1 天只有 8 个格子（每臂 4 个），χ² 自由度 3 的离散度估计可以低到真值的 1/5，
+ * 于是 SE 被低估数倍、z 虚高数倍 —— 实测 E060 第 1 天 z=3.97、第 2 天 se=0.157
+ * 而第 3 天 se=0.210（SE 随样本增加反而变大，唯一解释就是它在被噪声估），
+ * 那个 3.97 纯粹是「用几个格子估方差」的产物，不是数据里的信号。
+ * 序贯监控最怕的正是这种早起的假信号，所以格子不够时退回朴素口径（SE 偏保守）。
+ *
+ * 24 个格子 ≈ 3 天（每天 8 格）：再少就退，再多的收益已经不明显。
+ */
+const MIN_CELLS_FOR_ROBUST = 24;
+
+export function estimateAt(
+  rows: DailyRow[],
+  kind: 'rate' | 'continuous',
+  mode: PrimaryMode,
+): { diff: number; se: number; via: PrimaryMode } | null {
+  if (kind === 'continuous') {
+    const rt = ratioTest(ratioCellsOf(rows));
+    if (!rt) return null;
+    if (mode === 'cuped') {
+      const cuCells = cupedCellsOf(rows, 'continuous');
+      const nPerArm = cuCells.filter((c) => c.treatment).length;
+      const cu = cuCells.length >= MIN_CELLS_FOR_ROBUST && nPerArm >= 4
+        ? cupedAdjust(cuCells, 'continuous')
+        : null;
+      if (cu) return { diff: cu.diffAdj, se: cu.seAdj, via: 'cuped' };
+    }
+    return { diff: rt.diff, se: rt.se, via: 'delta' };
+  }
+  const c = aggregate(rows, 'control');
+  const t = aggregate(rows, 'treatment');
+  if (!(c.n > 0) || !(t.n > 0)) return null;
+  const zt = twoProportionZ(c.c, c.n, t.c, t.n);
+  if (mode === 'cuped' || mode === 'robust') {
+    const cuCells = cupedCellsOf(rows, 'rate');
+    const nPerArm = cuCells.filter((x) => x.treatment).length;
+    const cu = cuCells.length >= MIN_CELLS_FOR_ROBUST && nPerArm >= 4
+      ? cupedAdjust(cuCells, 'rate')
+      : null;
+    if (cu) {
+      return mode === 'cuped'
+        ? { diff: cu.diffAdj, se: cu.seAdj, via: 'cuped' }
+        : { diff: cu.diffRaw, se: cu.seRaw, via: 'robust' };
+    }
+  }
+  return { diff: zt.diff, se: unpooledSe(zt), via: 'ztest' };
+}
+
+/**
+ * 逐日累积的观察点：第 k 天 = 第 1..k 天的全部数据（真实团队就是这样看板的）。
+ *
+ * 只看「日期」这一维，不按天重置——序贯检验针对的正是**累计**统计量的重复窥探。
+ * 天数相同则按日期字符串升序（数据里是 YYYY-MM-DD，字典序即时间序）。
+ */
+export function dailyLooks(rows: DailyRow[], kind: 'rate' | 'continuous', mode: PrimaryMode): LookInput[] {
+  const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+  if (dates.length < 2) return [];
+  const out: LookInput[] = [];
+  for (let i = 0; i < dates.length; i++) {
+    const upto = new Set(dates.slice(0, i + 1));
+    const cum = rows.filter((r) => upto.has(r.date));
+    const est = estimateAt(cum, kind, mode);
+    if (!est || !(est.se > 0)) continue;
+    const c = aggregate(cum, 'control');
+    const t = aggregate(cum, 'treatment');
+    out.push({ day: i + 1, date: dates[i], nPerArm: (c.n + t.n) / 2, diff: est.diff, se: est.se });
+  }
+  return out;
 }
 
 /** 两比例检验的 4 步推导（主指标 / 分层 / 护栏共用） */
@@ -312,8 +425,7 @@ function ratioSteps(r: RatioTest, breakdown?: ArpuBreakdown): CalcStep[] {
 /** 把明细行折成「格子」：一行就是一个格子（日期 × 设备 × 新老 × 变体） */
 function ratioCellsOf(rows: DailyRow[]): RatioCell[] {
   const out: RatioCell[] = [];
-  for (const r of rows) {
-    if (r.revenue === undefined || !(r.exposures > 0)) continue;
+  for (const r of rows) {    if (r.revenue === undefined || !(r.exposures > 0)) continue;
     out.push({ n: r.exposures, sum: r.revenue, treatment: r.variant === 'treatment' });
   }
   return out;
@@ -401,17 +513,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
 
   // CUPED：只有明细行带前周期数据时才算（导入的真实数据常常没有，那就自动退回普通检验）。
   // 协变量必须与主指标同口径：率指标用前周期转化数，ARPU 用前周期收入。
-  const cells: CupedCell[] = [];
-  for (const r of rows) {
-    if (r.preExposures && r.exposures > 0) {
-      if (metricKind === 'continuous') {
-        if (r.preRevenue === undefined) continue;
-        cells.push({ n: r.exposures, c: r.revenue ?? 0, nPre: r.preExposures, cPre: r.preRevenue, treatment: r.variant === 'treatment' });
-      } else if (r.preConversions !== undefined) {
-        cells.push({ n: r.exposures, c: r.conversions, nPre: r.preExposures, cPre: r.preConversions, treatment: r.variant === 'treatment' });
-      }
-    }
-  }
+  // 格子构造与 estimateAt 共用同一个函数，避免「主指标走 A、逐日监控走 B」的口径漂移。
+  const cells = cupedCellsOf(rows, metricKind);
   const cuped = cells.length ? cupedAdjust(cells, metricKind) : null;
 
   // 决策口径，按优先级选：
@@ -432,6 +535,10 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   } else {
     primary = { kind: 'rate', label: exp.primaryMetric, unit: 'pp', controlValue: overall.controlRate, treatmentValue: overall.treatmentRate, diff: overall.diff, p: overall.p, ci95: overall.ci95, se: unpooledSe(overall), relativeLift: overall.relativeLift, via: 'ztest' };
   }
+
+  // 序贯监控：沿用**同一个口径**（primary.via）逐日重估，再换算出三套阈值。
+  // 逐日重估而不是按天重置，是因为偷看的人看的就是累计看板。
+  const sequential = buildPeekReport(dailyLooks(rows, metricKind, primary.via), { alpha: cfg.alpha });
 
   // 贝叶斯视角：率口径用 Beta-Binomial（把过离散折算成有效样本量，否则后验过度自信）；
   // 连续口径没有「计数/样本量」结构，用正态后验（bayesNormal），公式逐字对应。
@@ -678,6 +785,52 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     );
   }
 
+  // ---- 序贯（偷看校正）----
+  if (!sequential.skipped && sequential.looks.length >= 2) {
+    const L = sequential.looks;
+    const last = L[L.length - 1];
+    const first = L[0];
+    add(
+      'metric',
+      '序贯监控（窥探校正）',
+      `已观察 ${sequential.k} 次（第 1 天起每天累计）；最终 naive p=${ep(sequential.finalPNaive)}、` +
+        `OBF 门槛 p<${ep(sequential.finalPBoundary)}、always-valid p=${ep(sequential.finalPAlways)}；` +
+        `按 OBF 口径${sequential.obfSig ? '已越过边界' : '尚未越过边界'}`,
+      sequential.finalPBoundary,
+      [
+        {
+          title: '① 你其实看了几次',
+          formula: '每看一次，α 就被花掉一点；naive 0.05 只对「只看一次」成立',
+          value:
+            `信息量比例 ${first.infoFrac.toFixed(2)} → ${last.infoFrac.toFixed(2)}，共 ${sequential.k} 次观察；` +
+            `第 1 次观察的 z=${first.z.toFixed(3)}（边界 ±${first.zBoundary.toFixed(3)}），最后一次 z=${last.z.toFixed(3)}（边界 ±${last.zBoundary.toFixed(3)}）`,
+        },
+        {
+          title: '② OBF α 消耗函数（Lan–DeMets）',
+          formula: 'α*(t) = 2 − 2Φ(z₁₋α/₂/√t)，边界由联合分布递推数值解出',
+          value:
+            `累计花掉 α = ${(last.alphaSpent * 100).toFixed(2)}%（t=1 时正好等于 α=${(sequential.alpha * 100).toFixed(0)}%）；` +
+            `最后一次的名义门槛收紧到 ${(sequential.finalPBoundary * 100).toFixed(2)}%，相当于 naive 阈值的 1/${sequential.obfTightening.toFixed(2)}`,
+        },
+        {
+          title: '③ always-valid p（mSPRT）',
+          formula: 'Λ = √(σ²/(σ²+τ²))·exp(τ²δ̂²/(2σ²(σ²+τ²)))，p = min(1, 1/Λ)',
+          value:
+            `先验尺度 τ = ${fmtDiff(sequential.priorScale, primary.unit)}（= 1.96×最终标准误，看数据前就定好）；` +
+            `p_always = ${ep(sequential.finalPAlways)}。代价是它比 OBF 更严：随时可看是用功效换来的`,
+        },
+        {
+          title: '④ 三套口径的判定',
+          formula: 'naive：p<α；OBF：任一次越过该次边界；always-valid：任一次 p_always<α',
+          value:
+            `naive ${sequential.naiveSig ? '显著' : '不显著'} · OBF ${sequential.obfSig ? '显著' : '不显著'} · ` +
+            `always-valid ${sequential.alwaysSig ? '显著' : '不显著'}` +
+            (sequential.naiveSig && !sequential.obfSig ? ' → 这正是「偷看把不显著看成显著」的样子' : ''),
+        },
+      ],
+    );
+  }
+
   // ---- 分层 ----
   for (const s of segments.tenure) {
     const segRows = rows.filter((r) => r.tenure === s.key);
@@ -915,6 +1068,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       flatSegment: flatSegment ? flatSegment.label : null,
     },
     guardrails,
+    sequential,
     ...(cuped ? { cuped } : {}),
     bayes,
     confidence: bayes.probTreatBetter,

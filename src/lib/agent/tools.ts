@@ -18,6 +18,7 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   bayesian_view: '贝叶斯视角',
   metric_decompose: '指标因子分解',
   metric_dictionary: '口径字典',
+  peeking_check: '窥探校正（序贯）',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -493,6 +494,71 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
       };
     }
 
+    case 'peeking_check': {
+      // 序贯监控：回答「我每天都在看，现在算不算数」。
+      // 关键是把「看了几次」这个事实和「门槛被收紧到多少」连起来，
+      // 否则用户会以为序贯校正只是又给了一个 p 值。
+      const s = a.sequential;
+      const unit = a.primary.unit;
+      if (s.skipped || s.looks.length < 2) {
+        return {
+          tool: name,
+          args,
+          summary: `无法做序贯校正：${s.skipped ?? '观察次数不足'}`,
+          data: { available: false, reason: s.skipped ?? '观察次数不足', looks: 0 },
+          cites: [],
+        };
+      }
+      const last = s.looks[s.looks.length - 1];
+      return {
+        tool: name,
+        args,
+        summary:
+          `已观察 ${s.k} 次；按 OBF 口径最后一次要 p<${(s.finalPBoundary * 100).toFixed(2)}%（naive 为 ${(s.alpha * 100).toFixed(0)}%）；` +
+          `naive p=${pv(s.finalPNaive)}、OBF ${s.obfCrossDay ? `第 ${s.obfCrossDay} 次越过` : '全程未越界'}、always-valid p=${pv(s.finalPAlways)}`,
+        data: {
+          available: true,
+          looks: s.k,
+          alpha: s.alpha,
+          /** 最终那次观察的名义门槛（p 尺度）与百分数写法，回答里引用哪个都不会错 */
+          finalPBoundary: s.finalPBoundary,
+          finalPBoundaryText: `${(s.finalPBoundary * 100).toFixed(2)}%`,
+          tightening: s.obfTightening,
+          tighteningText: `收紧 ${s.obfTightening.toFixed(2)} 倍`,
+          finalPNaive: s.finalPNaive,
+          finalPNaiveText: pv(s.finalPNaive),
+          finalPAlways: s.finalPAlways,
+          finalPAlwaysText: pv(s.finalPAlways),
+          /** always-valid p 的正确报法是全程最小值（它控制的是「整个过程有没有出现证据」） */
+          minAlwaysP: s.minAlwaysP,
+          minAlwaysPText: pv(s.minAlwaysP),
+          minNaiveP: s.minNaiveP,
+          minNaivePText: pv(s.minNaiveP),
+          z: last.z,
+          zText: last.z.toFixed(2),
+          zBoundary: last.zBoundary,
+          zBoundaryText: last.zBoundary.toFixed(2),
+          naiveSig: s.naiveSig,
+          obfSig: s.obfSig,
+          alwaysSig: s.alwaysSig,
+          /** 第一次越过边界是第几次观察；null = 全程没越过 */
+          obfCrossDay: s.obfCrossDay,
+          alwaysCrossDay: s.alwaysCrossDay,
+          /** 最后一次观察本身有没有越过（早期越过、后面回落要说清楚） */
+          obfSigNow: s.obfSigNow,
+          obfCrossText: s.obfCrossDay ? `第 ${s.obfCrossDay} 次观察越过边界` : '全程未越过边界',
+          /** 「偷看把不显著看成显著」的那一类：回答必须点明，否则用户会以为引擎自相矛盾 */
+          rescuedByCorrection: s.naiveSig && !s.obfSig,
+          priorScale: s.priorScale,
+          priorScaleText: fmtDiff(s.priorScale, unit, 3),
+          unit,
+          /** 每次观察的边界序列：给"边界一路收紧"这个说法提供数字 */
+          boundaries: s.looks.map((l) => ({ day: l.day, date: l.date, z: +l.z.toFixed(3), zBoundary: +l.zBoundary.toFixed(3), pNaive: l.pNaive })),
+        },
+        cites: cite(a, 'metric', '序贯'),
+      };
+    }
+
     default:
       throw new Error(`未知工具：${name}`);
   }
@@ -629,6 +695,14 @@ export const TOOL_SCHEMA = [
         },
         required: [],
       },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'peeking_check',
+      description: '序贯监控：如果每天都在看同一份看板，现在这一次观察需要多严的阈值才算显著（OBF / always-valid p）',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
   },
 ];

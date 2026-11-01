@@ -1,0 +1,136 @@
+{
+  "generatedAt": "2026-11-01T10:33:46.630Z",
+  "seedBase": 20261031,
+  "sim": {
+    "looks": 7,
+    "trials": 20000,
+    "naiveRate": 0.16365,
+    "obfRate": 0.04925,
+    "alwaysRate": 0.00515,
+    "boundaries": [
+      5.185577291425391,
+      3.6668559938796914,
+      3.0046103970857008,
+      2.6319694248238514,
+      2.389745808753082,
+      2.2200587954270814,
+      2.096885881251712
+    ],
+    "finalNominalP": 0.036003678654902505,
+    "msprtZ": 3.088517881813373,
+    "msprtBestZ": 3.0351224130285512
+  },
+  "experiments": {
+    "n": 120,
+    "looksHistogram": {
+      "7": 120
+    },
+    "naiveSig": 68,
+    "obfSig": 68,
+    "alwaysSig": 60,
+    "rescuedByCorrection": 1,
+    "crossedEarly": 67,
+    "finalNominalPMedian": 0.036003678654902505
+  },
+  "disagreements": [
+    {
+      "id": "E004",
+      "archetype": "null",
+      "decision": "ship",
+      "looks": 7,
+      "naiveP": 0.04208653762860992,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 4,
+      "alwaysSig": false
+    },
+    {
+      "id": "E008",
+      "archetype": "heterogeneous",
+      "decision": "iterate",
+      "looks": 7,
+      "naiveP": 0.021466737350777976,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 7,
+      "alwaysSig": false
+    },
+    {
+      "id": "E038",
+      "archetype": "heterogeneous",
+      "decision": "iterate",
+      "looks": 7,
+      "naiveP": 0.024286300117507986,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 6,
+      "alwaysSig": false
+    },
+    {
+      "id": "E052",
+      "archetype": "null",
+      "decision": "inconclusive",
+      "looks": 7,
+      "naiveP": 0.05117034105838436,
+      "naiveSig": false,
+      "obfSig": true,
+      "obfCrossDay": 6,
+      "alwaysSig": false
+    },
+    {
+      "id": "E072",
+      "archetype": "heterogeneous",
+      "decision": "iterate",
+      "looks": 7,
+      "naiveP": 0.006434080089405603,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 6,
+      "alwaysSig": false
+    },
+    {
+      "id": "E077",
+      "archetype": "heterogeneous",
+      "decision": "iterate",
+      "looks": 7,
+      "naiveP": 0.006427104846286946,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 6,
+      "alwaysSig": false
+    },
+    {
+      "id": "E082",
+      "archetype": "heterogeneous",
+      "decision": "iterate",
+      "looks": 7,
+      "naiveP": 0.003215913683928928,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 6,
+      "alwaysSig": false
+    },
+    {
+      "id": "E084",
+      "archetype": "null",
+      "decision": "no-ship",
+      "looks": 7,
+      "naiveP": 0.012068167379355899,
+      "naiveSig": true,
+      "obfSig": true,
+      "obfCrossDay": 6,
+      "alwaysSig": false
+    },
+    {
+      "id": "E102",
+      "archetype": "null",
+      "decision": "no-ship",
+      "looks": 7,
+      "naiveP": 0.03759001867817635,
+      "naiveSig": true,
+      "obfSig": false,
+      "obfCrossDay": null,
+      "alwaysSig": false
+    }
+  ]
+}

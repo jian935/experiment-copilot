@@ -160,6 +160,52 @@ const INTENTS: IntentDef[] = [
   },
 
   {
+    key: 'peek',
+    // 这条意图的存在本身就是产品立场：多数工具只会回答「现在显不显著」，
+    // 而真实的人每天都在刷新看板。不把「看了几次」算进阈值，就等于默许 p-hacking。
+    test: /偷看|窥探|序贯|看了几次|看上?了几次|每天都(在)?看|peek|always.?valid|现在(能|可以).{0,4}(下结论|宣布|上线)/i,
+    run: (ctx) => {
+      const t = runTool('peeking_check', ctx);
+      const d = t.data as {
+        available: boolean;
+        reason?: string;
+        looks: number;
+        finalPBoundaryText: string;
+        finalPNaiveText: string;
+        finalPAlwaysText: string;
+        zText: string;
+        zBoundaryText: string;
+        tightening: number;
+        naiveSig: boolean;
+        obfSig: boolean;
+        obfCrossDay: number | null;
+        obfSigNow: boolean;
+        minAlwaysPText: string;
+      };
+      if (!d.available) {
+        return {
+          calls: [t],
+          text: `这份数据没法做序贯校正（${d.reason}）——没有逐日明细就谈不上「看了几次」，我不能凭一个总 p 值反推窥探次数。`,
+        };
+      }
+      const head =
+        `这份看板你已经在 ${d.looks} 次观察里看过同一份数据（每次都是累计口径）。` +
+        `按 OBF α 消耗，最后一次要 p<${d.finalPBoundaryText} 才算显著，比 naive 的 5% 紧 ${d.tightening.toFixed(2)} 倍`;
+      const verdict = d.obfSig && d.obfSigNow
+        ? `当前 |z|=${d.zText} 已越过该次边界 ${d.zBoundaryText}，序贯口径下也显著。`
+        : d.obfCrossDay
+          ? `第 ${d.obfCrossDay} 次观察曾越过边界（当时就该停下并宣布）；此刻 |z|=${d.zText} 已回落到边界 ${d.zBoundaryText} 之下，「等它涨回来再看」不算数。`
+          : d.naiveSig
+          ? `当前 naive p=${d.finalPNaiveText} 看着过了 0.05，但 |z|=${d.zText} 还没越过边界 ${d.zBoundaryText}——这正是「偷看把不显著看成显著」的样子，先别宣布。`
+          : `当前 naive p=${d.finalPNaiveText}，本来就不显著；继续看不会受罚（OBF 只收紧阈值，不禁止继续观察）。`;
+      return {
+        calls: [t],
+        text: `${withCites(head, t.cites)}${verdict}想「随时都能看」就得改用 always-valid p=${d.minAlwaysPText}（全程最小），代价是门槛抬到约 3σ。`,
+      };
+    },
+  },
+
+  {
     key: 'segment',
     test: /分层|新老|用户群|人群|设备|ios|安卓|哪类|细分|异质|个体差异/i,
     run: (ctx) => {

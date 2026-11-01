@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T10:13:35.697Z",
+  "generatedAt": "2026-11-01T10:33:44.101Z",
   "seedBase": 20261031,
   "config": {
     "alpha": 0.05,
@@ -9,18 +9,18 @@
     "useCuped": true
   },
   "summary": {
-    "n": 1720,
-    "numbers": 10177,
+    "n": 1840,
+    "numbers": 10708,
     "suspicious": 0,
     "hallucinationRate": 0,
     "dirtyAnswerRate": 0,
     "citationRate": 1,
-    "citableN": 1480,
+    "citableN": 1600,
     "violationRate": 0,
     "scopeRate": 1,
     "trapN": 80,
     "routeAccuracy": 1,
-    "routeN": 1080
+    "routeN": 1200
   },
   "byGroup": [
     {
@@ -33,8 +33,8 @@
     },
     {
       "group": "统计",
-      "n": 360,
-      "numbers": 2807,
+      "n": 480,
+      "numbers": 3338,
       "suspicious": 0,
       "citationRate": 1,
       "routeAccuracy": 1
@@ -107,6 +107,10 @@
     },
     {
       "intent": "forecast",
+      "n": 120
+    },
+    {
+      "intent": "peek",
       "n": 120
     },
     {
@@ -187,6 +191,16 @@
       "q": "还要跑几天？",
       "n": 120,
       "numbers": 306,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "peek",
+      "group": "统计",
+      "q": "我每天都在看这个看板，现在能下结论吗？",
+      "n": 120,
+      "numbers": 531,
       "suspicious": 0,
       "citationRate": 1,
       "routeAccuracy": 1
@@ -325,6 +339,10 @@
     },
     {
       "tool": "metric_dictionary",
+      "calls": 120
+    },
+    {
+      "tool": "peeking_check",
       "calls": 120
     },
     {

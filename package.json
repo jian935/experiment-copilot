@@ -20,7 +20,9 @@
     "eval": "tsx scripts/eval_report.ts",
     "eval:baseline": "tsx scripts/eval_report.ts --write",
     "eval:check": "tsx scripts/eval_report.ts --check",
-    "smoke": "node scripts/smoke_ui.mjs"
+    "smoke": "node scripts/smoke_ui.mjs",
+    "seq": "tsx scripts/sequential_report.ts",
+    "shot": "node scripts/screenshot.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

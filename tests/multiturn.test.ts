@@ -168,14 +168,18 @@ describe('多轮上下文 · 智能模式', () => {
   });
 
   it('历史里的数字不能当证据：复述上一轮的数字会被审计抓住', async () => {
-    mockAnswer('上一轮提到 p=0.037，这次也一样 [E2]。');
+    // 用的哨兵值是 88888（样本数）而不是某个 p 值：
+    // M12 加入序贯监控后，工具返回里多了 7 次观察的边界 p（0.0361/0.0366…），
+    // 之前随手写的 0.037 恰好落在白名单的舍入范围里，测试就变成「碰巧抓不到」。
+    // 换成任何实验都不可能产生的样本数，断言才真的在测「历史不算证据」这条规则。
+    mockAnswer('上一轮提到样本量 88888，这次也一样 [E2]。');
     const history: AgentTurn[] = [
-      { role: 'user', text: '主指标显著吗' },
-      { role: 'assistant', text: 'p=0.037，显著 [E2]。' },
+      { role: 'user', text: '样本量多少' },
+      { role: 'assistant', text: '样本量 88888，足够 [E2]。' },
     ];
     const r = await askWithLlm('再说一次', { ...ctx, history }, { apiKey: 'sk-test' });
-    // 本轮没调工具 → 白名单里没有 0.037 → 必须报出来
-    expect(r.audit.suspicious.join()).toContain('0.037');
+    // 本轮没调工具 → 白名单里没有 88888 → 必须报出来
+    expect(r.audit.suspicious.join()).toContain('88888');
     expect(r.violations?.join()).toMatch(/无法溯源/);
   });
 

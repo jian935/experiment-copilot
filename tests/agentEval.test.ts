@@ -3,7 +3,7 @@
  *
  * 这个文件真正的价值不是「跑通」，而是**锁住两件事**：
  *  1. 规则模式不许出现引擎没算过的数字（幻觉数字率恒 0）——模板里一旦自己算数就红；
- *  2. 12 个工具必须都被题库覆盖 —— 写了工具却没人能用上，比没写更糟。
+ *  2. 13 个工具必须都被题库覆盖 —— 写了工具却没人能用上，比没写更糟。
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -33,9 +33,9 @@ describe('白名单要认得工具返回的格式化文本', () => {
 });
 
 describe('题库覆盖', () => {
-  it('12 个工具一个都不能少（有工具没被用到 = 白写）', () => {
+  it('13 个工具一个都不能少（有工具没被用到 = 白写）', () => {
     expect(ev.uncoveredTools).toEqual([]);
-    expect(ev.toolCalls.filter((t) => t.calls > 0)).toHaveLength(12);
+    expect(ev.toolCalls.filter((t) => t.calls > 0)).toHaveLength(13);
   });
 
   it('每道题都至少被问过一次，且题号唯一', () => {
