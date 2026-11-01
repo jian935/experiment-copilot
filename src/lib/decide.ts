@@ -7,6 +7,7 @@ import {
 } from './stats.ts';
 import { DEFAULT_CONFIG, mergeConfig, type DecisionConfig } from './config.ts';
 import { buildPeekReport, type LookInput, type PeekReport } from './sequential.ts';
+import { noveltyReport, planExposureSplit, type NoveltyReport } from './novelty.ts';
 
 export interface VariantAgg {
   n: number;
@@ -172,6 +173,13 @@ export interface Analysis {
    * 以及差异有多大。真要按序贯口径上线，看 `sequential.obfSig` 而不是 `decision`。
    */
   sequential: PeekReport;
+  /**
+   * 新颖效应（效应衰减）检测：**只出报告，不参与 decision**。
+   *
+   * 真值标签是按频率派主指标 + 护栏口径标的，让衰减改 decision 就等于重标 120 条真值；
+   * 那是"改口径迁就引擎"。所以这里与 heterogeneity 一样：检测器自己报，评审自己看。
+   */
+  novelty: NoveltyReport;
   /** CUPED：用前周期数据做方差缩减后的检验（无前周期数据时为 undefined）；口径与主指标一致 */
   cuped?: CupedResult;
   /** 贝叶斯视角：率口径用 Beta-Binomial，连续口径用正态后验 */
@@ -345,6 +353,26 @@ export function dailyLooks(rows: DailyRow[], kind: 'rate' | 'continuous', mode: 
     if (!est || !(est.se > 0)) continue;
     const c = aggregate(cum, 'control');
     const t = aggregate(cum, 'treatment');
+    out.push({ day: i + 1, date: dates[i], nPerArm: (c.n + t.n) / 2, diff: est.diff, se: est.se });
+  }
+  return out;
+}
+
+/**
+ * 逐日**互不重叠**的分段估计（每天单独估一次，不是累计）。
+ *
+ * 与 dailyLooks 的区别必须记清楚：序贯检验要累计值（看板就是这么刷的），
+ * 新颖效应要分段值（两段误差必须独立）。混用会把 SE 低估、把一切判成衰减。
+ */
+export function dailySegments(rows: DailyRow[], kind: 'rate' | 'continuous', mode: PrimaryMode): LookInput[] {
+  const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+  const out: LookInput[] = [];
+  for (let i = 0; i < dates.length; i++) {
+    const sub = rows.filter((r) => r.date === dates[i]);
+    const est = estimateAt(sub, kind, mode);
+    if (!est || !(est.se > 0)) continue;
+    const c = aggregate(sub, 'control');
+    const t = aggregate(sub, 'treatment');
     out.push({ day: i + 1, date: dates[i], nPerArm: (c.n + t.n) / 2, diff: est.diff, se: est.se });
   }
   return out;
@@ -539,6 +567,15 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   // 序贯监控：沿用**同一个口径**（primary.via）逐日重估，再换算出三套阈值。
   // 逐日重估而不是按天重置，是因为偷看的人看的就是累计看板。
   const sequential = buildPeekReport(dailyLooks(rows, metricKind, primary.via), { alpha: cfg.alpha });
+
+  // 新颖效应：逐日**分段**（互不重叠）估一次，按曝光量对半切，两半各自再估一次。
+  //
+  // 半段的标准误**不**用「把半段的行重新估一次」那套 SE —— A/A 实测过，那样算出来的
+  // 「前后半段差异」误报率是 12%（率）/ 15%（ARPU），因为半段只有 3–4 天、16 个格子，
+  // 任何当天 SE 都会漏掉日间整体漂移。改用日级聚类（每天一个观测单位）+ Welch t，
+  // 同一套 A/A 落到 4.8% / 6.4%（见 scripts/novelty_report.ts 与 tests/novelty.test.ts）。
+  const segs = dailySegments(rows, metricKind, primary.via);
+  const novelty = noveltyReport({ points: segs, alpha: cfg.noveltyAlpha });
 
   // 贝叶斯视角：率口径用 Beta-Binomial（把过离散折算成有效样本量，否则后验过度自信）；
   // 连续口径没有「计数/样本量」结构，用正态后验（bayesNormal），公式逐字对应。
@@ -831,6 +868,53 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     );
   }
 
+  // ---- 新颖效应（效应是否随时间衰减）----
+  if (!novelty.skipped && novelty.points.length >= 2) {
+    const unit = primary.unit;
+    const PATTERN_CN: Record<string, string> = {
+      decay: '效应在衰减（后半段明显低于前半段）',
+      growth: '效应在增强（后半段明显高于前半段）',
+      stable: '未见衰减',
+      insufficient: '数据不足',
+    };
+    add(
+      'metric',
+      '新颖效应（时间维度）',
+      `前半段 ${novelty.early.days} 天 ${fmtDiff(novelty.early.diff, unit)}，后半段 ${novelty.late.days} 天 ${fmtDiff(novelty.late.diff, unit)}；` +
+        `前后差 ${fmtDiff(novelty.delta, unit)}，p=${ep(novelty.p)} → ${PATTERN_CN[novelty.pattern]}`,
+      novelty.p,
+      [
+        {
+          title: '① 为什么要按曝光量对半切',
+          formula: '按累计曝光首次 ≥50% 的那天切，而不是按日历天数等分',
+          value:
+            `两段样本 ${novelty.early.days} 天 / ${novelty.late.days} 天；` +
+            `按日历等分在某天没跑量时会让两段严重失衡，SE 就没法比`,
+        },
+        {
+          title: '② 两段的点估计',
+          formula: 'Δ = 日效应按 1/SEᵢ² 精度加权（样本少的日不该和样本多的日等权）',
+          value: `Δ₁ = ${fmtDiff(novelty.early.diff, unit)}（${novelty.early.days} 天，日间方差 ${fmtDiff(novelty.early.dayVar, unit)}²），Δ₂ = ${fmtDiff(novelty.late.diff, unit)}（${novelty.late.days} 天）`,
+        },
+        {
+          title: '③ 衰减检验（日级聚类 + t）',
+          formula: 'δ = Δ₂ − Δ₁；SE = √(s₁²/n₁ + s₂²/n₂)，s² 为日效应样本方差；t 用 Welch 自由度 ν',
+          value:
+            `δ = ${fmtDiff(novelty.delta, unit)}，SE = ${fmtDiff(novelty.seDelta, unit)}，t = ${novelty.t.toFixed(3)}，ν = ${novelty.df.toFixed(1)}，p = ${ep(novelty.p)}` +
+            (novelty.relativeDelta !== null ? `；相对变化 ${(novelty.relativeDelta * 100).toFixed(1)}%` : ''),
+        },
+        {
+          title: '④ 逐日斜率（描述形状，不做判定）',
+          formula: 'WLS：Δᵢ ~ 天序号，权重 1/SEᵢ²；φ = max(1, χ²/df) 修正过离散',
+          value:
+            novelty.slope === null
+              ? '逐日点数不足 4 个，不拟合斜率'
+              : `斜率 ${fmtDiff(novelty.slope, unit)}/天，p = ${ep(novelty.slopeP ?? 1)}（过离散因子 φ = ${(novelty.dispersion ?? 1).toFixed(2)}）`,
+        },
+      ],
+    );
+  }
+
   // ---- 分层 ----
   for (const s of segments.tenure) {
     const segRows = rows.filter((r) => r.tenure === s.key);
@@ -1069,6 +1153,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     },
     guardrails,
     sequential,
+    novelty,
     ...(cuped ? { cuped } : {}),
     bayes,
     confidence: bayes.probTreatBetter,

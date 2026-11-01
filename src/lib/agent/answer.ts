@@ -206,6 +206,51 @@ const INTENTS: IntentDef[] = [
   },
 
   {
+    key: 'novelty',
+    // 「第一天有效、第五天打脸」是上线后最常见的翻车方式，而所有看板都只显示累计值。
+    // 这条意图专门回答「这个效果会不会缩水」，并且必须把「看不出来的最小幅度」一起说。
+    test: /衰减|新颖效应|新奇|novelty|时效|时间维度|前(半|后)(段|几)|后几(天|日)|效果.{0,6}(会不会|是否).{0,6}(变|降|缩|掉)|还(在不在|剩多少)|继续(有效|管用)|掉下来|逐渐(变|降)/i,
+    run: (ctx) => {
+      const t = runTool('novelty_check', ctx);
+      const d = t.data as {
+        available: boolean;
+        reason?: string;
+        pattern: string;
+        patternText: string;
+        earlyDiffText: string;
+        earlyDays: number;
+        lateDiffText: string;
+        lateDays: number;
+        deltaText: string;
+        pText: string;
+        tText: string;
+        dfText: string;
+        relativeDeltaText: string;
+        detectableDeltaText: string;
+      };
+      if (!d.available) {
+        return {
+          calls: [t],
+          text: `这份数据做不了衰减判定（${d.reason}）——没有逐日明细就没法把前后半段分开估，我不能拿一个总差值去猜时间趋势。`,
+        };
+      }
+      const head =
+        `按曝光量对半切：前半段 ${d.earlyDays} 天 ${d.earlyDiffText}，后半段 ${d.lateDays} 天 ${d.lateDiffText}，` +
+        `前后差 ${d.deltaText}（t=${d.tText}，ν=${d.dfText}，p=${d.pText}）`;
+      const tail =
+        d.pattern === 'decay'
+          ? `后半段明显变弱，相对变化 ${d.relativeDeltaText}——累计曲线会把这件事平均掉，所以「整体有效」不代表下一周还站得住。`
+          : d.pattern === 'growth'
+            ? '后半段明显更强，可能是爬坡期（缓存预热、用户学习），说明现在的累计值还偏低。'
+            : `判「未见衰减」，但这不是「没有衰减」：小于 ±${d.detectableDeltaText} 的衰减这个样本量看不出来。`;
+      return {
+        calls: [t],
+        text: `${withCites(head, t.cites)}${tail}这项只做检测、不改结论（真值标注按主指标 + 护栏口径）。`,
+      };
+    },
+  },
+
+  {
     key: 'segment',
     test: /分层|新老|用户群|人群|设备|ios|安卓|哪类|细分|异质|个体差异/i,
     run: (ctx) => {

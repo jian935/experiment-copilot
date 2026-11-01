@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T10:33:44.101Z",
+  "generatedAt": "2026-11-01T10:53:50.394Z",
   "seedBase": 20261031,
   "config": {
     "alpha": 0.05,
@@ -9,18 +9,18 @@
     "useCuped": true
   },
   "summary": {
-    "n": 1840,
-    "numbers": 10708,
+    "n": 1960,
+    "numbers": 11521,
     "suspicious": 0,
     "hallucinationRate": 0,
     "dirtyAnswerRate": 0,
     "citationRate": 1,
-    "citableN": 1600,
+    "citableN": 1720,
     "violationRate": 0,
     "scopeRate": 1,
     "trapN": 80,
     "routeAccuracy": 1,
-    "routeN": 1200
+    "routeN": 1320
   },
   "byGroup": [
     {
@@ -33,8 +33,8 @@
     },
     {
       "group": "统计",
-      "n": 480,
-      "numbers": 3338,
+      "n": 600,
+      "numbers": 4151,
       "suspicious": 0,
       "citationRate": 1,
       "routeAccuracy": 1
@@ -111,6 +111,10 @@
     },
     {
       "intent": "peek",
+      "n": 120
+    },
+    {
+      "intent": "novelty",
       "n": 120
     },
     {
@@ -201,6 +205,16 @@
       "q": "我每天都在看这个看板，现在能下结论吗？",
       "n": 120,
       "numbers": 531,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "novelty",
+      "group": "统计",
+      "q": "这个效果会不会随着时间衰减？",
+      "n": 120,
+      "numbers": 813,
       "suspicious": 0,
       "citationRate": 1,
       "routeAccuracy": 1
@@ -343,6 +357,10 @@
     },
     {
       "tool": "peeking_check",
+      "calls": 120
+    },
+    {
+      "tool": "novelty_check",
       "calls": 120
     },
     {

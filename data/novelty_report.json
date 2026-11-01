@@ -1,0 +1,93 @@
+{
+  "generatedAt": "2026-11-01T10:45:42.857Z",
+  "seedBase": 20261031,
+  "sim": {
+    "days": 7,
+    "trials": 4000,
+    "alpha": 0.05,
+    "daySe": 0.004873397172404482,
+    "falsePositive": 0.0315,
+    "power": [
+      {
+        "injected": 0.005,
+        "rate": 0.16525,
+        "theoreticalZ": 1.343320988518935
+      },
+      {
+        "injected": 0.01,
+        "rate": 0.49225,
+        "theoreticalZ": 2.68664197703787
+      },
+      {
+        "injected": 0.02,
+        "rate": 0.95625,
+        "theoreticalZ": 5.37328395407574
+      }
+    ],
+    "detectable": 0.01299066137470624
+  },
+  "aa": {
+    "n": 1000,
+    "rateN": 500,
+    "continuousN": 500,
+    "rateFp": 0.048,
+    "continuousFp": 0.064,
+    "up": 29,
+    "down": 27
+  },
+  "experiments": {
+    "n": 120,
+    "patterns": {
+      "stable": 115,
+      "decay": 3,
+      "growth": 2
+    },
+    "shipInDecay": 1,
+    "shipTotal": 26,
+    "significant": 5,
+    "medianRelativeDelta": -0.010360092993657559,
+    "overdispersed": 75,
+    "medianDetectable": 0.02409098494589919
+  },
+  "decayExamples": [
+    {
+      "id": "E048",
+      "archetype": "srm",
+      "decision": "inconclusive",
+      "pattern": "decay",
+      "earlyDiff": 0.0042055565785285775,
+      "lateDiff": -0.0038290862732182174,
+      "delta": -0.008034642851746794,
+      "relativeDelta": -1.9104826440256621,
+      "p": 0.005192465374444161,
+      "slope": -0.0017711046273818209,
+      "dispersion": 1
+    },
+    {
+      "id": "E047",
+      "archetype": "positive",
+      "decision": "ship",
+      "pattern": "decay",
+      "earlyDiff": 1.9696278030276055,
+      "lateDiff": 0.8390091419103441,
+      "delta": -1.1306186611172615,
+      "relativeDelta": -0.5740265543466312,
+      "p": 0.029516811984371928,
+      "slope": -0.286995187033991,
+      "dispersion": 1
+    },
+    {
+      "id": "E003",
+      "archetype": "negative",
+      "decision": "no-ship",
+      "pattern": "decay",
+      "earlyDiff": -0.824388358399497,
+      "lateDiff": -1.2756641882937143,
+      "delta": -0.45127582989421733,
+      "relativeDelta": -0.5474068444759987,
+      "p": 0.04636419032931503,
+      "slope": -0.10371798813693814,
+      "dispersion": 1
+    }
+  ]
+}

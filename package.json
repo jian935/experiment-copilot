@@ -22,6 +22,7 @@
     "eval:check": "tsx scripts/eval_report.ts --check",
     "smoke": "node scripts/smoke_ui.mjs",
     "seq": "tsx scripts/sequential_report.ts",
+    "novelty": "tsx scripts/novelty_report.ts",
     "shot": "node scripts/screenshot.mjs"
   },
   "devDependencies": {

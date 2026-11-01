@@ -19,6 +19,7 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   metric_decompose: '指标因子分解',
   metric_dictionary: '口径字典',
   peeking_check: '窥探校正（序贯）',
+  novelty_check: '新颖效应（时间衰减）',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -559,6 +560,77 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
       };
     }
 
+    case 'novelty_check': {
+      // 新颖效应：回答「这个效果会不会随着时间缩水 / 上周的效果这周还在不在」。
+      // 必须同时给三件事：前后半段各是多少、差异的 p、以及「比这更小的衰减看不出来」——
+      // 只说"未见衰减"会让人以为已经排除了衰减。
+      const n = a.novelty;
+      const unit = a.primary.unit;
+      if (n.skipped) {
+        return {
+          tool: name,
+          args,
+          summary: `无法做衰减判定：${n.skipped}`,
+          data: { available: false, reason: n.skipped },
+          cites: [],
+        };
+      }
+      const PATTERN: Record<string, string> = {
+        decay: '效应在衰减（后半段显著低于前半段）',
+        growth: '效应在增强（后半段显著高于前半段）',
+        stable: '未见衰减（不等于没有衰减，见可检出下限）',
+        insufficient: '数据不足',
+      };
+      return {
+        tool: name,
+        args,
+        summary:
+          `前半段 ${n.early.days} 天 ${fmtDiff(n.early.diff, unit)}、后半段 ${n.late.days} 天 ${fmtDiff(n.late.diff, unit)}；` +
+          `前后差 ${fmtDiff(n.delta, unit)}，p=${pv(n.p)} → ${PATTERN[n.pattern]}`,
+        data: {
+          available: true,
+          pattern: n.pattern,
+          patternText: PATTERN[n.pattern],
+          earlyDiff: n.early.diff,
+          earlyDiffText: fmtDiff(n.early.diff, unit),
+          earlyDays: n.early.days,
+          earlySeText: fmtDiff(n.early.se, unit),
+          lateDiff: n.late.diff,
+          lateDiffText: fmtDiff(n.late.diff, unit),
+          lateDays: n.late.days,
+          lateSeText: fmtDiff(n.late.se, unit),
+          delta: n.delta,
+          deltaText: fmtDiff(n.delta, unit),
+          relativeDelta: n.relativeDelta,
+          relativeDeltaText: n.relativeDelta === null ? '—（前半段效应≈0，谈相对变化没有意义）' : `${(n.relativeDelta * 100).toFixed(1)}%`,
+          seDelta: n.seDelta,
+          seDeltaText: fmtDiff(n.seDelta, unit),
+          t: n.t,
+          tText: n.t.toFixed(2),
+          /** 日数少，参考分布是 t 不是正态：自由度必须一起给，否则 t 值没法核 */
+          df: n.df,
+          dfText: n.df.toFixed(1),
+          p: n.p,
+          pText: pv(n.p),
+          alpha: n.alpha,
+          /** 80% 功效下可检出的最小衰减 —— "未见衰减"必须配上这个数才诚实 */
+          detectableDelta: n.detectableDelta,
+          detectableDeltaText: fmtDiff(n.detectableDelta, unit),
+          unit,
+          slope: n.slope,
+          slopeText: n.slope === null ? '逐日点数不足，未拟合斜率' : `${fmtDiff(n.slope, unit)}/天`,
+          slopePText: n.slopeP === null ? '—' : pv(n.slopeP),
+          dispersion: n.dispersion,
+          dispersionText: n.dispersion === null ? '—' : `φ = ${n.dispersion.toFixed(2)}`,
+          /** 逐日点（互不重叠，不是累计值），给"哪一天掉了"提供依据 */
+          points: n.points.map((pt) => ({ day: pt.day, date: pt.date, diff: +pt.diff.toFixed(6), se: +pt.se.toFixed(6), half: pt.half, sig: pt.sig })),
+          /** 检测器不参与决策：回答里要能说清"这个结论没被衰减改写" */
+          affectsDecision: false,
+        },
+        cites: cite(a, 'metric', '新颖效应'),
+      };
+    }
+
     default:
       throw new Error(`未知工具：${name}`);
   }
@@ -702,6 +774,14 @@ export const TOOL_SCHEMA = [
     function: {
       name: 'peeking_check',
       description: '序贯监控：如果每天都在看同一份看板，现在这一次观察需要多严的阈值才算显著（OBF / always-valid p）',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'novelty_check',
+      description: '新颖效应：按曝光量把观察期对半切，检验后半段效应是否显著低于（或高于）前半段，并给出可检出的最小衰减',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },

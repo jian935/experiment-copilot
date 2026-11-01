@@ -31,6 +31,11 @@ export interface DecisionConfig {
   segmentFdr: number;
   /** 交互（效应异质）判定的 p 阈值 */
   interactionAlpha: number;
+  /**
+   * 新颖效应（效应衰减）判定的 p 阈值。
+   * 与 interactionAlpha 同量级但独立：衰减是「时间维度」的异质，不是人群维度的。
+   */
+  noveltyAlpha: number;
 
   /** SRM：卡方 p 阈值 */
   srmAlpha: number;
@@ -74,6 +79,7 @@ export const DEFAULT_CONFIG: DecisionConfig = {
   alpha: 0.05,
   segmentFdr: 0.1,
   interactionAlpha: 0.01,
+  noveltyAlpha: 0.05,
 
   srmAlpha: 0.001,
   srmMaxRelImb: 0.02,

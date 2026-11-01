@@ -43,7 +43,7 @@
    - 落点：`decide.ts` 加 `confidence` 字段 → `EvalScreen.tsx` 加校准曲线面板 → `evaluate.ts` 加校准误差。
    - 实现要点：`confidence` 直接复用贝叶斯 `P(B>A)`（同一口径，避免两套"概率"打架）；`evaluate.ts` 出 10 桶校准曲线 + ECE，单测锁住"真实正效应实验平均置信度高于负效应"。
 
-3. **序贯检验 / always-valid p（防 peeking）**
+3. ~~**序贯检验 / always-valid p（防 peeking）**~~ ✅ 已落地（`lib/sequential.ts`，见 EVAL §4g）
    - 现状：按固定 7 天快照判，没处理"每天看一次导致 α 膨胀"。
    - 做：加 alpha-spending（O'Brien–Fleming）或 mSPRT，给"如果中途每天看，需要多严的阈值"。蓝图 P2。
    - 落点：新 `src/lib/stats.ts` 函数 + 数据生成加"逐日 peek"维度。

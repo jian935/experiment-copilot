@@ -34,6 +34,7 @@ import {
 import { Forest, type ForestRow } from './Forest';
 import { ForecastPanel } from './Forecast';
 import { SequentialPanel } from './SequentialPanel';
+import { NoveltyPanel } from './NoveltyPanel';
 import { Trend } from './Trend';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { exportConclusionCard } from '../lib/exportCard';
@@ -381,6 +382,9 @@ export function ExperimentDetail({
 
       {/* 序贯监控：偷看校正 */}
       <SequentialPanel analysis={analysis} />
+
+      {/* 新颖效应：累计值会把衰减平均掉 */}
+      <NoveltyPanel analysis={analysis} />
 
       {/* 还要跑几天 */}
       <ForecastPanel

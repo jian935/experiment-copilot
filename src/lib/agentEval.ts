@@ -37,7 +37,7 @@ const hasSegments = (a: Analysis) => a.segments.tenure.length > 1;
 
 /**
  * 题库。设计原则：
- *  1. **覆盖 13 个工具**——单测会检查每题的工具覆盖率，缺一个就说明有工具「写了但没人能用上」；
+ *  1. **覆盖 14 个工具**——单测会检查每题的工具覆盖率，缺一个就说明有工具「写了但没人能用上」；
  *  2. 每题只在「该实验上答得出来」时才问，否则引用覆盖率会被无证据的题稀释成假低分；
  *  3. 口径陷阱题（ARPU / GMV / 留存）必留，它们是「敢说不知道」的唯一自动化证据。
  */
@@ -49,6 +49,7 @@ export const QA_BANK: QaItem[] = [
   { id: 'mde', q: '样本够不够？', group: '统计', expectIntent: 'mde' },
   { id: 'days', q: '还要跑几天？', group: '预测', expectIntent: 'forecast' },
   { id: 'peek', q: '我每天都在看这个看板，现在能下结论吗？', group: '统计', expectIntent: 'peek' },
+  { id: 'novelty', q: '这个效果会不会随着时间衰减？', group: '统计', expectIntent: 'novelty' },
   { id: 'similar', q: '有类似实验吗？', group: '检索', expectIntent: 'similar' },
   { id: 'list', q: '有哪些实验被拦截了？', group: '检索', expectIntent: 'list' },
   { id: 'bayes', q: '贝叶斯怎么看这个结果？', group: '统计' },
