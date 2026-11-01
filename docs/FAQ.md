@@ -191,7 +191,7 @@
 
 | 想现场验证 | 命令 |
 |---|---|
-| 单测（340 条 / 26 个文件） | `npm test` |
+| 单测（349 条 / 27 个文件） | `npm test` |
 | 与 scipy 对齐 | `npm test -- tests/stats.test.ts` |
 | 决策准确率 / FPR / 分层 F1 / 幻觉数字率 | `npm run calibrate`、`npm run eval`、`npm run eval:check` |
 | A/A 自校准（2000 次零效应） | `npm run aa` |
