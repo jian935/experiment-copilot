@@ -1,7 +1,7 @@
 import type { DailyRow, Decision, Experiment, Variant } from './types.ts';
 import {
-  bhAdjust, srmChi2, twoProportionZ, twoSidedP, welchTest, wilson,
-  type PropTest, type SrmResult,
+  bayesBetaBinomial, bhAdjust, srmChi2, twoProportionZ, twoSidedP, welchTest, wilson,
+  type BayesResult, type PropTest, type SrmResult,
 } from './stats.ts';
 
 export interface VariantAgg {
@@ -64,6 +64,10 @@ export interface Analysis {
   segments: { tenure: SegmentTest[]; device: SegmentTest[] };
   interaction: { tenure: { diffDiff: number; se: number; z: number; p: number } | null };
   guardrails: GuardrailResult[];
+  /** 贝叶斯视角（Beta-Binomial 后验）：P(treatment 更优)、可信区间、期望损失 */
+  bayes: BayesResult;
+  /** 置信度 = P(treatment 真正优于 control)；与频率派 p 值口径不同，但结论互补 */
+  confidence: number;
   decision: Decision;
   reason: string;
   reasonCode: 'SRM' | 'GUARDRAIL' | 'NOT_SIG' | 'NEGATIVE' | 'HETEROGENEOUS' | 'POSITIVE';
@@ -156,6 +160,9 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
   const c = aggregate(rows, 'control');
   const t = aggregate(rows, 'treatment');
   const overall = twoProportionZ(c.c, c.n, t.c, t.n);
+
+  // 贝叶斯视角：把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率
+  const bayes = bayesBetaBinomial(c.c, c.n, t.c, t.n);
 
   const srm = srmChi2([c.n, t.n], [0.5, 0.5]);
 
@@ -458,6 +465,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[]): Analysis {
     segments,
     interaction: { tenure: interaction },
     guardrails,
+    bayes,
+    confidence: bayes.probTreatBetter,
     decision,
     reason,
     reasonCode,

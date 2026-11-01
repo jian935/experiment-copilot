@@ -242,9 +242,9 @@ export function AgentPanel({
               可以直接点开看原始证据。
             </p>
             <div className="mt-3 border-t border-line/60 pt-2.5">
-              <div className="text-[10px] text-dim">可调用的 8 个工具（模型只能通过它们取数）</div>
+              <div className="text-[10px] text-dim">可调用的 9 个工具（模型只能通过它们取数）</div>
               <div className="mt-1.5 flex flex-wrap gap-1">
-                {['读取结论', '重算检验', '扫描分层', '检查护栏', '推算 MDE', '检索相似', '检索列表', '回溯规则'].map((t) => (
+                {['读取结论', '重算检验', '扫描分层', '检查护栏', '推算 MDE', '检索相似', '检索列表', '回溯规则', '贝叶斯视角'].map((t) => (
                   <span key={t} className="rounded border border-line bg-panel px-1.5 py-0.5 text-[9.5px] text-muted">
                     {t}
                   </span>

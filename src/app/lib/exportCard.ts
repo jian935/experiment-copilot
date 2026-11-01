@@ -116,6 +116,11 @@ export function buildCardSvg(exp: Experiment, a: Analysis, meta: { datasetVersio
     )
     .join('\n  ')}
 
+  <!-- bayesian -->
+  <text x="40" y="${420 - shift}" font-family="PingFang SC, Microsoft YaHei, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#c2410c">贝叶斯视角</text>
+  <text x="152" y="${420 - shift}" font-family="SFMono-Regular, Consolas, monospace" font-size="12" fill="#241a12">treatment 更优概率 ${a.bayes.probTreatBetter >= 0.999 ? '>99.9%' : `${(a.bayes.probTreatBetter * 100).toFixed(1)}%`}</text>
+  <text x="${W - 40}" y="${420 - shift}" text-anchor="end" font-family="SFMono-Regular, Consolas, monospace" font-size="11" fill="#9d8b7a">95% CrI [${fmtPP(a.bayes.credLow)}, ${fmtPP(a.bayes.credHigh)}]</text>
+
   <!-- checks -->
   <line x1="40" y1="${434 - shift}" x2="${W - 40}" y2="${434 - shift}" stroke="#f2e9df"/>
   ${checks

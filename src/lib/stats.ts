@@ -187,3 +187,112 @@ export function welchTest(m1: number, s1: number, n1: number, m2: number, s2: nu
   const df = den > 0 ? num / den : n1 + n2 - 2;
   return { t, df, p: twoSidedP(t) };
 }
+
+// ===================== 贝叶斯层（Beta-Binomial） =====================
+// 频率派之外，给出「treatment 真比 control 好」的后验概率与可信区间。
+// 全部确定性（无随机），每个函数都有单测对齐权威实现（Beta CDF 闭式 betai）。
+// P(B>A) 用正态近似：两 Beta 后验之差在大样本下收敛到正态，且与下面的 95% 可信区间
+// 同源（均来自后验差的均值/方差），避免对极陡的 Beta CDF 台阶做数值积分时漏掉分辨率。
+
+/** Lanczos 近似 ln Γ(x)（相对误差 ~1e-14） */
+export function lgamma(x: number): number {
+  if (x < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * x)) - lgamma(1 - x);
+  x -= 1;
+  const g = 7;
+  const c = [
+    0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+    -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6,
+    1.5056327351493116e-7,
+  ];
+  let a = c[0];
+  const t = x + g + 0.5;
+  for (let i = 1; i < g + 2; i++) a += c[i] / (x + i);
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+/** 正则化不完全 Beta 函数 I_x(a,b)（Numerical Recipes betai） */
+export function betai(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bt = Math.exp(lgamma(a + b) - lgamma(a) - lgamma(b) + a * Math.log(x) + b * Math.log(1 - x));
+  if (x < (a + 1) / (a + b + 2)) return (bt * betacf(x, a, b)) / a;
+  return 1 - (bt * betacf(1 - x, b, a)) / b;
+}
+
+/** 不完全 Beta 连分式（Lentz 法，Numerical Recipes betacf） */
+function betacf(x: number, a: number, b: number): number {
+  const MAXIT = 300;
+  const EPS = 3e-14;
+  const FPMIN = 1e-300;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < FPMIN) d = FPMIN;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  return h;
+}
+
+export interface BayesResult {
+  /** P(treatment 转化率 > control 转化率)：把两变体当作 Beta 后验，对「谁更大」做积分 */
+  probTreatBetter: number;
+  /** 后验期望差值（treatment − control，比例单位） */
+  meanDiff: number;
+  /** 差值 95% 可信区间（比例单位；正态近似后验差） */
+  credLow: number;
+  credHigh: number;
+  /** 期望损失（若误判上线，treatment 实际更差时的平均损失，比例单位） */
+  expectedLoss: number;
+}
+
+/** Beta-Binomial 贝叶斯：以 Beta(成功+1, 失败+1) 为后验，给频率派结论配一个概率口径 */
+export function bayesBetaBinomial(c1: number, n1: number, c2: number, n2: number): BayesResult {
+  // treatment 后验 Beta(a, b)，control 后验 Beta(cc, d)
+  const a = c2 + 1;
+  const b = n2 - c2 + 1;
+  const cc = c1 + 1;
+  const d = n1 - c1 + 1;
+
+  const mt = a / (a + b);
+  const mc = cc / (cc + d);
+  const vt = (mt * (1 - mt)) / (a + b + 1);
+  const vc = (mc * (1 - mc)) / (cc + d + 1);
+  const meanDiff = mt - mc;
+  const varDiff = vt + vc;
+  const sd = Math.sqrt(Math.max(varDiff, 0));
+
+  const credLow = meanDiff - 1.96 * sd;
+  const credHigh = meanDiff + 1.96 * sd;
+
+  // P(B>A)：两 Beta 后验之差 Δ 在 n 大时收敛到 N(meanDiff, varDiff)，
+  // 于是 P(B>A)=P(Δ>0)=Φ(meanDiff/sd)。与下方 95% 可信区间同源，数值稳定。
+  const probTreatBetter = sd > 0 ? normalCdf(meanDiff / sd) : 0.5;
+
+  // 期望损失 E[max(0, control − treatment)]：后验差 Δ~N(meanDiff, varDiff)
+  const z = sd > 0 ? meanDiff / sd : 0;
+  const phi = Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI);
+  const expectedLoss = sd * phi - meanDiff * normalCdf(-z);
+
+  return { probTreatBetter, meanDiff, credLow, credHigh, expectedLoss };
+}

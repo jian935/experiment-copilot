@@ -107,3 +107,39 @@ describe('决策规则', () => {
     expect(a.reasonCode).toBe('HETEROGENEOUS');
   });
 });
+
+describe('贝叶斯置信度', () => {
+  it('贝叶斯结果始终存在且概率在 [0,1]', () => {
+    const exp = mkExp();
+    const rows = mkRows(exp.id, {
+      cNew: { c: 200, n: 4000 }, tNew: { c: 280, n: 4000 },
+      cOld: { c: 800, n: 16000 }, tOld: { c: 1120, n: 16000 },
+    });
+    const a = analyze(exp, rows);
+    expect(a.bayes.probTreatBetter).toBeGreaterThanOrEqual(0);
+    expect(a.bayes.probTreatBetter).toBeLessThanOrEqual(1);
+    expect(a.confidence).toBe(a.bayes.probTreatBetter);
+  });
+
+  it('treatment 明显更好时置信度接近 1', () => {
+    const exp = mkExp();
+    const rows = mkRows(exp.id, {
+      cNew: { c: 200, n: 4000 }, tNew: { c: 400, n: 4000 },
+      cOld: { c: 800, n: 16000 }, tOld: { c: 1600, n: 16000 },
+    });
+    const a = analyze(exp, rows);
+    expect(a.bayes.probTreatBetter).toBeGreaterThan(0.999);
+  });
+
+  it('无差异时置信度接近 0.5（真实效应≈0 时不过度自信）', () => {
+    const exp = mkExp();
+    const rows = mkRows(exp.id, {
+      cNew: { c: 200, n: 4000 }, tNew: { c: 202, n: 4000 },
+      cOld: { c: 800, n: 16000 }, tOld: { c: 808, n: 16000 },
+    });
+    const a = analyze(exp, rows);
+    // 输入里只有 ~0.05pp 的随机噪声（无真实效应），P(B>A) 应停在 0.5 附近而非逼近 0/1
+    expect(a.bayes.probTreatBetter).toBeGreaterThan(0.4);
+    expect(a.bayes.probTreatBetter).toBeLessThan(0.6);
+  });
+});

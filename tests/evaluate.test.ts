@@ -53,4 +53,26 @@ describe('评测口径（M5）', () => {
   it('按类型统计的样本量之和等于总数', () => {
     expect(r.byArchetype.reduce((s, a) => s + a.n, 0)).toBe(r.n);
   });
+
+  it('贝叶斯校准：每行的置信度都在 [0,1]，且校准桶覆盖全部样本', () => {
+    for (const row of r.rows) {
+      expect(row.confidence).toBeGreaterThanOrEqual(0);
+      expect(row.confidence).toBeLessThanOrEqual(1);
+    }
+    const binN = r.calibration.reduce((s, b) => s + b.n, 0);
+    expect(binN).toBe(r.n);
+  });
+
+  it('校准基本自洽：真实整体效应为正的实验，平均置信度高于为负的', () => {
+    const pos = r.rows.filter((x) => x.trueLiftPositive);
+    const neg = r.rows.filter((x) => !x.trueLiftPositive);
+    const avg = (xs: typeof r.rows) => xs.reduce((s, x) => s + x.confidence, 0) / (xs.length || 1);
+    // 整体效应为正的实验，其 P(B>A) 应当系统性更高（贝叶斯自校准）
+    expect(avg(pos)).toBeGreaterThan(avg(neg));
+  });
+
+  it('ECE 为非负且落在合理范围', () => {
+    expect(r.ece).toBeGreaterThanOrEqual(0);
+    expect(r.ece).toBeLessThan(0.3);
+  });
 });

@@ -268,6 +268,37 @@ export function ExperimentDetail({
         </div>
       </Panel>
 
+      {/* 贝叶斯视角 */}
+      <Panel className="mt-4">
+        <PanelHead
+          title="贝叶斯视角"
+          hint="在频率派结论之外，把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率与可信区间"
+          right={
+            <span className="rounded-md border border-line bg-panel2/60 px-2 py-0.5 font-mono text-[10px] text-dim">
+              Beta-Binomial 后验
+            </span>
+          }
+        />
+        <div className="grid gap-px bg-line sm:grid-cols-4">
+          <BayesCell
+            label="treatment 更优概率"
+            value={fmtProb(analysis.bayes.probTreatBetter)}
+            cls={analysis.bayes.probTreatBetter > 0.95 ? 'text-ship' : analysis.bayes.probTreatBetter < 0.5 ? 'text-noship' : 'text-ink'}
+          />
+          <BayesCell label="95% 可信区间" value={`[${fmtPP(analysis.bayes.credLow)}, ${fmtPP(analysis.bayes.credHigh)}]`} />
+          <BayesCell label="后验均值差" value={fmtPP(analysis.bayes.meanDiff)} cls={liftClass(analysis.bayes.meanDiff)} />
+          <BayesCell
+            label="期望损失（误上）"
+            value={`${fmtPP(analysis.bayes.expectedLoss)}pp`}
+            cls={analysis.bayes.expectedLoss > 0.002 ? 'text-iterate' : 'text-muted'}
+          />
+        </div>
+        <p className="px-4 py-2.5 text-[11px] leading-5 text-dim">
+          P(B&gt;A) 是「treatment 真的比 control 好」的<b className="text-ink">后验概率</b>，与频率派的 p 值口径不同但结论互补；
+          期望损失 = 若误判上线、treatment 实际更差时，平均会损失多少个百分点。
+        </p>
+      </Panel>
+
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
         <Panel>
           <PanelHead
@@ -514,6 +545,13 @@ function Metric({ label, value, cls, sub }: { label: string; value: string; cls?
   );
 }
 
+/** 概率格式：99.9% 以上显示「>99.9%」，避免「100.0%」过度承诺 */
+function fmtProb(v: number): string {
+  if (!Number.isFinite(v)) return '—';
+  if (v >= 0.999) return '>99.9%';
+  return `${(v * 100).toFixed(1)}%`;
+}
+
 function Check({
   ok,
   icon,
@@ -588,6 +626,15 @@ function TruthCell({ label, value, cls, sub }: { label: string; value: string; c
       <div className="text-[10.5px] text-dim">{label}</div>
       <div className={cx('num mt-0.5 text-[13px] font-medium', cls ?? 'text-ink')}>{value}</div>
       {sub && <div className="text-[10px] text-dim">{sub}</div>}
+    </div>
+  );
+}
+
+function BayesCell({ label, value, cls }: { label: string; value: string; cls?: string }) {
+  return (
+    <div className="bg-panel px-4 py-2.5">
+      <div className="text-[10.5px] text-dim">{label}</div>
+      <div className={cx('num mt-0.5 text-[14px] font-semibold', cls ?? 'text-ink')}>{value}</div>
     </div>
   );
 }

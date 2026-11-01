@@ -23,6 +23,14 @@ function citesOf(calls: ToolCall[]): string[] {
   return [...seen];
 }
 
+/** 贝叶斯视角一句话（带 metric 引用，便于审计溯源） */
+function bayesLine(ctx: AgentCtx): { call: ToolCall; text: string } {
+  const b = runTool('bayesian_view', ctx);
+  const d = b.data as { probPP: number; credLowPP: number; credHighPP: number };
+  const text = `贝叶斯视角：treatment 有 ${d.probPP}% 的概率优于 control（95% 可信区间 [${d.credLowPP}, ${d.credHighPP}]pp）`;
+  return { call: b, text: withCites(text, b.cites) };
+}
+
 function withCites(text: string, ids: string[]): string {
   return ids.length ? `${text.replace(/[。；]$/, '')} [${ids.join('][')}]。` : text;
 }
@@ -157,12 +165,13 @@ const INTENTS: IntentDef[] = [
       const passed = passing.length ? `它前面的 ${passing.join('、')} 都没有触发，` : '';
       const body = `${passed}命中依据是 ${hit.detail}。`;
       const metric = ctx.analysis.overall;
+      const bayes = bayesLine(ctx);
       return {
-        calls: [r, o],
+        calls: [r, o, bayes.call],
         text: `${withCites(head, r.cites)}${withCites(
           `主指标 ${pp(metric.diff)}（p=${pv(metric.p)}，95% CI ${pp(metric.ci95[0])} ~ ${pp(metric.ci95[1])}）`,
           runTool('run_test', ctx).cites,
-        )}${body}`,
+        )}${body}${bayes.text}`,
       };
     },
   },
@@ -211,8 +220,9 @@ const INTENTS: IntentDef[] = [
       const o = ctx.analysis.overall;
       const srm = ctx.analysis.srm;
       const sig = o.p < 0.05;
+      const bayes = bayesLine(ctx);
       return {
-        calls: [t],
+        calls: [t, bayes.call],
         text:
           withCites(
             `主指标 control ${pct(o.controlRate, 3)} → treatment ${pct(o.treatmentRate, 3)}，差值 ${pp(o.diff)}，95% CI ${pp(o.ci95[0])} ~ ${pp(o.ci95[1])}，p=${pv(o.p)}`,
@@ -220,7 +230,8 @@ const INTENTS: IntentDef[] = [
           ) +
           (sig
             ? `区间不跨 0，差异在统计上成立（SRM 相对偏差 ${(srm.relImb * 100).toFixed(2)}%，分流正常）。`
-            : `区间跨过 0，这点差异还不足以说明有效果——更准确的说法是「没能证明有差异」。`),
+            : `区间跨过 0，这点差异还不足以说明有效果——更准确的说法是「没能证明有差异」。`) +
+          bayes.text,
       };
     },
   },
@@ -232,13 +243,14 @@ const FALLBACK: IntentDef = {
   run: (ctx) => {
     const o = runTool('get_overview', ctx);
     const t = runTool('run_test', ctx);
+    const bayes = bayesLine(ctx);
     const data = o.data as { decision: string; reasonCode: string; reason: string };
     return {
-      calls: [o, t],
+      calls: [o, t, bayes.call],
       text: `${withCites(
         `这个实验的结论是「${DECISION_CN[data.decision]}」，规则 ${data.reasonCode}`,
         o.cites,
-      )}主指标差值 ${pp(ctx.analysis.overall.diff)}，p=${pv(ctx.analysis.overall.p)}。可以继续问我：为什么是这个结论、新老用户有没有差异、护栏有没有恶化、样本够不够。`,
+      )}主指标差值 ${pp(ctx.analysis.overall.diff)}，p=${pv(ctx.analysis.overall.p)}。${bayes.text}可以继续问我：为什么是这个结论、新老用户有没有差异、护栏有没有恶化、样本够不够。`,
     };
   },
 };

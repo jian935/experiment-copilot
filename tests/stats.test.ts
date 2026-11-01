@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  bhAdjust, chi2Sf1, mdeTwoProportion, newcombeDiffCI, normalCdf, normalInv,
+  bayesBetaBinomial, betai, bhAdjust, chi2Sf1, lgamma, mdeTwoProportion, newcombeDiffCI, normalCdf, normalInv,
   powerTwoProportion, srmChi2, twoProportionZ, twoSidedP, wilson,
 } from '../src/lib/stats.ts';
 
@@ -98,5 +98,71 @@ describe('SRM 规则', () => {
     const r = srmChi2([31539, 20468], [0.5, 0.5]);
     expect(r.relImb).toBeGreaterThan(0.2);
     expect(r.flagged).toBe(true);
+  });
+});
+
+describe('贝叶斯层（Beta-Binomial）', () => {
+  it('lgamma 与 ln Γ 已知值对齐', () => {
+    close(lgamma(1), 0, 1e-10, 1e-12);
+    close(lgamma(0.5), 0.5723649429, 1e-9, 1e-12); // ln √π
+    close(lgamma(5), Math.log(24), 1e-9, 1e-12); // Γ(5)=24
+    close(lgamma(10), Math.log(362880), 1e-9, 1e-12);
+  });
+
+  it('betai 与闭式 CDF 已知值对齐', () => {
+    expect(betai(0.5, 1, 1)).toBeCloseTo(0.5, 12); // Uniform
+    expect(betai(0.3, 1, 1)).toBeCloseTo(0.3, 12);
+    // Beta(1,2): CDF = 2x − x²；I_0.5 = 0.75
+    expect(betai(0.5, 1, 2)).toBeCloseTo(0.75, 10);
+    // Beta(2,1): CDF = x²；I_0.5 = 0.25
+    expect(betai(0.5, 2, 1)).toBeCloseTo(0.25, 10);
+    // Beta(2,2): CDF = 3x² − 2x³；I_0.5 = 0.5
+    expect(betai(0.5, 2, 2)).toBeCloseTo(0.5, 10);
+  });
+
+  it('betai 单调且在 [0,1]', () => {
+    let prev = -1;
+    for (let x = 0.05; x <= 0.95; x += 0.05) {
+      const v = betai(x, 3, 7);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+      prev = v;
+    }
+  });
+
+  it('P(B>A) 对称性：两变体相同时 ≈ 0.5', () => {
+    const r = bayesBetaBinomial(500, 1000, 500, 1000);
+    expect(r.probTreatBetter).toBeCloseTo(0.5, 2);
+    expect(r.meanDiff).toBeCloseTo(0, 6);
+  });
+
+  it('treatment 明显更好时 P(B>A)→1，且期望损失很小', () => {
+    const r = bayesBetaBinomial(100, 1000, 200, 1000);
+    expect(r.probTreatBetter).toBeGreaterThan(0.999);
+    expect(r.expectedLoss).toBeLessThan(0.005);
+    expect(r.credLow).toBeGreaterThan(0);
+  });
+
+  it('treatment 明显更差时 P(B>A)→0，且期望损失≈|均值差|', () => {
+    const r = bayesBetaBinomial(200, 1000, 100, 1000);
+    expect(r.probTreatBetter).toBeLessThan(0.001);
+    expect(r.expectedLoss).toBeGreaterThan(0.05);
+    expect(r.meanDiff).toBeLessThan(0);
+  });
+
+  it('极端不对称处确定性且落在合理区间', () => {
+    // 同一输入重复调用必须完全一致（确定性），且 P(B>A) 在合理范围内
+    const a = bayesBetaBinomial(305, 990, 360, 1010);
+    const b = bayesBetaBinomial(305, 990, 360, 1010);
+    expect(a.probTreatBetter).toBe(b.probTreatBetter);
+    expect(a.probTreatBetter).toBeGreaterThan(0.9);
+    expect(a.probTreatBetter).toBeLessThan(1);
+  });
+
+  it('可信区间包含后验均值差', () => {
+    const r = bayesBetaBinomial(305, 990, 360, 1010);
+    expect(r.credLow).toBeLessThanOrEqual(r.meanDiff + 1e-12);
+    expect(r.credHigh).toBeGreaterThanOrEqual(r.meanDiff - 1e-12);
   });
 });

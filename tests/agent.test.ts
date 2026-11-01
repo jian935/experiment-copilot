@@ -20,8 +20,8 @@ const guardrailCtx = ctxOf('E001');
 const heteroCtx = ctxOf('E002');
 
 describe('Agent 工具（M4）', () => {
-  it('8 个工具都能调用，且引用的证据编号都真实存在', () => {
-    expect(TOOL_NAMES.length).toBe(8);
+  it('9 个工具都能调用，且引用的证据编号都真实存在', () => {
+    expect(TOOL_NAMES.length).toBe(9);
     const valid = new Set(guardrailCtx.analysis.evidence.map((e) => e.id));
     for (const name of TOOL_NAMES) {
       const call = runTool(name, guardrailCtx, name === 'segment_breakdown' ? { dimension: 'device' } : {});
@@ -98,6 +98,15 @@ describe('规则模式的回答', () => {
     const r = answerQuestion('你好', guardrailCtx);
     expect(r.intent).toBe('overview');
     expect(r.text.length).toBeGreaterThan(20);
+    expect(r.audit.suspicious).toEqual([]);
+  });
+
+  it('贝叶斯视角一句话正常渲染（带 P(B>A)，且不含畸形符号）', () => {
+    const r = answerQuestion('这个实验有效果吗', guardrailCtx);
+    expect(r.intent).toBe('test');
+    expect(r.text).toContain('贝叶斯视角');
+    expect(r.text).not.toContain('+-');
+    expect(r.text).toMatch(/有 \d+(\.\d+)?% 的概率优于 control/);
     expect(r.audit.suspicious).toEqual([]);
   });
 

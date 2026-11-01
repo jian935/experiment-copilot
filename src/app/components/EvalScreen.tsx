@@ -235,6 +235,24 @@ export function EvalScreen({
 
       <Panel className="mt-4">
         <PanelHead
+          title="置信度校准（贝叶斯 P(B>A)）"
+          hint="把预测「treatment 更优的概率」分桶，看每桶里真实整体效应确实 >0 的比例；越贴近对角线越准"
+          right={
+            <span className="font-mono text-[10px] text-dim">
+              ECE {r.ece <= 0 ? '0' : (r.ece * 100).toFixed(1)}%
+            </span>
+          }
+        />
+        <div className="px-4 py-4">
+          <CalibrationChart calibration={r.calibration} />
+          <p className="mt-3 text-[10.5px] leading-4 text-dim">
+            ECE（期望校准误差）= 各桶 |预测 − 观测| 按样本量加权平均。贝叶斯概率天然是自校准口径：若说「90% 的实验 treatment 更优」，实际就应有约 90% 真的更优。
+          </p>
+        </div>
+      </Panel>
+
+      <Panel className="mt-4">
+        <PanelHead
           title="Agent ablation：规则模板 vs 大模型"
           hint="同一批问题跑两种回答方式，比引用覆盖率、可疑数字率、口径识别"
           right={
@@ -320,5 +338,55 @@ function Row({ k, v, good }: { k: string; v: string; good?: boolean }) {
         {v}
       </dd>
     </div>
+  );
+}
+
+/** 校准曲线：预测 P(B>A) 分桶 vs 实际 treatment 更优比例，对角虚线 = 完美校准 */
+function CalibrationChart({ calibration }: { calibration: { probMid: number; n: number; observed: number }[] }) {
+  const W = 320;
+  const H = 230;
+  const mL = 42;
+  const mR = 12;
+  const mT = 14;
+  const mB = 34;
+  const pw = W - mL - mR;
+  const ph = H - mT - mB;
+  const px = (v: number) => mL + v * pw;
+  const py = (v: number) => mT + (1 - v) * ph;
+  const maxN = Math.max(1, ...calibration.map((b) => b.n));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[420px]" role="img" aria-label="置信度校准曲线">
+      {/* 网格 */}
+      {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+        <g key={g}>
+          <line x1={mL} y1={py(g)} x2={W - mR} y2={py(g)} stroke={C.line} strokeWidth={1} />
+          <line x1={px(g)} y1={mT} x2={px(g)} y2={mT + ph} stroke={C.line} strokeWidth={1} />
+          <text x={mL - 5} y={py(g) + 3} textAnchor="end" fontSize={9} fill={C.dim}>
+            {Math.round(g * 100)}
+          </text>
+          <text x={px(g)} y={H - mB + 14} textAnchor="middle" fontSize={9} fill={C.dim}>
+            {Math.round(g * 100)}
+          </text>
+        </g>
+      ))}
+      {/* 对角线 */}
+      <line x1={px(0)} y1={py(0)} x2={px(1)} y2={py(1)} stroke={C.muted} strokeWidth={1.2} strokeDasharray="4 3" />
+      {/* 数据点，半径随样本量 */}
+      {calibration.map((b) => {
+        const r = 3 + 6 * Math.sqrt(b.n / maxN);
+        return (
+          <circle key={b.probMid} cx={px(b.probMid)} cy={py(b.observed)} r={r} fill={C.brand} fillOpacity={0.7} stroke={C.brand2} strokeWidth={1}>
+            <title>{`预测 ${Math.round(b.probMid * 100)}% · 实际 ${(b.observed * 100).toFixed(0)}% · n=${b.n}`}</title>
+          </circle>
+        );
+      })}
+      <text x={W / 2} y={H - 4} textAnchor="middle" fontSize={10} fill={C.muted}>
+        预测 P(B&gt;A)（%）
+      </text>
+      <text x={12} y={H / 2} textAnchor="middle" fontSize={10} fill={C.muted} transform={`rotate(-90 12 ${H / 2})`}>
+        实际 treatment 更优（%）
+      </text>
+    </svg>
   );
 }

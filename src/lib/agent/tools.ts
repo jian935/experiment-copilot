@@ -12,6 +12,7 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   find_similar: '检索相似实验',
   list_experiments: '检索实验列表',
   explain_rules: '回溯判定规则',
+  bayesian_view: '贝叶斯视角',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -31,7 +32,7 @@ function cite(a: Analysis, kind: Evidence['kind'], labelPart?: string): string[]
   return hit.map((e) => e.id);
 }
 
-/** 8 个工具全部是纯函数：只读 Analysis / Dataset，不联网、不算任何新口径 */
+/** 9 个工具全部是纯函数：只读 Analysis / Dataset，不联网、不算任何新口径 */
 export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unknown> = {}): ToolCall {
   const { analysis: a, exp, dataset } = ctx;
 
@@ -214,6 +215,30 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
       };
     }
 
+    case 'bayesian_view': {
+      const b = a.bayes;
+      const probPP = Math.min(99.9, +(b.probTreatBetter * 100).toFixed(1));
+      const credLowPP = +(b.credLow * 100).toFixed(1);
+      const credHighPP = +(b.credHigh * 100).toFixed(1);
+      const meanDiffPP = +(b.meanDiff * 100).toFixed(1);
+      const expectedLossPP = +(b.expectedLoss * 100).toFixed(1);
+      return {
+        tool: name,
+        args,
+        summary: `treatment 更优概率 ${probPP}% · 95% 可信区间 [${credLowPP}, ${credHighPP}]pp`,
+        data: {
+          probTreatBetter: b.probTreatBetter,
+          probPP,
+          credLowPP,
+          credHighPP,
+          meanDiffPP,
+          expectedLossPP,
+          expectedLoss: b.expectedLoss,
+        },
+        cites: cite(a, 'metric'),
+      };
+    }
+
     default:
       throw new Error(`未知工具：${name}`);
   }
@@ -301,6 +326,15 @@ export const TOOL_SCHEMA = [
     function: {
       name: 'explain_rules',
       description: '回溯判定规则：6 条规则的顺序、条件、是否命中',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'bayesian_view',
+      description:
+        '贝叶斯视角：用 Beta-Binomial 后验给出 treatment 优于 control 的概率（P(B>A)）、95% 可信区间与期望损失（若误判上线的平均损失）',
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },

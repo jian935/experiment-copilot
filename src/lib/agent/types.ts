@@ -30,7 +30,8 @@ export type ToolName =
   | 'compute_mde'
   | 'find_similar'
   | 'list_experiments'
-  | 'explain_rules';
+  | 'explain_rules'
+  | 'bayesian_view';
 
 export interface AgentReply {
   /** 最终回答（含 [E1] 这类引用标记） */

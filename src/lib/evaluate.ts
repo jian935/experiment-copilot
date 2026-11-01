@@ -12,7 +12,19 @@ export interface EvalRow {
   reasonCode: string;
   p: number;
   diff: number;
+  /** 贝叶斯置信度：P(treatment 真正优于 control) */
+  confidence: number;
+  /** 真实整体效应是否 > 0（校准曲线的观测目标） */
+  trueLiftPositive: boolean;
   correct: boolean;
+}
+
+export interface CalibrationBin {
+  /** 预测概率区间中点（0.05, 0.15, …, 0.95，以及 1.0 代表 ≥0.9） */
+  probMid: number;
+  n: number;
+  /** 该桶内真实整体效应 > 0 的比例 */
+  observed: number;
 }
 
 export interface EvalSummary {
@@ -30,6 +42,10 @@ export interface EvalSummary {
   byArchetype: { archetype: Archetype; n: number; correct: number; accuracy: number }[];
   /** 按 p 值分桶：越靠近阈值，准确率越能反映"证据强度" */
   byPValue: { label: string; n: number; correct: number; accuracy: number }[];
+  /** 贝叶斯置信度校准：预测 P(B>A) 分桶 vs 实际 treatment 更优的比例 */
+  calibration: CalibrationBin[];
+  /** 期望校准误差（ECE）：各桶 |预测−观测| 按样本量加权平均 */
+  ece: number;
   rows: EvalRow[];
   mismatches: EvalRow[];
 }
@@ -58,6 +74,8 @@ export function evaluate(dataset: Dataset, analyses: Map<string, Analysis>): Eva
       reasonCode: a.reasonCode,
       p: a.overall.p,
       diff: a.overall.diff,
+      confidence: a.bayes?.probTreatBetter ?? 0.5,
+      trueLiftPositive: e.trueLiftOverall > 0,
       correct: a.decision === e.trueDecision,
     });
     confusion[DECISIONS.indexOf(e.trueDecision)][DECISIONS.indexOf(a.decision)] += 1;
@@ -89,6 +107,24 @@ export function evaluate(dataset: Dataset, analyses: Map<string, Analysis>): Eva
     return { label: b.label, n: sub.length, correct: sub.filter((r) => r.correct).length, accuracy: sub.length ? sub.filter((r) => r.correct).length / sub.length : 0 };
   });
 
+  // 贝叶斯置信度校准：把预测 P(B>A) 分 10 个桶，看每桶里「真实整体效应 > 0」的比例
+  const NB = 10;
+  const binAgg: { n: number; hit: number; mid: number }[] = Array.from({ length: NB }, (_, i) => ({
+    n: 0,
+    hit: 0,
+    mid: (i + 0.5) / NB,
+  }));
+  for (const r of rows) {
+    const b = Math.min(NB - 1, Math.max(0, Math.floor(r.confidence * NB)));
+    binAgg[b].n += 1;
+    if (r.trueLiftPositive) binAgg[b].hit += 1;
+  }
+  const calibration: CalibrationBin[] = binAgg
+    .filter((x) => x.n > 0)
+    .map((x) => ({ probMid: x.mid, n: x.n, observed: x.n ? x.hit / x.n : 0 }));
+  const ece =
+    calibration.reduce((s, b) => s + (b.n / n) * Math.abs(b.probMid - b.observed), 0);
+
   return {
     n,
     correct,
@@ -99,6 +135,8 @@ export function evaluate(dataset: Dataset, analyses: Map<string, Analysis>): Eva
     fnrNegative: { miss: negMiss, n: negRows.length, rate: negRows.length ? negMiss / negRows.length : 0 },
     byArchetype,
     byPValue,
+    calibration,
+    ece,
     rows,
     mismatches: rows.filter((r) => !r.correct),
   };
