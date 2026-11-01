@@ -1,6 +1,6 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M10 完成（统计深度 / 产品完整度 / CUPED / 还要跑几天 / 多轮上下文）** ｜ 2026-11-01
+> 状态：**M11 完成（评测闭环：分层 F1 / 幻觉数字率自动测 / 回归基线 / CI）** ｜ 2026-11-01
 > 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ 实测记录：[`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
@@ -32,7 +32,7 @@
 | 规则轨迹 | 结论那条证据展开后是 6 条规则按优先级依次判断，标出命中/被覆盖/未触发 | [`04-规则判定轨迹.png`](docs/screenshots/04-规则判定轨迹.png) |
 | 结论卡导出 | 一键导出 2 倍图 PNG（880×552），可直接贴文档/简历/群聊 | [`05-结论卡导出.png`](docs/screenshots/05-结论卡导出.png) |
 | Agent 面板 | 建议问题、规则/智能双模式、工具调用可视化、回答带可点引用、数字审计徽章 | [`06-Agent-建议问题.png`](docs/screenshots/06-Agent-建议问题.png) · [`07-Agent-问答.png`](docs/screenshots/07-Agent-问答.png) |
-| 评测看板 | 混淆矩阵、按类型/按 p 值分桶准确率、4 条失败案例可点开 | [`08-评测看板.png`](docs/screenshots/08-评测看板.png) |
+| 评测看板 | 混淆矩阵、分层检测 F1（含区间）、幻觉数字率、按类型/按 p 值分桶、失败案例可点开、校准双口径 | [`08-评测看板.png`](docs/screenshots/08-评测看板.png) |
 | Ablation 对比 | 规则模式 vs 真实 DeepSeek 并排（引用覆盖 / 可疑数字 / 违规 / 口径 / 字数） | [`09-Ablation对比.png`](docs/screenshots/09-Ablation对比.png) |
 | Agent 智能模式 | 真实 DeepSeek：4 次工具调用、回答带可点引用、数字审计通过 | [`10-Agent-智能模式.png`](docs/screenshots/10-Agent-智能模式.png) |
 
@@ -54,7 +54,9 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 196 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 还要跑几天 / 多轮上下文 / 连续指标 ARPU）
+npm test           # 224 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
+npm run eval       # 评测报告：分层 F1 + 1720 条 Agent 问答的幻觉数字率（写 data/agent_eval.json 给看板）
+npm run eval:check # 与 eval/baseline.json 逐指标比对，任何漂移 exit 1（CI 用的就是它）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 npm run smoke      # UI 冒烟（需先 npm run build && npx vite preview --port 4321）
@@ -142,8 +144,9 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  196 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
-                        + 口径字典/阈值可配/多轮上下文）
+tests/                  224 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
+                        + 口径字典/阈值可配/多轮上下文 + 分层 F1/基线比对器自测）
+eval/baseline.json      回归基线：82 个指标 + 数据指纹（npm run eval -- --write 更新）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
 docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```
@@ -229,12 +232,13 @@ node scripts/mock_llm.mjs          # 本地 mock，返回「先调工具、再�
 
 | 模块 | 内容 |
 |---|---|
-| 五个 KPI | 决策准确率 **93.3%**（112/120）、null 误报率 **5.0%**（2/40）、负效应漏判 0% / 正效应 4.0%（1/25）、Agent 引用覆盖 100% |
+| 六个 KPI | 决策准确率 **93.3%**（112/120）、null 误报率 **5.0%**（2/40）、分层检测 F1 **0.857**、幻觉数字率 **0.00%**、Agent 引用覆盖 100%、负效应漏判 0% |
 | 混淆矩阵 | 4×4，对角线绿、错判红，鼠标悬停看「真实 → 引擎」的计数 |
-| 证据强度分桶 | 按 p 值分四桶看准确率：p<0.001 是 100%，**0.01–0.05 是 0%（0/3）**——恰好跨过阈值的实验本就无法判定 |
-| 失败案例 | 4 条全部列出、可点开看证据链；不修是刻意的（改了反而像在挑数据） |
+| 证据强度分桶 | 按 p 值分四桶看准确率：p<0.001 是 98.1%，**0.01–0.05 是 42.9%（3/7）**——恰好跨过阈值的实验本就无法判定 |
+| 失败案例 | 8 条全部列出、可点开看证据链；不修是刻意的（改了反而像在挑数据） |
 | Ablation | 规则模式 vs 智能模式并排：引用覆盖率 / 可疑数字率 / 违规率 / 口径识别 / 平均字数 |
-| 口径 | 单一源 `src/lib/evaluate.ts`，脚本 `npm run calibrate` 与看板共用，杜绝两套数字 |
+| 校准双口径 | 全量 ECE 20.0% 是「把精确 0 的真值当负类」的产物；只看真值非零的 70 个实验，ECE **5.0%**。两个都留着，差值本身就是结论 |
+| 口径 | 单一源 `src/lib/evaluate.ts`，脚本 `npm run calibrate` / `npm run eval` 与看板共用，杜绝两套数字 |
 
 > FPR 分母只取 `archetype=null`（40 个真实无效应）。SRM 实验属于「数据坏了」另一种失败模式，
 > 混进分母会把误报率稀释成 6.0%——那不是更准，是分母被白送。
@@ -297,6 +301,29 @@ CUPED 的功劳是在区间已经诚实的前提下再收窄 7.24%。这两件�
 改成按 6 个一块轮转（总数仍是 40/120，且每类实验都有 ARPU）后，才有了「正效应 ARPU 实验」这条覆盖率。
 现在有单测直接锁「口径与实验类型正交」，谁再写成 `i % 3` 会红。
 
+### M11 — 评测闭环（让「可证伪」变成自动跑的事实）
+
+| 模块 | 内容 | 复现 |
+|---|---|---|
+| 分层检测 F1 | 对**检测器**打分，不对决策打分：真值 = 生成器注入的「新老效应不同」，预测 = `analysis.heterogeneity`。实测 F1 **0.857**（P 0.923 / R 0.800，15 个正例），95% CI 0.67–0.97 | `npm run eval` |
+| 放宽口径对照 | 只要求交互显著时 F1 反而掉到 **0.788**：召回只多 1 条，假阳性从 1 涨到 5 → 「一个分层显著为正、另一个无效」这层合取是净收益，不是多余条件 | 同上 |
+| 幻觉数字率自动测 | 规则模式 **1720 条问答 / 10177 个数字**，可疑 **0** 个；15 道题覆盖全部 12 个工具，每题只在该实验答得出来时才问（否则引用覆盖率会被无证据的题稀释） | `npm run eval` |
+| 接进统一口径 | `evaluate(ds, analyses, { agent })` 一个出口；看板 fetch `data/agent_eval.json`，设置页改过阈值时显式提示「这份评测已过期，重跑 npm run eval」 | `src/lib/agentEval.ts` |
+| 回归基线 | `eval/baseline.json` 82 个指标 + 数据指纹；`npm run eval:check` 漂移即 `exit 1`，并打印 `✗ accuracy 93.33% → 91.67%（-1.67pp）` 这种可直接定位的一行 | `npm run eval:check` |
+| CI | typecheck → test → 基线比对 → **重建数据后再比对**（证明同代码出同数据）→ A/A 200 次冒烟（`--dry`，不覆盖 2000 次的正式报告） | `.github/workflows/ci.yml` |
+| 单测 | 196 → **224**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条） | `npm test` |
+
+**顺手抓到的真 bug（在判定器里，不在回答里）**：接进自动评测后，规则模式的「还要跑几天」立刻冒出
+48 个「无法溯源的数字」（0.63 / 0.68 / 20）。查下来是 `audit.ts` 的**白名单只收 number、不收字符串**：
+工具返回的 `mdeNowText: "0.63pp"` 是格式化文本字段，回答照抄它是**合规**的（system prompt 第 6 条就是这么要求的），
+却被判成幻觉。修完后 1720 条回答的可疑数字归零。
+
+这条最能说明自动评测的价值：那个 bug 在人工 ablation 里躺了很久——因为「规则模式不可能编数字」听起来太合理了，
+没人去查。**只要指标不是自动跑的，它就会停在「我以为它是 0」。**
+
+> 纪律：指标漂移时**先查清原因再更新基线**。`npm run eval -- --write` 是给「有意改口径」用的，
+> 提交信息里必须写清改了什么、为什么。CI 不区分两者——它只负责把漂移变成一次红灯。
+
 ## 技术栈
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）+ Recharts（仅趋势图）；森林图手写 SVG；统计自研带单测；无后端、无数据库。后续 Agent 走 DeepSeek 浏览器直连，部署 GitHub Pages。
@@ -304,5 +331,6 @@ Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语�
 ## 里程碑
 
 M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → M4 Agent ✅ → M5 评测看板 ✅ → M6 演示与包装 ✅ →
-M8 统计深度 ✅ → M9 产品完整度 ✅ → **M10 旗舰差异化（A1 CUPED / A3 连续指标 ARPU / B3 还要跑几天 / D1 多轮上下文）✅** → M11 评测闭环 → 部署（等网络）。
+M8 统计深度 ✅ → M9 产品完整度 ✅ → M10 旗舰差异化（A1 CUPED / A3 连续指标 ARPU / B3 还要跑几天 / D1 多轮上下文）✅ →
+**M11 评测闭环（D6 幻觉率 / E1 分层 F1 / E6 基线 / G1 CI）✅** → M12 序贯与高级 → M13 打磨与部署（等网络）。
 验收标准见蓝图 §13；扩展清单与实测记录见 [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md)。

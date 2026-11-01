@@ -165,16 +165,26 @@ const pct = (v: number) => `${(v * 100).toFixed(2)}%`;
 const isDirectRun = (process.argv[1] ?? '').replace(/\\/g, '/').endsWith('scripts/aa_test.ts');
 
 if (isDirectRun) {
-  const trials = Number(process.argv[2] ?? 2000);
+  // 参数：`npm run aa -- 2000`（次数）+ `--dry`（只打印，不覆盖 data/aa_report.json）
+  // `--dry` 是给 CI 用的：CI 只做 200 次冒烟，不该把仓库里 2000 次的正式报告冲掉。
+  const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+  const DRY = process.argv.includes('--dry');
+  const trials = Number(positional[0] ?? 2000);
+  if (!Number.isFinite(trials) || trials <= 0) {
+    console.error(`次数必须是正整数，收到「${positional[0]}」`);
+    process.exit(1);
+  }
   const t0 = Date.now();
   const r = runAa(trials);
-  // 两份：data/ 进仓库当文档证据，public/data/ 供前端评测看板直接读
-  const json = `${JSON.stringify(r, null, 2)}\n`;
-  writeFileSync('data/aa_report.json', json);
-  try {
-    writeFileSync('public/data/aa_report.json', json);
-  } catch {
-    console.log('（public/data/ 不存在，跳过前端副本；先跑 npm run data）');
+  if (!DRY) {
+    // 两份：data/ 进仓库当文档证据，public/data/ 供前端评测看板直接读
+    const json = `${JSON.stringify(r, null, 2)}\n`;
+    writeFileSync('data/aa_report.json', json);
+    try {
+      writeFileSync('public/data/aa_report.json', json);
+    } catch {
+      console.log('（public/data/ 不存在，跳过前端副本；先跑 npm run data）');
+    }
   }
 
   console.log(`\nA/A 自校准（${r.trials} 个零效应实验，seed=${r.seedBase}，${r.days} 天，每臂平均 ${Math.round(r.meanSamplePerArm)} 样本）`);
@@ -208,5 +218,5 @@ if (isDirectRun) {
     const bar = '█'.repeat(Math.round((v / maxBar) * 40));
     console.log(`    [${(i / 10).toFixed(1)}, ${((i + 1) / 10).toFixed(1)})  ${String(v).padStart(4)}  ${bar}`);
   });
-  console.log(`\n  耗时 ${Date.now() - t0}ms → data/aa_report.json\n`);
+  console.log(`\n  耗时 ${Date.now() - t0}ms → ${DRY ? '（--dry，未写文件）' : 'data/aa_report.json'}\n`);
 }

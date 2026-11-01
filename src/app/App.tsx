@@ -136,6 +136,7 @@ export default function App() {
           <EvalScreen
             dataset={data.dataset}
             analyses={data.analyses}
+            config={settings.config}
             onOpen={(id) => go(`#/e/${id}`)}
             onBack={() => go('#/')}
           />

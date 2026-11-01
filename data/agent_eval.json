@@ -1,0 +1,337 @@
+{
+  "generatedAt": "2026-11-01T10:13:35.697Z",
+  "seedBase": 20261031,
+  "config": {
+    "alpha": 0.05,
+    "interactionAlpha": 0.01,
+    "segmentFdr": 0.1,
+    "seMode": "robust",
+    "useCuped": true
+  },
+  "summary": {
+    "n": 1720,
+    "numbers": 10177,
+    "suspicious": 0,
+    "hallucinationRate": 0,
+    "dirtyAnswerRate": 0,
+    "citationRate": 1,
+    "citableN": 1480,
+    "violationRate": 0,
+    "scopeRate": 1,
+    "trapN": 80,
+    "routeAccuracy": 1,
+    "routeN": 1080
+  },
+  "byGroup": [
+    {
+      "group": "结论",
+      "n": 240,
+      "numbers": 3120,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "group": "统计",
+      "n": 360,
+      "numbers": 2807,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "group": "护栏",
+      "n": 120,
+      "numbers": 701,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "group": "分层",
+      "n": 120,
+      "numbers": 621,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "group": "预测",
+      "n": 120,
+      "numbers": 306,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "group": "检索",
+      "n": 240,
+      "numbers": 840,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "group": "口径",
+      "n": 520,
+      "numbers": 1782,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    }
+  ],
+  "byIntent": [
+    {
+      "intent": "rules",
+      "n": 240
+    },
+    {
+      "intent": "test",
+      "n": 240
+    },
+    {
+      "intent": "metric_scope",
+      "n": 240
+    },
+    {
+      "intent": "guardrail",
+      "n": 120
+    },
+    {
+      "intent": "segment",
+      "n": 120
+    },
+    {
+      "intent": "mde",
+      "n": 120
+    },
+    {
+      "intent": "forecast",
+      "n": 120
+    },
+    {
+      "intent": "similar",
+      "n": 120
+    },
+    {
+      "intent": "list",
+      "n": 120
+    },
+    {
+      "intent": "overview",
+      "n": 120
+    },
+    {
+      "intent": "metric",
+      "n": 120
+    },
+    {
+      "intent": "decompose",
+      "n": 40
+    }
+  ],
+  "byQa": [
+    {
+      "qaId": "why",
+      "group": "结论",
+      "q": "为什么是这个结论？",
+      "n": 120,
+      "numbers": 1560,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "test",
+      "group": "统计",
+      "q": "主指标显著吗？",
+      "n": 120,
+      "numbers": 1465,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "guard",
+      "group": "护栏",
+      "q": "护栏有没有恶化？",
+      "n": 120,
+      "numbers": 701,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "seg",
+      "group": "分层",
+      "q": "新老用户有差异吗？",
+      "n": 120,
+      "numbers": 621,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "mde",
+      "group": "统计",
+      "q": "样本够不够？",
+      "n": 120,
+      "numbers": 638,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "days",
+      "group": "预测",
+      "q": "还要跑几天？",
+      "n": 120,
+      "numbers": 306,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "similar",
+      "group": "检索",
+      "q": "有类似实验吗？",
+      "n": 120,
+      "numbers": 600,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "list",
+      "group": "检索",
+      "q": "有哪些实验被拦截了？",
+      "n": 120,
+      "numbers": 240,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "bayes",
+      "group": "统计",
+      "q": "贝叶斯怎么看这个结果？",
+      "n": 120,
+      "numbers": 704,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "used",
+      "group": "结论",
+      "q": "这个实验踩了哪条规则？",
+      "n": 120,
+      "numbers": 1560,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "arpu",
+      "group": "口径",
+      "q": "ARPU 提升了多少？",
+      "n": 120,
+      "numbers": 1465,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "dict",
+      "group": "口径",
+      "q": "ARPU 是怎么算的？",
+      "n": 120,
+      "numbers": 0,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "out_gmv",
+      "group": "口径",
+      "q": "GMV 提升了多少？",
+      "n": 120,
+      "numbers": 0,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "out_ret",
+      "group": "口径",
+      "q": "留存率有变化吗？",
+      "n": 120,
+      "numbers": 0,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
+      "qaId": "decomp",
+      "group": "口径",
+      "q": "收入变化里转化率和客单价各占多少？",
+      "n": 40,
+      "numbers": 317,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    }
+  ],
+  "toolCalls": [
+    {
+      "tool": "get_overview",
+      "calls": 720
+    },
+    {
+      "tool": "bayesian_view",
+      "calls": 600
+    },
+    {
+      "tool": "run_test",
+      "calls": 360
+    },
+    {
+      "tool": "segment_breakdown",
+      "calls": 240
+    },
+    {
+      "tool": "explain_rules",
+      "calls": 240
+    },
+    {
+      "tool": "check_guardrails",
+      "calls": 120
+    },
+    {
+      "tool": "compute_mde",
+      "calls": 120
+    },
+    {
+      "tool": "forecast_days",
+      "calls": 120
+    },
+    {
+      "tool": "find_similar",
+      "calls": 120
+    },
+    {
+      "tool": "list_experiments",
+      "calls": 120
+    },
+    {
+      "tool": "metric_dictionary",
+      "calls": 120
+    },
+    {
+      "tool": "metric_decompose",
+      "calls": 40
+    }
+  ],
+  "uncoveredTools": [],
+  "problems": []
+}

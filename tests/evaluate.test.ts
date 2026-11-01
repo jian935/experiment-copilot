@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../src/lib/decide.ts';
 import { generateDataset } from '../src/lib/simulate.ts';
-import { evaluate, DECISIONS } from '../src/lib/evaluate.ts';
+import { evaluate, DECISIONS, f1Of } from '../src/lib/evaluate.ts';
 
 const ds = generateDataset(20261031);
 const analyses = new Map(ds.experiments.map((e) => [e.id, analyze(e, ds.daily)]));
@@ -84,5 +84,80 @@ describe('评测口径（M5）', () => {
   it('ECE 为非负且落在合理范围', () => {
     expect(r.ece).toBeGreaterThanOrEqual(0);
     expect(r.ece).toBeLessThan(0.3);
+  });
+});
+
+describe('分层（异质）检测 F1（E1）', () => {
+  const h = r.hetero;
+
+  it('四格之和等于实验数，正例数等于真异质实验数', () => {
+    expect(h.tp + h.fp + h.fn + h.tn).toBe(r.n);
+    expect(h.positives).toBe(ds.experiments.filter((e) => e.archetype === 'heterogeneous').length);
+    expect(h.positives).toBe(h.tp + h.fn);
+  });
+
+  it('precision / recall / F1 与四格手算一致', () => {
+    expect(h.precision).toBeCloseTo(h.tp / (h.tp + h.fp), 12);
+    expect(h.recall).toBeCloseTo(h.tp / (h.tp + h.fn), 12);
+    expect(h.f1).toBeCloseTo((2 * h.precision * h.recall) / (h.precision + h.recall), 12);
+  });
+
+  it('预测口径是检测器本身，不是决策（不拿 iterate 当预测值）', () => {
+    // 只要有实验被判 iterate 但检测器没报异质，或反之，就说明两者口径不同、必须分开
+    const iterateIds = new Set(r.rows.filter((x) => x.predDecision === 'iterate').map((x) => x.id));
+    const detectedIds = new Set(r.rows.filter((x) => x.heteroDetected).map((x) => x.id));
+    expect([...iterateIds].sort()).toEqual([...detectedIds].sort());
+    // 真值来源必须是 archetype，而不是 trueDecision（heterogeneous 的真决策就是 iterate）
+    expect(h.tp + h.fn).toBe(15);
+  });
+
+  it('放宽口径的召回不会低于严格口径（逻辑性质，写反就会红）', () => {
+    const loose = h.interactionOnly;
+    expect(loose.tp).toBeGreaterThanOrEqual(h.tp);
+    expect(loose.fn).toBeLessThanOrEqual(h.fn);
+    expect(loose.fp).toBeGreaterThanOrEqual(h.fp);
+  });
+
+  it('区间确定性：同一份数据跑两次完全一致，且落在 [0,1]', () => {
+    const again = evaluate(ds, analyses).hetero;
+    expect(again.f1Ci).toEqual(h.f1Ci);
+    expect(h.f1Ci[0]).toBeLessThanOrEqual(h.f1Ci[1]);
+    expect(h.f1Ci[0]).toBeGreaterThanOrEqual(0);
+    expect(h.f1Ci[1]).toBeLessThanOrEqual(1);
+  });
+
+  it('分母为 0 时 F1 记 0，不记 1（没有正预测不等于完美）', () => {
+    const f = f1Of(0, 0, 3, 10);
+    expect(f.precision).toBe(0);
+    expect(f.f1).toBe(0);
+  });
+});
+
+describe('置信度校准的两个口径', () => {
+  it('「真值非零」子集的样本量等于非零真值实验数，且分桶不丢样本', () => {
+    const nonZero = ds.experiments.filter((e) => e.trueLiftOverall !== 0).length;
+    expect(r.eceEffects.n).toBe(nonZero);
+    expect(nonZero).toBeLessThan(r.n); // null / srm 的真值是精确 0，必须被排除在子集外
+    expect(r.eceEffects.calibration.reduce((s, b) => s + b.n, 0)).toBe(nonZero);
+  });
+
+  it('子集里每个桶的观测值都能用 rows 重算出来（分桶逻辑不自洽会红）', () => {
+    const sub = r.rows.filter((x) => x.trueLiftNonZero);
+    for (const b of r.eceEffects.calibration) {
+      const inBin = sub.filter((x) => Math.min(9, Math.max(0, Math.floor(x.confidence * 10))) === Math.round(b.probMid * 10 - 0.5));
+      expect(inBin.length).toBe(b.n);
+      const hit = inBin.filter((x) => x.trueLiftPositive).length;
+      expect(b.observed).toBeCloseTo(hit / b.n, 10);
+    }
+  });
+
+  it('全量 ECE 被「精确 0」抬高：它比子集 ECE 大，且两者都在 [0,1]', () => {
+    // 这不是后验不校准，而是观测目标二值化的产物：精确 0 只能记成「不为正」。
+    // 两个口径都留着的意义就在于这个差值本身。
+    expect(r.ece).toBeGreaterThan(r.eceEffects.ece);
+    for (const v of [r.ece, r.eceEffects.ece]) {
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(1);
+    }
   });
 });

@@ -3,7 +3,8 @@ import { ArrowLeft, ArrowRight, BadgeCheck, FlaskConical, Info, TriangleAlert } 
 import type { Analysis } from '../../lib/decide.ts';
 import { DECISIONS, evaluate } from '../../lib/evaluate.ts';
 import type { Dataset } from '../../lib/types.ts';
-import { ARCHETYPE_LABEL, DECISION_META, fmtP, fmtPP, liftClass } from '../lib/format';
+import type { DecisionConfig } from '../../lib/config.ts';
+import { ARCHETYPE_LABEL, DECISION_META, fmtDiff, fmtP, liftClass } from '../lib/format';
 import { DecisionBadge, Panel, PanelHead, cx } from './ui';
 import { C } from '../lib/palette';
 
@@ -35,36 +36,80 @@ interface Ablation {
   rows: { exp: string; q: string; intent: string; cited: boolean; numbers: number; suspicious: number }[];
 }
 
+/** `data/agent_eval.json` 的形状（`npm run eval` 产出）。看板只读汇总，不读 1720 条回答全文 */
+interface AgentEvalFile {
+  generatedAt: string;
+  seedBase: number;
+  config: { alpha: number; interactionAlpha: number; segmentFdr: number; seMode?: string; useCuped?: boolean };
+  summary: {
+    n: number;
+    numbers: number;
+    suspicious: number;
+    hallucinationRate: number;
+    dirtyAnswerRate: number;
+    citationRate: number;
+    citableN: number;
+    violationRate: number;
+    scopeRate: number;
+    trapN: number;
+    routeAccuracy: number;
+    routeN: number;
+  };
+  byGroup: { group: string; n: number; numbers: number; suspicious: number; citationRate: number; routeAccuracy: number }[];
+  byIntent: { intent: string; n: number }[];
+  byQa: { qaId: string; group: string; q: string; n: number; numbers: number; suspicious: number; citationRate: number; routeAccuracy: number }[];
+  toolCalls: { tool: string; calls: number }[];
+  uncoveredTools: string[];
+  problems: { expId: string; qaId: string; q: string; suspicious: string[]; violations: string[]; answer: string }[];
+}
+
 export function EvalScreen({
   dataset,
   analyses,
+  config,
   onOpen,
   onBack,
 }: {
   dataset: Dataset;
   analyses: Map<string, Analysis>;
+  config: DecisionConfig;
   onOpen: (id: string) => void;
   onBack: () => void;
 }) {
   const r = useMemo(() => evaluate(dataset, analyses), [dataset, analyses]);
   const [ablation, setAblation] = useState<Ablation | null>(null);
   const [aa, setAa] = useState<AaReport | null>(null);
+  const [agent, setAgent] = useState<AgentEvalFile | null>(null);
   const noTruth = dataset.groundTruth === false;
 
   useEffect(() => {
     let alive = true;
-    fetch(`${import.meta.env.BASE_URL}data/ablation.json`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((d) => alive && setAblation(d as Ablation))
-      .catch(() => {});
-    fetch(`${import.meta.env.BASE_URL}data/aa_report.json`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((d) => alive && setAa(d as AaReport))
-      .catch(() => {});
+    const load = (name: string) =>
+      fetch(`${import.meta.env.BASE_URL}data/${name}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .catch(() => null);
+    load('ablation.json').then((d) => alive && setAblation(d as Ablation | null));
+    load('aa_report.json').then((d) => alive && setAa(d as AaReport | null));
+    load('agent_eval.json').then((d) => alive && setAgent(d as AgentEvalFile | null));
     return () => {
       alive = false;
     };
   }, []);
+
+  // 这份 Agent 评测是脚本在某个阈值下生成的；设置页改过口径后它就不再代表当前结论。
+  // 不静默：显式比对五项会改变决策的阈值，不一致就提示重跑。
+  const agentStale = useMemo(() => {
+    if (!agent) return false;
+    const c = agent.config;
+    return (
+      agent.seedBase !== dataset.seedBase ||
+      Math.abs(c.alpha - config.alpha) > 1e-12 ||
+      Math.abs(c.interactionAlpha - config.interactionAlpha) > 1e-12 ||
+      Math.abs(c.segmentFdr - config.segmentFdr) > 1e-12 ||
+      c.seMode !== (config.seMode ?? 'robust') ||
+      c.useCuped !== (config.useCuped ?? true)
+    );
+  }, [agent, config, dataset.seedBase]);
 
   const maxCell = Math.max(1, ...r.confusion.flat());
 
@@ -123,17 +168,28 @@ export function EvalScreen({
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <Kpi label="决策准确率" value={`${(r.accuracy * 100).toFixed(1)}%`} sub={`${r.correct} / ${r.n}`} tone="text-ship" />
         <Kpi label="null 误报率 (FPR)" value={`${(r.fpr.rate * 100).toFixed(1)}%`} sub={`${r.fpr.hit} / ${r.fpr.n}`} tone="text-noship" />
-        <Kpi label="正效应漏判" value={`${(r.fnrPositive.rate * 100).toFixed(1)}%`} sub={`${r.fnrPositive.miss} / ${r.fnrPositive.n}`} tone="text-ink" />
-        <Kpi label="负效应漏判" value={`${(r.fnrNegative.rate * 100).toFixed(1)}%`} sub={`${r.fnrNegative.miss} / ${r.fnrNegative.n}`} tone="text-ink" />
+        <Kpi
+          label="分层检测 F1"
+          value={r.hetero.f1.toFixed(2)}
+          sub={`95% CI ${r.hetero.f1Ci[0].toFixed(2)}–${r.hetero.f1Ci[1].toFixed(2)}`}
+          tone={r.hetero.f1 >= 0.8 ? 'text-ship' : 'text-iterate'}
+        />
+        <Kpi
+          label="幻觉数字率"
+          value={agent ? `${(agent.summary.hallucinationRate * 100).toFixed(2)}%` : '—'}
+          sub={agent ? `${agent.summary.suspicious} / ${agent.summary.numbers} 个数字` : '未运行 npm run eval'}
+          tone={agent && agent.summary.suspicious === 0 ? 'text-ship' : 'text-ink'}
+        />
         <Kpi
           label="Agent 引用覆盖"
-          value={ablation ? `${(ablation.rules.citationRate * 100).toFixed(0)}%` : '—'}
-          sub={ablation ? `${ablation.rules.n} 条问答` : '未运行 ablation'}
+          value={agent ? `${(agent.summary.citationRate * 100).toFixed(1)}%` : ablation ? `${(ablation.rules.citationRate * 100).toFixed(0)}%` : '—'}
+          sub={agent ? `${agent.summary.n} 条问答` : ablation ? `${ablation.rules.n} 条问答` : '未运行'}
           tone="text-brand2"
         />
+        <Kpi label="负效应漏判" value={`${(r.fnrNegative.rate * 100).toFixed(1)}%`} sub={`${r.fnrNegative.miss} / ${r.fnrNegative.n}`} tone="text-ink" />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.05fr_1fr]">
@@ -178,7 +234,7 @@ export function EvalScreen({
               ))}
             </div>
             <p className="mt-2 text-[10.5px] leading-4 text-dim">
-              4 个不一致全部来自「真实无效应」的 null 实验：3 个被判成可上线、1 个被判成负向。
+              {mismatchSummary(r.mismatches)}
             </p>
           </div>
         </Panel>
@@ -204,12 +260,64 @@ export function EvalScreen({
             ))}
             <div className="flex items-start gap-1.5 rounded-lg border border-iterate/25 bg-iterate/[0.07] px-2.5 py-2 text-[10.5px] leading-4 text-iterate">
               <Info size={11} className="mt-0.5 shrink-0" />
-              落在 0.01–0.05 的 3 个实验全部判错——它们本来就是 null 的尾部假阳性，p 恰好跨过 0.05
-              的实验在统计上与"有微效"无法区分。这不是 bug，是 α=0.05 的代价。
+              {pBucketNote(r.byPValue)}
             </div>
           </div>
         </Panel>
       </div>
+
+      <Panel className="mt-4">
+        <PanelHead
+          title="分层检测（效应异质）F1"
+          hint="评的是检测器本身，不是决策：真值 = 生成器注入的「新老效应不同」，预测 = 交互显著 ∧ 一个分层为正 ∧ 另一个无效"
+          right={<span className="font-mono text-[10px] text-dim">{r.hetero.positives} 个真异质</span>}
+        />
+        <div className="grid gap-x-6 gap-y-4 px-4 py-4 lg:grid-cols-[1.05fr_1fr]">
+          <div>
+            <div className="grid grid-cols-2 gap-2">
+              <ConfCell label="TP 真异质·检出" value={r.hetero.tp} tone="ship" />
+              <ConfCell label="FP 同质·误报" value={r.hetero.fp} tone="noship" />
+              <ConfCell label="FN 真异质·漏检" value={r.hetero.fn} tone="iterate" />
+              <ConfCell label="TN 同质·正确排除" value={r.hetero.tn} tone="muted" />
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <MetricCell label="precision" value={r.hetero.precision.toFixed(3)} />
+              <MetricCell label="recall" value={r.hetero.recall.toFixed(3)} />
+              <MetricCell
+                label="F1"
+                value={r.hetero.f1.toFixed(3)}
+                sub={`CI ${r.hetero.f1Ci[0].toFixed(2)}–${r.hetero.f1Ci[1].toFixed(2)}`}
+                good={r.hetero.f1 >= 0.8}
+              />
+            </div>
+          </div>
+          <div className="space-y-2.5 text-[10.5px] leading-[1.75] text-muted">
+            <p>
+              正例只有 <b className="text-ink">{r.hetero.positives}</b> 个，动一条实验 F1 就跳几个点，
+              所以区间必须一起看：点估计 {r.hetero.f1.toFixed(2)} 落在{" "}
+              {r.hetero.f1Ci[0].toFixed(2)}–{r.hetero.f1Ci[1].toFixed(2)} 之间，<b className="text-ink">下界离 0.8 有距离</b>。
+              说「F1 达到 0.8」只在点估计意义上成立，不当作稳定能力。
+            </p>
+            <div className="rounded-lg border border-line bg-panel2/50 px-2.5 py-2">
+              <div className="mb-1 flex items-baseline justify-between">
+                <span className="text-dim">放宽口径对照（只要求交互显著）</span>
+                <span className="num text-ink">F1 {r.hetero.interactionOnly.f1.toFixed(2)}</span>
+              </div>
+              <div className="text-[10px] leading-4 text-dim">
+                P {r.hetero.interactionOnly.precision.toFixed(2)} / R {r.hetero.interactionOnly.recall.toFixed(2)}；
+                假阳性 {r.hetero.interactionOnly.fp} 个（严格口径 {r.hetero.fp} 个）。
+                召回只多 {r.hetero.interactionOnly.tp - r.hetero.tp} 条，假阳性多 {r.hetero.interactionOnly.fp - r.hetero.fp} 个——
+                <b className="text-ink">「一个分层显著为正、另一个无效」这层合取是净收益</b>，不是多余条件。
+              </div>
+            </div>
+            <p className="text-[10px] leading-4 text-dim">
+              为什么不用 <code className="rounded bg-white/[0.06] px-1">decision === 'iterate'</code> 当预测：
+              决策是 SRM → 护栏 → 负向 → 异质 → 不显著 → 正向的合取链，用它的输出反推检测能力，
+              会把别的规则的锅算到分层头上。这里直接读 <code className="rounded bg-white/[0.06] px-1">analysis.heterogeneity</code>。
+            </p>
+          </div>
+        </div>
+      </Panel>
 
       <Panel className="mt-4">
         <PanelHead title="按实验类型" hint="六类原型的准确率；guardrail / srm / heterogeneous 是关键能力" />
@@ -236,7 +344,7 @@ export function EvalScreen({
       <Panel className="mt-4 overflow-hidden">
         <PanelHead
           title="失败案例"
-          hint="全部 4 条不一致，逐条可点开看证据链——不修是刻意的，改了反而说明在挑数据"
+          hint={`全部 ${r.mismatches.length} 条不一致，逐条可点开看证据链——不修是刻意的，改了反而说明在挑数据`}
           right={<span className="text-[10px] text-dim">{r.mismatches.length} 条</span>}
         />
         <div className="overflow-x-auto">
@@ -272,7 +380,10 @@ export function EvalScreen({
                     <DecisionBadge decision={m.predDecision} size="sm" showDot={false} />
                   </td>
                   <td className="px-3 py-2 font-mono text-[10.5px] text-muted">{m.reasonCode}</td>
-                  <td className={cx('num px-3 py-2 text-right', liftClass(m.diff))}>{fmtPP(m.diff)}</td>
+                  {/* 单位必须跟着主指标走：ARPU 口径的 +1.22 元写成 +121.60pp 是实打实的口径错误 */}
+                  <td className={cx('num px-3 py-2 text-right', liftClass(m.diff))}>
+                    {fmtDiff(m.diff, m.metricKind === 'continuous' ? '元' : 'pp')}
+                  </td>
                   <td className="num px-3 py-2 text-right text-muted">{fmtP(m.p)}</td>
                   <td className="pr-3">
                     <ArrowRight size={13} className="text-dim opacity-0 group-hover:opacity-100" />
@@ -297,7 +408,7 @@ export function EvalScreen({
           hint="把预测「treatment 更优的概率」分桶，看每桶里真实整体效应确实 >0 的比例；越贴近对角线越准"
           right={
             <span className="font-mono text-[10px] text-dim">
-              ECE {r.ece <= 0 ? '0' : (r.ece * 100).toFixed(1)}%
+              ECE {(r.ece * 100).toFixed(1)}%（全量） · {(r.eceEffects.ece * 100).toFixed(1)}%（真值非零 {r.eceEffects.n} 个）
             </span>
           }
         />
@@ -306,6 +417,17 @@ export function EvalScreen({
           <p className="mt-3 text-[10.5px] leading-4 text-dim">
             ECE（期望校准误差）= 各桶 |预测 − 观测| 按样本量加权平均。贝叶斯概率天然是自校准口径：若说「90% 的实验 treatment 更优」，实际就应有约 90% 真的更优。
           </p>
+          <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-line bg-panel2/50 px-2.5 py-2 text-[10.5px] leading-4 text-muted">
+            <Info size={11} className="mt-0.5 shrink-0 text-dim" />
+            <span>
+              <b className="text-ink">为什么有两个 ECE：</b>
+              图里 0.95 以下那些点全部贴在地板上，不是后验算错了——它们对应的 {r.eceEffects.n === r.n ? 0 : r.n - r.eceEffects.n} 个实验
+              真值是<b className="text-ink">精确的 0</b>（null / 分流异常），而观测目标被二值化成「真实效应 &gt; 0」，
+              精确 0 只能记成负类，于是任何中间置信度都必然算错。只看真值非零的 {r.eceEffects.n} 个实验，
+              ECE 是 <b className="text-ink">{(r.eceEffects.ece * 100).toFixed(1)}%</b> —— 那才是在问「说 90% 更优时是不是真的 90%」。
+              两个口径都留着，因为差异本身就是「别把精确为 0 的实验当反面教材」这条结论。
+            </span>
+          </div>
         </div>
       </Panel>
 
@@ -374,6 +496,122 @@ export function EvalScreen({
 
       <Panel className="mt-4">
         <PanelHead
+          title="Agent 问答自动评测（幻觉数字率）"
+          hint="规则模式、完全确定性、无需 Key，所以能进 CI 与基线比对；题库覆盖全部工具，每题只在该实验答得出来时才问"
+          right={
+            agent ? (
+              <span className="font-mono text-[10px] text-dim">
+                {agent.summary.n} 条 · {agent.summary.numbers} 个数字
+              </span>
+            ) : (
+              <span className="text-[10px] text-dim">未运行</span>
+            )
+          }
+        />
+        {agent ? (
+          <>
+            {agentStale && (
+              <div className="flex items-start gap-2 border-b border-iterate/25 bg-iterate/[0.07] px-4 py-2.5 text-[10.5px] leading-4 text-iterate">
+                <TriangleAlert size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  这份评测是在 α={agent.config.alpha}、交互阈值 {agent.config.interactionAlpha}、FDR {agent.config.segmentFdr} 下生成的，
+                  与当前设置不一致 —— 数字可能已过期。重跑 <code className="rounded bg-white/10 px-1">npm run eval</code> 再引用它。
+                </span>
+              </div>
+            )}
+            <div className="grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-3">
+              <AaCell
+                label="幻觉数字率"
+                value={`${(agent.summary.hallucinationRate * 100).toFixed(2)}%`}
+                nominal={`${agent.summary.suspicious} / ${agent.summary.numbers} 个数字无法溯源`}
+                good={agent.summary.suspicious === 0}
+              />
+              <AaCell
+                label="引用覆盖率"
+                value={`${(agent.summary.citationRate * 100).toFixed(1)}%`}
+                nominal={`分母 ${agent.summary.citableN}（无证据可引的不计入）`}
+                good={agent.summary.citationRate >= 0.99}
+              />
+              <AaCell
+                label="违规率"
+                value={`${(agent.summary.violationRate * 100).toFixed(2)}%`}
+                nominal="缺引用或出现幻觉数字"
+                good={agent.summary.violationRate === 0}
+              />
+              <AaCell
+                label="口径陷阱识别"
+                value={`${(agent.summary.scopeRate * 100).toFixed(1)}%`}
+                nominal={`分母 ${agent.summary.trapN}（主指标是转化率却被问 ARPU）`}
+                good={agent.summary.scopeRate >= 0.95}
+              />
+              <AaCell
+                label="意图路由准确"
+                value={`${(agent.summary.routeAccuracy * 100).toFixed(1)}%`}
+                nominal={`分母 ${agent.summary.routeN}（有期望意图的题）`}
+                good={agent.summary.routeAccuracy >= 0.99}
+              />
+              <AaCell
+                label="工具覆盖"
+                value={`${agent.toolCalls.filter((t) => t.calls > 0).length} / ${agent.toolCalls.length}`}
+                nominal={agent.uncoveredTools.length ? `未覆盖：${agent.uncoveredTools.join("、")}` : "12 个工具全部被题库触达"}
+                good={agent.uncoveredTools.length === 0}
+              />
+            </div>
+            <div className="border-t border-line px-4 py-3.5">
+              <div className="mb-2 text-[10.5px] text-muted">按题目分组（同一批实验，分组看才知道是哪类问题在拉低覆盖）</div>
+              <table className="w-full border-collapse text-left text-[10.5px]">
+                <thead>
+                  <tr className="border-b border-line text-[10px] text-dim">
+                    <th className="py-1.5 pr-3 font-medium">组</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">问答</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">数字</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">可疑</th>
+                    <th className="py-1.5 pr-3 text-right font-medium">引用</th>
+                    <th className="py-1.5 text-right font-medium">路由</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agent.byGroup.map((g) => (
+                    <tr key={g.group} className="border-b border-line/50 last:border-0">
+                      <td className="py-1.5 pr-3 text-muted">{g.group}</td>
+                      <td className="num py-1.5 pr-3 text-right text-muted">{g.n}</td>
+                      <td className="num py-1.5 pr-3 text-right text-muted">{g.numbers}</td>
+                      <td className={cx("num py-1.5 pr-3 text-right", g.suspicious > 0 ? "text-noship" : "text-muted")}>{g.suspicious}</td>
+                      <td className="num py-1.5 pr-3 text-right text-muted">{(g.citationRate * 100).toFixed(0)}%</td>
+                      <td className="num py-1.5 text-right text-muted">{(g.routeAccuracy * 100).toFixed(0)}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {agent.problems.length > 0 && (
+                <div className="mt-3 rounded-lg border border-noship/25 bg-noship/[0.06] px-2.5 py-2">
+                  <div className="mb-1 text-[10.5px] font-medium text-noship">{agent.problems.length} 条回答有问题</div>
+                  <ul className="space-y-1 text-[10px] leading-4 text-muted">
+                    {agent.problems.slice(0, 4).map((p) => (
+                      <li key={`${p.expId}-${p.qaId}`}>
+                        <span className="font-mono text-dim">{p.expId}</span> · {p.q} ——
+                        {p.suspicious.length > 0 ? ` 无法溯源的数字 ${p.suspicious.join("、")}` : ` ${p.violations.join("；")}`}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              <p className="mt-3 text-[10.5px] leading-4 text-dim">
+                「幻觉数字率」= 回答里出现、但引擎与工具从未返回过的数字 ÷ 回答里数字总数；判定按回答写的小数位数四舍五入核对。
+                它抓的是<b className="text-ink">编数字</b>，抓不到「数字对但解读错」——后者只能人工看，不假装能自动测。
+                智能模式（DeepSeek）有随机性，仍放下面 ablation 里人工核对。
+              </p>
+            </div>
+          </>
+        ) : (
+          <div className="px-4 py-6 text-center text-[11px] text-dim">
+            运行 <code className="rounded bg-white/10 px-1">npm run eval</code> 生成 Agent 问答评测（1720 条，规则模式，无需 Key）
+          </div>
+        )}
+      </Panel>
+
+      <Panel className="mt-4">
+        <PanelHead
           title="Agent ablation：规则模板 vs 大模型"
           hint="同一批问题跑两种回答方式，比引用覆盖率、可疑数字率、口径识别"
           right={
@@ -411,6 +649,63 @@ export function EvalScreen({
           </div>
         </div>
       </Panel>
+    </div>
+  );
+}
+
+/** 混淆矩阵下方的一句话总结：按不一致的来源动态聚合，避免写死数字 */
+function mismatchSummary(rows: { archetype: string; predDecision: string }[]): string {
+  if (!rows.length) return '全部判对：每个实验的决策都与真值完全一致。';
+  // ship 与 iterate 必须分开念：iterate 是「定向上线」（只对某个分层放开），
+  // 与「整体上线」是两种结论。混成一句「判成可上线」会把 E029 那类误判说得比实际轻。
+  const LABEL: Record<string, string> = {
+    ship: '可上线',
+    'no-ship': '负向',
+    iterate: '定向上线',
+    inconclusive: '证据不足',
+  };
+  const byArch = new Map<string, Map<string, number>>();
+  for (const m of rows) {
+    const bucket = byArch.get(m.archetype) ?? new Map<string, number>();
+    bucket.set(m.predDecision, (bucket.get(m.predDecision) ?? 0) + 1);
+    byArch.set(m.archetype, bucket);
+  }
+  const parts = [...byArch.entries()].map(([arch, bucket]) => {
+    const bits = ['ship', 'iterate', 'no-ship', 'inconclusive']
+      .filter((d) => bucket.has(d))
+      .map((d) => `${bucket.get(d)} 个判成${LABEL[d]}`);
+    return `「${ARCHETYPE_LABEL[arch] ?? arch}」${bits.join('、')}`;
+  });
+  return `${rows.length} 条不一致：${parts.join('；')}。`;
+}
+
+/** p 值分桶提示：数字来自当前评测，不写死 */
+function pBucketNote(buckets: { label: string; n: number; correct: number }[]): string {
+  const mid = buckets.find((b) => b.label === '0.01 ≤ p < 0.05');
+  if (!mid || mid.n === 0) return '当前没有落在 0.01–0.05 的实验。';
+  const tail = mid.correct === mid.n ? '全部判对' : `判对 ${mid.correct} 个`;
+  return `落在 0.01–0.05 的 ${mid.n} 个实验${tail}——p 恰好跨过 0.05 的实验在统计上与「有微效」无法区分。这不是 bug，是 α=0.05 的代价。`;
+}
+
+/** 四格小方块 */
+function ConfCell({ label, value, tone }: { label: string; value: number; tone: 'ship' | 'noship' | 'iterate' | 'muted' }) {
+  const color =
+    tone === 'ship' ? 'text-ship' : tone === 'noship' ? 'text-noship' : tone === 'iterate' ? 'text-iterate' : 'text-muted';
+  return (
+    <div className="rounded-lg border border-line bg-panel2/40 px-2.5 py-2">
+      <div className="text-[10px] text-dim">{label}</div>
+      <div className={cx('num mt-0.5 text-lg', color)}>{value}</div>
+    </div>
+  );
+}
+
+/** precision / recall / F1 小格 */
+function MetricCell({ label, value, sub, good }: { label: string; value: string; sub?: string; good?: boolean }) {
+  return (
+    <div className="rounded-lg border border-line bg-panel px-2.5 py-2">
+      <div className="text-[10px] text-dim">{label}</div>
+      <div className={cx('num mt-0.5 text-base', good === undefined ? 'text-ink' : good ? 'text-ship' : 'text-iterate')}>{value}</div>
+      {sub && <div className="num mt-0.5 text-[9.5px] text-dim">{sub}</div>}
     </div>
   );
 }

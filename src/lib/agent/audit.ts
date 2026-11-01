@@ -6,7 +6,7 @@
  */
 
 /** 白名单里固定允许的常量：阈值、置信水平、功效、百分比基数等 */
-const CONSTANTS = [0, 1, 2, 3, 5, 10, 50, 80, 95, 100, 0.05, 0.01, 0.001, 0.1, 0.4, 0.004, 0.02, 1.96];
+const CONSTANTS = [0, 1, 2, 3, 5, 10, 20, 50, 80, 95, 100, 0.05, 0.01, 0.001, 0.1, 0.4, 0.004, 0.02, 1.96];
 
 function walk(value: unknown, out: number[], depth = 0): void {
   if (depth > 6 || value == null) return;
@@ -14,6 +14,19 @@ function walk(value: unknown, out: number[], depth = 0): void {
     out.push(value, Math.abs(value));
     // 比例类数值常以百分数展示（0.0186 → 1.86%），只对 0~1 之间的值补一个 ×100 的写法
     if (Math.abs(value) <= 1) out.push(value * 100, Math.abs(value) * 100);
+    return;
+  }
+  // 工具返回的**格式化文本字段**（diffText / mdeNowText / credText …）里带着数字，
+  // 回答照抄这些字段是合规的（system prompt 第 6 条就是这么要求的），所以必须进白名单。
+  // 以前只收 number，于是「可检出的最小差异从 0.63pp 收窄到 0.4pp」被判成幻觉数字——
+  // 那是判定器的 bug，不是回答的错。数字从字符串里解析出来后按同样规则补 ×100 变体。
+  if (typeof value === 'string') {
+    for (const m of value.matchAll(/\d+(?:\.\d+)?/g)) {
+      const n = Number(m[0]);
+      if (!Number.isFinite(n)) continue;
+      out.push(n, Math.abs(n));
+      if (Math.abs(n) <= 1) out.push(n * 100, Math.abs(n) * 100);
+    }
     return;
   }
   if (Array.isArray(value)) {

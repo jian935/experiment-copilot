@@ -17,9 +17,9 @@
 | 决策引擎 | 6 条硬规则 + 证据链 + 逐步代入 + 规则轨迹 | `src/lib/decide.ts` |
 | 数据 | 120 例合成、6 类真值、固定种子、7 天 × 2 分层 × 2 设备 | `src/lib/simulate.ts` |
 | Agent | 12 工具、数字审计、引用强制、多轮补全、无 Key 降级 | `src/lib/agent/*` |
-| 评测 | 决策准确率 93.3%（112/120）、混淆矩阵、按 p 分桶、8 条失败案例（含 1 条正效应误判为 iterate，原因可查） | `src/lib/evaluate.ts`、`src/app/components/EvalScreen.tsx` |
+| 评测 | 决策准确率 93.3%（112/120）、混淆矩阵、按 p 分桶、8 条失败案例（含 1 条正效应误判为 iterate，原因可查）、**分层 F1 0.857**、**幻觉数字率 0.00%**、校准双口径（全量 20.0% / 真值非零 5.0%） | `src/lib/evaluate.ts`、`src/app/components/EvalScreen.tsx` |
 | UI | 列表 / 详情 / 证据抽屉 / Agent / 评测 5 屏，浅色暖橙 | `src/app/*` |
-| 评测闭环 | ablation（规则 vs DeepSeek，24 题） | `scripts/ablation.ts` |
+| 评测闭环 | ablation（规则 vs DeepSeek，24 题）+ **自动评测（规则模式 1720 条，进 CI）** + **回归基线 82 指标** | `scripts/ablation.ts`、`src/lib/agentEval.ts`、`eval/baseline.json` |
 
 **反复在蓝图里出现、但实现里"缺位"的三件事**（M8–M10 已全部补齐，此处保留作历史记录）：
 ① 置信度/概率输出（蓝图结论卡要"大字结论 + 置信度"，实际只有类别决策）→ M8 贝叶斯视角补齐；
@@ -91,13 +91,14 @@
 
 ## 三、评测体系补全（P1）
 
-12. **幻觉数字率自动测（接进 evaluate）** —— P1
-    - 现状：ablation 是手动跑的（`scripts/ablation.ts`），数字保真度没进 `evaluate.ts`；蓝图 10.2 的"幻觉数字率 ≤1%"没有自动口径。
-    - 做：把 `audit.ts` 接到评测，对每题 Agent 回答算 suspicious 率，看板加一栏。
+12. ~~**幻觉数字率自动测（接进 evaluate）**~~ ✅ **已完成（M11-D6）**
+    - 落点：`src/lib/agentEval.ts`（15 道题 × 120 实验 = 1720 条问答，规则模式、确定性、无需 Key）
+    - 实测：幻觉数字率 **0.00%**（0 / 10177 个数字）、引用覆盖 100%（分母 1480）、口径陷阱 100%（分母 80）、工具覆盖 12/12
+    - 出口：`evaluate(ds, analyses, { agent })`，看板 fetch `data/agent_eval.json`；设置页改过阈值会提示"评测已过期"
 
-13. **分层检测 F1**
-    - 现状：蓝图 10.2 有"分层检测 F1 ≥0.8"，实际评测没算（只算了异质识别 100%）。
-    - 做：`evaluate.ts` 加 F1——对 heterogeneous 实验，模型/Agent 是否点名了"仅新用户有效"。
+13. ~~**分层检测 F1**~~ ✅ **已完成（M11-E1）**
+    - 落点：`Analysis.heterogeneity`（新导出，与决策解耦）+ `evaluate.ts::heteroF1Of`
+    - 实测：**F1 0.857**（P 0.923 / R 0.800，15 正例），bootstrap 95% CI 0.667–0.970；放宽口径对照 0.788（假阳性 1→5）
 
 14. **按效应量 / 样本量分桶**
     - 现状：看板只有"按 p 值分桶"。
@@ -159,9 +160,10 @@
 
 ## 六、工程与部署（P1 偏交付）
 
-26. **CI（GitHub Actions）** —— P1
-    - 现状：无 CI；本机 GitHub 不通，81 提交未推。
-    - 做：`.github/workflows/ci.yml` 跑 `npm test` + `npm run calibrate` + 评测，防回归。蓝图 10.3 / 13 里程碑都要求。
+26. ~~**CI（GitHub Actions）**~~ ✅ **workflow 已写（M11-G1），待 push 验证**
+    - 现状：`.github/workflows/ci.yml` 已就绪（typecheck → test → `npm run eval:check` → 重建数据后再比对 → A/A 200 次 `--dry` 冒烟）；
+      **本机到 GitHub 不通，这份 workflow 还没真正跑过一次**——不宣称"CI 绿了"。
+    - 本地等价验证已做：每条命令单独在本机跑通，且故意制造漂移能拿到 exit 1。
 
 27. **部署 GitHub Pages** —— P1（交付闭环）
     - 现状：网络不通未推；README 写的是本地 8080。

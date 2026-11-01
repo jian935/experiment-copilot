@@ -1,0 +1,69 @@
+# 持续集成：把「可证伪」变成每次 push 都跑一遍的事实
+#
+# 三件事，按失败时的诊断价值排序：
+#   1. 单测           —— 统计量对齐权威实现、决策规则不被悄悄改坏
+#   2. 基线比对       —— 评测指标（准确率 / FPR / 分层 F1 / 幻觉数字率）漂移即红，
+#                        并直接打印是哪一个指标从多少变到多少
+#   3. 数据可复现     —— 重跑生成器后指标必须与基线逐位一致；不一致说明数据不再是确定的
+#
+# 注意：CI 只用**规则模式**跑 Agent 评测（不需要 API Key，完全确定性）。
+# 智能模式的 ablation 有随机性，不进 CI，只人工看并记录在 docs/ABLATION-NOTES.md。
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck · test · eval baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 单测（统计 / 决策 / 证据 / Agent / 导入 / 评测 / 基线）
+        run: npm test
+
+      - name: 评测指标与基线比对
+        # 失败时输出形如 `✗ accuracy 93.33% → 91.67%（-1.67pp）`，
+        # 直接指出是哪个指标动了；有意改口径就用 npm run eval:baseline 更新基线并写明原因
+        run: npm run eval:check
+
+      - name: 数据可复现性（重跑生成器后指标必须不变）
+        # 生成器的随机流一旦被改动（加字段、改抽样顺序），这批数据就不再是同一批，
+        # 所有对外数字都要重测。这里让它在 CI 里直接红，而不是等人发现文档对不上。
+        run: npm run gen && npm run eval:check
+
+      - name: A/A 冒烟（200 次零效应实验）
+        # 不是精确测误报率（200 次的分辨率太粗），而是确认引擎没被改成「一跑 A/A 就报显著」
+        run: npm run aa -- 200 --dry
+
+      - name: 上传评测报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: |
+            data/agent_eval.json
+            data/aa_report.json
+            eval/baseline.json
+          if-no-files-found: ignore

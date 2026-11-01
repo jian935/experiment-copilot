@@ -17,6 +17,9 @@
     "aa": "tsx scripts/aa_test.ts",
     "cuped": "tsx scripts/cuped_report.ts",
     "forecast": "tsx scripts/forecast_report.ts",
+    "eval": "tsx scripts/eval_report.ts",
+    "eval:baseline": "tsx scripts/eval_report.ts --write",
+    "eval:check": "tsx scripts/eval_report.ts --check",
     "smoke": "node scripts/smoke_ui.mjs"
   },
   "devDependencies": {

@@ -143,6 +143,24 @@ export interface Analysis {
   srm: SrmResult;
   segments: { tenure: SegmentTest[]; device: SegmentTest[] };
   interaction: { tenure: { diffDiff: number; se: number; z: number; p: number } | null };
+  /**
+   * 效应异质的检测结果（E1 分层 F1 要评价的是**检测器**，不是决策）。
+   *
+   * 为什么要单独导出而不是让评测去看 decision==='iterate'：
+   * 决策是多个规则串起来的合取式，用决策反推「这个实验有没有被检测到异质」
+   * 会把别的规则的失败混进分层指标里。检测器指标就该只看检测器。
+   * 同时给出 `interactionSig`（只看交互是否显著）作为灵敏度上限：
+   * 实际检测器还要求「一个分层显著为正、另一个无效」，是更严的合取口径。
+   */
+  heterogeneity: {
+    /** 实际检测器判定：交互显著 ∧ 一个分层显著为正 ∧ 另一个分层无效 */
+    detected: boolean;
+    /** 只要求交互 p < interactionAlpha（不含合取），是检测器的宽松上限 */
+    interactionSig: boolean;
+    interactionP: number | null;
+    bestSegment: string | null;
+    flatSegment: string | null;
+  };
   guardrails: GuardrailResult[];
   /** CUPED：用前周期数据做方差缩减后的检验（无前周期数据时为 undefined）；口径与主指标一致 */
   cuped?: CupedResult;
@@ -791,7 +809,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   const flatSegment = bestPos
     ? segments.tenure.find((s) => s.key !== bestPos.key && s.p > cfg.alpha && Math.abs(s.diff) < 0.5 * Math.abs(bestPos.diff))
     : undefined;
-  const heterogeneous = !!interaction && interaction.p < cfg.interactionAlpha && !!bestPos && !!flatSegment;
+  const interactionSig = !!interaction && interaction.p < cfg.interactionAlpha;
+  const heterogeneous = interactionSig && !!bestPos && !!flatSegment;
 
   const D = (v: number) => fmtDiff(v, primary.unit);
   let decision: Decision;
@@ -888,6 +907,13 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     srm,
     segments,
     interaction: { tenure: interaction },
+    heterogeneity: {
+      detected: heterogeneous,
+      interactionSig,
+      interactionP: interaction ? interaction.p : null,
+      bestSegment: bestPos ? bestPos.label : null,
+      flatSegment: flatSegment ? flatSegment.label : null,
+    },
     guardrails,
     ...(cuped ? { cuped } : {}),
     bayes,

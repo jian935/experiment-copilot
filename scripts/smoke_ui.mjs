@@ -33,7 +33,7 @@ const ROUTES = [
   { hash: '#/e/E001', name: '详情 · 率口径 + 护栏拦截', must: ['退款率', '转化率'] },
   { hash: '#/e/E029', name: '详情 · 连续口径（ARPU + 因子分解）', must: ['ARPU', '因子分解', '客单价'] },
   { hash: '#/e/E002', name: '详情 · 分层异质', must: ['分层'] },
-  { hash: '#/eval', name: '评测看板', must: ['准确率'] },
+  { hash: '#/eval', name: '评测看板', must: ['准确率', '分层检测', '幻觉数字率', 'F1'] },
   { hash: '#/settings', name: '设置 · 口径字典', must: ['口径'] },
 ];
 
