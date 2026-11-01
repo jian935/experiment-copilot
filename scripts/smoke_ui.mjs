@@ -358,6 +358,66 @@ async function runPaletteScenario() {
   return problems;
 }
 
+/* ─────────── 第五阶段：主题切换（F5） ───────────
+ * 「切了主题」肉眼很好骗（换个按钮图标也算切了），所以这里验的是**真正被画出来的东西**：
+ * body 背景变了、**森林图 CI 线的颜色也变了**（证明 var() 真的作用到了 SVG 表现属性）、刷新后不回退。
+ * 只验 <html> 上有没有 dark 类是不够的——那正是「只改了卡片没改图表」会漏掉的检查。
+ */
+const PROBE = `(() => {
+  const line = document.querySelector('svg line[stroke-width="2.4"]');
+  return JSON.stringify({
+    dark: document.documentElement.classList.contains('dark'),
+    body: getComputedStyle(document.body).backgroundColor,
+    ci: line ? getComputedStyle(line).stroke : 'no-line',
+    stored: (() => { try { return localStorage.getItem('ec_theme_v1'); } catch { return 'denied'; } })(),
+  });
+})()`;
+
+async function clickThemeBtn() {
+  const ok = await evaluate(`(() => {
+    const btn = [...document.querySelectorAll('button')].find(
+      (b) => (b.title || '').includes('主题') || (b.title || '').includes('跟随系统'),
+    );
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  if (!ok) throw new Error('顶栏找不到主题切换按钮');
+}
+
+async function runThemeScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/compare?a=E001&b=E002` });
+    await waitText((t) => t.includes('共用同一条横轴'), '对比页加载');
+    const a = JSON.parse(await evaluate(PROBE));
+    if (a.dark) problems.push('默认就带 dark 类：默认值应当是「跟随系统」，不是写死深色');
+
+    await clickThemeBtn();
+    await sleep(400);
+    const b = JSON.parse(await evaluate(PROBE));
+    if (!b.dark) problems.push('点一次没有切到深色');
+    if (b.body === a.body) problems.push(`切主题后 body 背景没变（还是 ${a.body}）：CSS 变量没生效`);
+    if (b.ci === a.ci) problems.push(`切主题后森林图 CI 线颜色没变（还是 ${a.ci}）：SVG 没跟着主题走`);
+    if (b.stored !== 'dark') problems.push(`主题没有落盘（localStorage=${b.stored}）`);
+
+    // 硬刷新：主题选择要留着（存的是「选择」，不是算出来的结果，所以刷新不会跳回）
+    await send('Page.reload', { ignoreCache: true });
+    await waitText((t) => t.includes('共用同一条横轴'), '刷新后对比页', 60);
+    const c = JSON.parse(await evaluate(PROBE));
+    if (!c.dark) problems.push('刷新后主题退回浅色（选择没被记住）');
+
+    await clickThemeBtn();
+    await sleep(400);
+    const d = JSON.parse(await evaluate(PROBE));
+    if (d.dark) problems.push('再点一次没有切回浅色');
+    if (d.body !== a.body) problems.push(`切回浅色后背景与初始不一致：${d.body} vs ${a.body}`);
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -399,6 +459,18 @@ if (paletteProblems.length) {
   for (const p of paletteProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（键盘可用、编号精确匹配排第一、回车直达详情）');
+}
+console.log('');
+
+const themeProblems = await runThemeScenario();
+console.log(`\n主题切换（F5）：深色 ↔ 浅色（body 背景 + SVG 配色 + 刷新后不回退）`);
+console.log('─'.repeat(70));
+if (themeProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of themeProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（背景与图表配色都跟着变，且刷新后保留选择）');
 }
 console.log('');
 

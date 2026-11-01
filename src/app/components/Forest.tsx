@@ -74,7 +74,7 @@ export function Forest({ rows, height, unit = 'pp' }: { rows: ForestRow[]; heigh
             <line x1={lx} x2={hx} y1={cy} y2={cy} stroke={dotColor} strokeWidth={r.emphasized ? 2.4 : 1.6} opacity={0.85} strokeLinecap="round" />
             <line x1={lx} x2={lx} y1={cy - 4} y2={cy + 4} stroke={dotColor} strokeWidth={1.4} opacity={0.85} />
             <line x1={hx} x2={hx} y1={cy - 4} y2={cy + 4} stroke={dotColor} strokeWidth={1.4} opacity={0.85} />
-            <circle cx={x(r.diff)} cy={cy} r={radius} fill={dotColor} stroke="#ffffff" strokeWidth={1.5} />
+            <circle cx={x(r.diff)} cy={cy} r={radius} fill={dotColor} stroke={C.card} strokeWidth={1.5} />
             <text x={W - valueW + 4} y={cy + 1} fontSize={11} fill={sig ? color : C.dim} className="num">
               {fmtDiff(r.diff, unit)}
             </text>

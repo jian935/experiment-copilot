@@ -40,8 +40,9 @@
 | 导入持久化 | 顶栏「数据源」芯片：导入的那份存在本机（IndexedDB），刷新不丢；可在内置 / 导入之间来回切，也能删存档 | [`13-导入持久化.png`](docs/screenshots/13-导入持久化.png) |
 | 实验对比 | 列表页勾两个 → 同单位的共用**一条**横轴（线长 = 不确定性），单位不同（pp vs 元）就拒绝同轴、竖排各给一条；逐项对照 15 项 | [`14-实验对比.png`](docs/screenshots/14-实验对比.png) · [`15-对比-不能同轴.png`](docs/screenshots/15-对比-不能同轴.png) · [`16-列表勾选对比.png`](docs/screenshots/16-列表勾选对比.png) |
 
+| 主题切换 | 浅 / 深 / 跟随系统，顶栏一键循环；**全部颜色走 CSS 变量**，所以 SVG 图表与卡片一起换，不会出现「卡片黑了图表还是浅的」 | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
 **演示视频（36s）**：[`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) —— 真实操作录屏 + 中文旁白 + 字幕。
-**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 3.5MB，视频与 8 张 1600px 截图全部内联；点击任意截图可全屏查看并下载原图。
+**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 3.8MB，视频与 9 张 1600px 截图全部内联；点击任意截图可全屏查看并下载原图。
 
 深链：`#/e/E001` 直达实验，`#/e/E001?ev=E6` 直接展开第 6 条证据，`#/?d=ship&s=diff` 还原筛选视图。
 
@@ -58,7 +59,7 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 315 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
+npm test           # 323 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
 npm run eval       # 评测报告：分层 F1 + 1960 条 Agent 问答的幻觉数字率（写 data/agent_eval.json 给看板）
 npm run eval:check # 与 eval/baseline.json 逐指标比对，任何漂移 exit 1（CI 用的就是它）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
@@ -152,7 +153,7 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  315 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
+tests/                  323 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
                         + 口径字典/阈值可配/多轮上下文 + 分层 F1/基线比对器自测）
 eval/baseline.json      回归基线：84 个指标 + 数据指纹（npm run eval -- --write 更新）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
@@ -319,7 +320,7 @@ CUPED 的功劳是在区间已经诚实的前提下再收窄 7.24%。这两件�
 | 接进统一口径 | `evaluate(ds, analyses, { agent })` 一个出口；看板 fetch `data/agent_eval.json`，设置页改过阈值时显式提示「这份评测已过期，重跑 npm run eval」 | `src/lib/agentEval.ts` |
 | 回归基线 | `eval/baseline.json` 84 个指标 + 数据指纹；`npm run eval:check` 漂移即 `exit 1`，并打印 `✗ accuracy 93.33% → 91.67%（-1.67pp）` 这种可直接定位的一行 | `npm run eval:check` |
 | CI | typecheck → test → 基线比对 → **重建数据后再比对**（证明同代码出同数据）→ A/A 200 次冒烟（`--dry`，不覆盖 2000 次的正式报告） | `.github/workflows/ci.yml` |
-| 单测 | 196 → **315**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条） | `npm test` |
+| 单测 | 196 → **323**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条） | `npm test` |
 
 **顺手抓到的真 bug（在判定器里，不在回答里）**：接进自动评测后，规则模式的「还要跑几天」立刻冒出
 48 个「无法溯源的数字」（0.63 / 0.68 / 20）。查下来是 `audit.ts` 的**白名单只收 number、不收字符串**：

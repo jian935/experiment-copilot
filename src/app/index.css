@@ -3,41 +3,108 @@
 @tailwind utilities;
 
 /*
- * 纯白 + 橙的暖色清透主题。
- * 分层靠「1px 暖灰描边 + 极浅暖阴影」，不靠深色块；橙色只做点缀。
+ * 主题：**一套类名，两套取值**。
+ *
+ * 所有颜色都走 CSS 变量（RGB 三元组，不是十六进制），Tailwind 里写作
+ * `rgb(var(--c-base) / <alpha-value>)`。这样 `bg-brand/10` 这种透明度写法仍然可用，
+ * 而切主题只是给 <html> 换一个类——**不需要在几百个 className 上加 dark: 变体**。
+ *
+ * 变量成组放在这里（不是散进组件），因为「深色模式」最容易出的错是
+ * 只改了卡片没改线条、只改了正文没改图表，结果变成一块块深浅不一的补丁。
  */
 @layer base {
-  html {
+  :root {
+    --c-base: 255 253 249;
+    --c-panel: 255 255 255;
+    --c-panel2: 255 247 237;
+    --c-line: 242 233 223;
+    --c-line2: 231 216 201;
+    --c-ink: 36 26 18;
+    --c-muted: 111 95 80;
+    --c-dim: 157 139 122;
+    --c-brand: 249 115 22;
+    --c-brand2: 194 65 12;
+    --c-ship: 21 128 61;
+    --c-noship: 190 18 60;
+    --c-iterate: 180 83 9;
+    --c-incon: 120 113 108;
+    /* 图表专用：网格 / 零点参考线 / 不显著的灰 */
+    --c-grid: 244 237 229;
+    --c-zero: 203 184 164;
+    --c-neutral: 168 162 158;
+    /* 网格底纹与选区：透明度在深色下要更淡，否则会显出脏点 */
+    --c-grid-rgb: 180 130 80;
+    --c-grid-alpha: 0.055;
+    --c-select: 249 115 22;
+    --c-select-alpha: 0.18;
+    /* 阴影是暖褐色（浅底上更自然）；深色下换成纯黑，暖色阴影在深底上会发脏 */
+    --c-shadow-rgb: 120 80 40;
+    /* 弹层遮罩：浅色下用暖褐，深色下必须更黑，否则压不住背后的内容 */
+    --c-scrim: 59 36 16;
+    --c-scrim-alpha: 0.25;
+
     color-scheme: light;
   }
+
+  /* 暖深色，不是纯黑：纯黑面板在 OLED 上会跟边框糊成一片，
+     而且语义色（绿/红/橙）在纯黑上会刺眼 —— 这里统一压低亮度、提高明度。 */
+  :root.dark {
+    --c-base: 22 20 18;
+    --c-panel: 32 27 24;
+    --c-panel2: 44 36 31;
+    --c-line: 58 49 42;
+    --c-line2: 84 71 61;
+    --c-ink: 244 238 229;
+    --c-muted: 186 172 156;
+    --c-dim: 148 134 118;
+    --c-brand: 251 146 60;
+    --c-brand2: 253 186 116;
+    --c-ship: 74 222 128;
+    --c-noship: 251 113 133;
+    --c-iterate: 251 191 36;
+    --c-incon: 168 162 158;
+    --c-grid: 52 45 39;
+    --c-zero: 110 96 82;
+    --c-neutral: 150 144 138;
+    --c-grid-rgb: 255 214 170;
+    --c-grid-alpha: 0.045;
+    --c-select: 251 146 60;
+    --c-select-alpha: 0.3;
+    --c-shadow-rgb: 0 0 0;
+    --c-scrim: 0 0 0;
+    --c-scrim-alpha: 0.55;
+
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-base font-sans text-ink antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'tnum';
   }
   ::selection {
-    background: rgba(249, 115, 22, 0.18);
+    background: rgb(var(--c-select) / var(--c-select-alpha));
   }
   * {
     scrollbar-width: thin;
-    scrollbar-color: #e7d8c9 transparent;
+    scrollbar-color: rgb(var(--c-line2)) transparent;
   }
   *::-webkit-scrollbar {
     width: 9px;
     height: 9px;
   }
   *::-webkit-scrollbar-thumb {
-    background: #e7d8c9;
+    background: rgb(var(--c-line2));
     border-radius: 9px;
   }
   *::-webkit-scrollbar-thumb:hover {
-    background: #d9c6b3;
+    background: rgb(var(--c-dim));
   }
   *::-webkit-scrollbar-track {
     background: transparent;
   }
-  /* 键盘可达性：浅底上必须能看清焦点 */
+  /* 键盘可达性：两套主题下都要看得清焦点 */
   :focus-visible {
-    outline: 2px solid rgba(249, 115, 22, 0.55);
+    outline: 2px solid rgb(var(--c-brand) / 0.55);
     outline-offset: 2px;
   }
 }
@@ -48,11 +115,16 @@
     font-feature-settings: 'tnum';
   }
 
-  /* 极浅暖色网格：给白底一点空间感，但不抢内容 */
+  /* 弹层遮罩：单独抽出来是因为它必须两套主题各一个值，写死一种会在另一套下压不住内容 */
+  .scrim {
+    background: rgb(var(--c-scrim) / var(--c-scrim-alpha));
+  }
+
+  /* 极浅网格：给底一点空间感，但不抢内容（深浅两套透明度不同，见变量） */
   .bg-grid {
     background-image:
-      linear-gradient(to right, rgba(180, 130, 80, 0.055) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(180, 130, 80, 0.055) 1px, transparent 1px);
+      linear-gradient(to right, rgb(var(--c-grid-rgb) / var(--c-grid-alpha)) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--c-grid-rgb) / var(--c-grid-alpha)) 1px, transparent 1px);
     background-size: 44px 44px;
   }
 }

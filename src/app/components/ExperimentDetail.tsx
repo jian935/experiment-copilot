@@ -43,6 +43,7 @@ import { exportConclusionCard } from '../lib/exportCard';
 import { AgentPanel } from './AgentPanel';
 import type { AgentCtx } from '../../lib/agent/types.ts';
 import type { Analysis as AnalysisT } from '../../lib/decide.ts';
+import { C } from '../lib/palette';
 import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
 
 type Tab = 'segments' | 'guardrails' | 'calc';
@@ -899,7 +900,7 @@ function ArpuPanel({ analysis }: { analysis: Analysis }) {
                     className="h-full rounded-full"
                     style={{
                       width: `${Math.min(100, (Math.abs(x.v) / scale) * 100)}%`,
-                      background: x.v >= 0 ? '#15803d' : '#be123c',
+                      background: x.v >= 0 ? C.ship : C.noship,
                       opacity: 0.75,
                     }}
                   />

@@ -31,6 +31,7 @@ SHOTS = [
     ('SHOT6', 'docs/screenshots/05-结论卡导出.png'),
     ('SHOT7', 'docs/screenshots/14-实验对比.png'),
     ('SHOT8', 'docs/screenshots/17-全局搜索.png'),
+    ('SHOT9', 'docs/screenshots/20-深色模式-对比.png'),
 ]
 
 LINKS = {

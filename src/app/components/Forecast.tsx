@@ -215,12 +215,12 @@ function Curve({ f }: { f: ForecastResult }) {
       {median !== null && (
         <g>
           <line x1={x(median)} x2={x(median)} y1={padT} y2={y(0)} stroke={C.brand} strokeWidth={1} strokeDasharray="2 3" opacity={0.55} />
-          <circle cx={x(median)} cy={y(0.5)} r={3} fill={C.brand} stroke="#ffffff" strokeWidth={1.4} />
+          <circle cx={x(median)} cy={y(0.5)} r={3} fill={C.brand} stroke={C.card} strokeWidth={1.4} />
         </g>
       )}
 
       {/* 曲线末端标注 */}
-      <circle cx={x(horizon)} cy={y(f.sim.curve.at(-1)!.p)} r={3} fill="#ffffff" stroke={C.brand} strokeWidth={1.6} />
+      <circle cx={x(horizon)} cy={y(f.sim.curve.at(-1)!.p)} r={3} fill={C.card} stroke={C.brand} strokeWidth={1.6} />
     </svg>
   );
 }

@@ -174,7 +174,7 @@ function BoundaryChart({ analysis }: { analysis: Analysis }) {
         const out = v >= bd[i];
         return (
           <g key={i}>
-            <circle cx={x(i)} cy={y(v)} r={out ? 4 : 3} fill={out ? C.ship : C.brand} stroke="#ffffff" strokeWidth={1.5} />
+            <circle cx={x(i)} cy={y(v)} r={out ? 4 : 3} fill={out ? C.ship : C.brand} stroke={C.card} strokeWidth={1.5} />
             <title>
               第 {s.looks[i].day} 天（{s.looks[i].date}）· 信息量 {(s.looks[i].infoFrac * 100).toFixed(0)}%
               {'\n'}|z| = {v.toFixed(2)} · 边界 {bd[i].toFixed(2)} · naive p = {s.looks[i].pNaive < 1e-4 ? '<0.0001' : s.looks[i].pNaive.toFixed(4)}

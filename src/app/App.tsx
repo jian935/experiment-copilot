@@ -1,7 +1,8 @@
-import { Activity, Code2, Loader2, Search, Settings2, TriangleAlert, Upload } from 'lucide-react';
+import { Activity, Code2, Loader2, Moon, Search, Settings2, Sun, TriangleAlert, Upload } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useDataset, useHashRoute } from './lib/useDataset';
 import { useSettings } from './lib/settings';
+import { useTheme, THEME_LABEL, type ThemeChoice } from './lib/theme';
 import { ExperimentList } from './components/ExperimentList';
 import { ExperimentDetail } from './components/ExperimentDetail';
 import { EvalScreen } from './components/EvalScreen';
@@ -15,8 +16,18 @@ import { Button } from './components/ui';
 // 面板里承诺了「能按规则名搜」：引擎只有英文规则码，中文标签得从这里补进去
 import { DECISION_META, REASON_META } from './lib/format';
 
+/**
+ * 点一次切一次：跟随系统 → 先固定成「与当前相反的那个」（因为用户点这一下多半是想换），
+ * 再点就在浅/深之间来回。不直接跳到「三选一菜单」——主题这种事一次点击就该换完。
+ */
+function themeCycle(choice: ThemeChoice, isDark: boolean): ThemeChoice {
+  if (choice === 'follow') return isDark ? 'light' : 'dark';
+  return choice === 'dark' ? 'light' : 'dark';
+}
+
 export default function App() {
   const { settings, patchConfig, patchLlm, reset } = useSettings();
+  const { choice: themeChoice, set: setTheme, dark, systemDark } = useTheme();
   // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
   const { data, error, source, meta, storedMeta, importData, useBuiltin, useImported, forgetImport } =
     useDataset(settings.config);
@@ -202,6 +213,17 @@ export default function App() {
             <Button size="sm" variant="outline" onClick={() => setImportOpen(true)} title="导入自己的数据（保存在本机，刷新不丢）">
               <Upload size={13} /> 导入数据
             </Button>
+            <button
+              onClick={() => setTheme(themeCycle(themeChoice, dark))}
+              title={
+                themeChoice === 'follow'
+                  ? `跟随系统（当前${systemDark ? '深色' : '浅色'}）— 点击固定为${systemDark ? '浅色' : '深色'}`
+                  : `主题：${THEME_LABEL[themeChoice]} — 点击切换`
+              }
+              className="rounded-lg border border-line p-1.5 text-muted transition-colors hover:border-line2 hover:text-ink"
+            >
+              {dark ? <Moon size={14} /> : <Sun size={14} />}
+            </button>
             <button
               onClick={() => go('#/settings')}
               title="决策口径与模型设置"

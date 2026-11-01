@@ -164,7 +164,7 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div
-        className="absolute inset-0 bg-[#3b2410]/25 backdrop-blur-[3px]"
+        className="scrim absolute inset-0 backdrop-blur-[3px]"
         onClick={onClose}
         aria-hidden
       />

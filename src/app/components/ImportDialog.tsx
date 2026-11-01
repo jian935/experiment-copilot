@@ -76,7 +76,7 @@ export function ImportDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#3b2410]/25 backdrop-blur-[3px]" onClick={onClose} aria-hidden />
+      <div className="scrim absolute inset-0 backdrop-blur-[3px]" onClick={onClose} aria-hidden />
       <div className="anim-up relative flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-line bg-panel shadow-2xl">
         <header className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
           <div>
