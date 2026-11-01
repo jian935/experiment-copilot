@@ -1,4 +1,5 @@
 import { mdeTwoProportion, powerTwoProportion } from '../stats.ts';
+import { dailyRatePerArm, forecast } from '../forecast.ts';
 import type { Analysis, Evidence } from '../decide.ts';
 import type { Decision } from '../types.ts';
 import type { AgentCtx, ToolCall, ToolName } from './types.ts';
@@ -10,6 +11,7 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   segment_breakdown: '扫描分层',
   check_guardrails: '检查护栏',
   compute_mde: '推算 MDE / 功效',
+  forecast_days: '预测还要跑几天',
   find_similar: '检索相似实验',
   list_experiments: '检索实验列表',
   explain_rules: '回溯判定规则',
@@ -133,6 +135,62 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
         args: { baseline, nPerArm },
         summary: `在 n=${nPerArm}/组、基线 ${pct(baseline)} 下，80% 功效的最小可检出差异为 ${pp(mde)}`,
         data: { baseline, nPerArm, mde, power, observedDiff: a.overall.diff },
+        cites: cite(a, 'metric'),
+      };
+    }
+
+    case 'forecast_days': {
+      // 「还要跑几天」：流量从日表算（不让人拍脑袋填），差值与标准误沿用当前决策口径，
+      // 所以开了 CUPED 时预测用的也是 CUPED 的 SE —— 口径必须和结论页一致。
+      const rows = dataset.daily.filter((r) => r.expId === exp.id);
+      let n1 = 0, c1 = 0, n2 = 0, c2 = 0;
+      for (const r of rows) {
+        if (r.variant === 'control') {
+          n1 += r.exposures;
+          c1 += r.conversions;
+        } else {
+          n2 += r.exposures;
+          c2 += r.conversions;
+        }
+      }
+      const horizonDays = typeof args.horizonDays === 'number' ? args.horizonDays : 30;
+      const f = forecast({
+        n1,
+        c1,
+        n2,
+        c2,
+        diff: a.primary.diff,
+        se: a.primary.se,
+        dailyRate: dailyRatePerArm(rows, 3),
+        elapsedDays: new Set(rows.map((r) => r.date)).size,
+        horizonDays,
+        sims: 1200,
+        seed: 20261101,
+      });
+      return {
+        tool: name,
+        args: { horizonDays },
+        summary:
+          f.verdict.code === 'done'
+            ? `已可下结论，不必再等（p=${pv(f.observed.p)}）`
+            : `预计第 ${f.sim.medianDays ?? '—'} 天可下结论；跑满 ${horizonDays} 天仍等不到的概率 ${Math.round(f.sim.stuck * 100)}%`,
+        data: {
+          verdictCode: f.verdict.code,
+          verdictText: f.verdict.text,
+          horizonDays,
+          medianDays: f.sim.medianDays,
+          p20Days: f.sim.p20Days,
+          p80Days: f.sim.p80Days,
+          stuckPP: Math.round(f.sim.stuck * 100),
+          p: f.observed.p,
+          requiredNPerArm: Number.isFinite(f.point.requiredNPerArm) ? f.point.requiredNPerArm : null,
+          remainingDays: Number.isFinite(f.point.remainingDays) ? f.point.remainingDays : null,
+          nPerArm: f.observed.nPerArm,
+          dailyRate: f.rate.perArmPerDay,
+          mdeNowPP: +(f.mde.now * 100).toFixed(3),
+          mdeAtHorizonPP: +(f.mde.atHorizon * 100).toFixed(3),
+          via: a.primary.via,
+        },
         cites: cite(a, 'metric'),
       };
     }
@@ -331,6 +389,21 @@ export const TOOL_SCHEMA = [
         properties: {
           baseline: { type: 'number', description: '基线转化率（0-1），默认取 control' },
           nPerArm: { type: 'number', description: '每组样本量，默认取现有样本' },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'forecast_days',
+      description:
+        '预测「还要跑几天」才能下结论：给出预计天数（50% / 80% 把握）、跑满预测期仍等不到显著性的概率、以及所需样本量。流量从日表实算，口径与当前决策一致',
+      parameters: {
+        type: 'object',
+        properties: {
+          horizonDays: { type: 'number', description: '最多往后预测多少天，默认 30' },
         },
         required: [],
       },

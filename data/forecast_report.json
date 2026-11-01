@@ -1,0 +1,137 @@
+{
+  "generatedAt": "2026-11-01T08:11:29.802Z",
+  "seed": 20261031,
+  "experiments": 120,
+  "horizonDays": 30,
+  "sims": 2000,
+  "significant": 69,
+  "notSignificant": 51,
+  "stuckAmongNotSignificant": 0.333,
+  "medianDays": 10,
+  "verdictCounts": {
+    "done": 69,
+    "eta": 35,
+    "unlikely": 16
+  },
+  "byArchetype": [
+    {
+      "archetype": "guardrail",
+      "n": 15,
+      "significant": 15,
+      "medianStuck": 0,
+      "medianDays": 0
+    },
+    {
+      "archetype": "heterogeneous",
+      "n": 15,
+      "significant": 10,
+      "medianStuck": 0,
+      "medianDays": 0
+    },
+    {
+      "archetype": "negative",
+      "n": 15,
+      "significant": 15,
+      "medianStuck": 0,
+      "medianDays": 0
+    },
+    {
+      "archetype": "null",
+      "n": 40,
+      "significant": 4,
+      "medianStuck": 0.388,
+      "medianDays": 10
+    },
+    {
+      "archetype": "positive",
+      "n": 25,
+      "significant": 25,
+      "medianStuck": 0,
+      "medianDays": 0
+    },
+    {
+      "archetype": "srm",
+      "n": 10,
+      "significant": 0,
+      "medianStuck": 0.502,
+      "medianDays": 19
+    }
+  ],
+  "samples": [
+    {
+      "id": "E004",
+      "archetype": "null",
+      "decision": "inconclusive",
+      "diffPP": 0.342,
+      "p": 0.13061840779758127,
+      "significant": false,
+      "medianDays": 7,
+      "p80Days": null,
+      "stuck": 0.239,
+      "requiredNPerArm": 60547,
+      "remainingDays": 15,
+      "rate": 2748,
+      "verdict": "eta"
+    },
+    {
+      "id": "E006",
+      "archetype": "srm",
+      "decision": "inconclusive",
+      "diffPP": -0.185,
+      "p": 0.4925118541527227,
+      "significant": false,
+      "medianDays": 25,
+      "p80Days": null,
+      "stuck": 0.462,
+      "requiredNPerArm": 221087,
+      "remainingDays": 90,
+      "rate": 2303,
+      "verdict": "eta"
+    },
+    {
+      "id": "E010",
+      "archetype": "null",
+      "decision": "inconclusive",
+      "diffPP": 0.007,
+      "p": 0.9736246422092036,
+      "significant": false,
+      "medianDays": null,
+      "p80Days": null,
+      "stuck": 0.659,
+      "requiredNPerArm": 134071809,
+      "remainingDays": 49436,
+      "rate": 2712,
+      "verdict": "unlikely"
+    },
+    {
+      "id": "E012",
+      "archetype": "srm",
+      "decision": "inconclusive",
+      "diffPP": -0.474,
+      "p": 0.08220987122416717,
+      "significant": false,
+      "medianDays": 1,
+      "p80Days": 1,
+      "stuck": 0.094,
+      "requiredNPerArm": 35876,
+      "remainingDays": 10,
+      "rate": 2213,
+      "verdict": "eta"
+    },
+    {
+      "id": "E014",
+      "archetype": "heterogeneous",
+      "decision": "iterate",
+      "diffPP": 0.379,
+      "p": 0.3071180621446584,
+      "significant": false,
+      "medianDays": 5,
+      "p80Days": null,
+      "stuck": 0.284,
+      "requiredNPerArm": 62924,
+      "remainingDays": 17,
+      "rate": 2649,
+      "verdict": "eta"
+    }
+  ]
+}

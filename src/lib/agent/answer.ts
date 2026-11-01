@@ -1,7 +1,7 @@
 import { auditNumbers, buildWhitelist } from './audit.ts';
 import { runTool } from './tools.ts';
 import { METRIC_LABELS } from '../metrics.ts';
-import type { AgentCtx, AgentReply, ToolCall } from './types.ts';
+import type { AgentCtx, AgentReply, AgentTurn, ToolCall } from './types.ts';
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
 const pp = (v: number, d = 2) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}pp`;
@@ -222,6 +222,61 @@ const INTENTS: IntentDef[] = [
   },
 
   {
+    key: 'forecast',
+    test: /还要.*(几天|多久)|跑多久|多久才(能|会)|需要.*(几天|多久)|什么时候.*(结束|结论)|预计.*(结束|完成|多久)|结束时间|还要等|再跑多久/,
+    run: (ctx) => {
+      const fc = runTool('forecast_days', ctx);
+      const d = fc.data as {
+        verdictCode: 'done' | 'eta' | 'unlikely';
+        horizonDays: number;
+        medianDays: number | null;
+        p20Days: number | null;
+        p80Days: number | null;
+        stuckPP: number;
+        requiredNPerArm: number | null;
+        mdeNowPP: number;
+        mdeAtHorizonPP: number;
+        p: number;
+        via: string;
+      };
+      if (d.verdictCode === 'done') {
+        return {
+          calls: [fc],
+          text: withCites(
+            `已经能下结论了（主指标检验的 p=${pv(d.p)}），不用再等——继续跑只会让区间更窄，不会改变判定`,
+            fc.cites,
+          ),
+        };
+      }
+      if (d.verdictCode === 'unlikely' || d.medianDays === null) {
+        return {
+          calls: [fc],
+          text: withCites(
+            `按当前效应和流量，跑到第 ${d.horizonDays} 天仍有 ${d.stuckPP}% 的模拟等不到显著性。` +
+              `这通常说明真实效应小到不值得为它继续投入流量：更该做的是按「无实质差异」收尾，或者改设计再跑一轮`,
+            fc.cites,
+          ),
+        };
+      }
+      const samples =
+        d.requiredNPerArm !== null
+          ? `按现在这点效应，每组需要 ${d.requiredNPerArm.toLocaleString('en-US')} 个样本才算得出来；`
+          : '';
+      return {
+        calls: [fc],
+        text:
+          withCites(
+            `预计第 ${d.medianDays} 天能下结论，第 ${d.p80Days ?? '—'} 天有 80% 把握（20% 分位是第 ${d.p20Days ?? '—'} 天）；` +
+              samples +
+              `同期可检出的最小差异会从 ${d.mdeNowPP.toFixed(2)}pp 收窄到 ${d.mdeAtHorizonPP.toFixed(2)}pp`,
+            fc.cites,
+          ) +
+          `这个预测用的是${d.via === 'cuped' ? 'CUPED 调整后' : '当前'}的差值与标准误，前提是流量和效应都不变。`,
+      };
+    },
+  },
+
+  {
     key: 'similar',
     test: /类似|相似|历史|其他实验|横向|对比|同类/,
     run: (ctx) => {
@@ -274,19 +329,141 @@ const FALLBACK: IntentDef = {
       text: `${withCites(
         `这个实验的结论是「${DECISION_CN[data.decision]}」，规则 ${data.reasonCode}`,
         o.cites,
-      )}主指标差值 ${pp(ctx.analysis.overall.diff)}，p=${pv(ctx.analysis.overall.p)}。${bayes.text}可以继续问我：为什么是这个结论、新老用户有没有差异、护栏有没有恶化、样本够不够。`,
+      )}主指标差值 ${pp(ctx.analysis.overall.diff)}，p=${pv(ctx.analysis.overall.p)}。${bayes.text}可以继续问我：为什么是这个结论、新老用户有没有差异、护栏有没有恶化、样本够不够、还要跑几天。`,
     };
   },
 };
 
-/** 规则模式：不需要任何密钥，纯确定性路由与模板 */
-export function answerQuestion(question: string, ctx: AgentCtx): AgentReply {
+/** 意图的中文名：多轮补全时给用户看的「我把你这句话理解成了什么」 */
+export const INTENT_LABEL: Record<string, string> = {
+  test: '主指标是否显著',
+  rules: '为什么是这个结论',
+  guardrail: '护栏是否恶化',
+  segment: '分层（新老 / 设备）差异',
+  mde: '样本够不够',
+  forecast: '还要跑几天',
+  similar: '同类实验横向对比',
+  list: '实验清单',
+  metric: '指标口径',
+  metric_scope: '指标是否在口径内',
+  overview: '整体结论',
+};
+
+/** 「那…呢 / 还有呢 / 那它呢」这类省略式追问的特征 */
+const REFER = /^(那|那么|还有|再|它|这个|那个|这|其|另外|换成|改成)/;
+const NEXT_TOPIC = /^(还有|继续|然后|接着|另外|下一个|再讲)/;
+const PUNCT = /[\s，。？！?、,.!~：:；;"'“”‘’（）()]/g;
+
+/** 把省略式追问补成能命中意图的完整问题（只补关键词，不改写语义） */
+const TOPIC_SEED: Record<string, string> = {
+  test: '主指标 显著性 效果 差值',
+  rules: '为什么 依据 判定规则',
+  guardrail: '护栏 退款 投诉 延迟',
+  segment: '分层 新老用户',
+  mde: '样本 够不够 需要多少',
+  forecast: '还要跑几天 预计多久',
+  similar: '类似 对比 历史实验',
+  list: '有哪些 列出',
+  metric: '口径 指标定义 怎么算',
+  metric_scope: '口径 指标定义',
+  overview: '结论',
+};
+
+/** 「还有呢 / 继续」时按这个顺序换下一个主题——都是 PM 会依次追问的东西 */
+const TOPIC_CYCLE = ['test', 'rules', 'segment', 'guardrail', 'forecast', 'similar'];
+
+export interface FollowUp {
+  /** 用于路由的问题（可能被补全） */
+  effective: string;
+  rewritten: boolean;
+  why?: string;
+  from?: string;
+}
+
+/**
+ * 规则模式的多轮补全。
+ *
+ * 原则：**只在「确实是省略式追问」时才动手**，且补全内容必须可解释。
+ * - 完整句子一律按原样路由（「主指标显著吗」不会被改写）；
+ * - 原文已经能命中某个意图就不动（否则「那退款率呢」会被错改成主指标）；
+ * - 只有短句 + 指代/省略特征（「那新用户呢」「还有呢」「那它呢」）才补。
+ *
+ * 为什么用「补关键词」而不是真的做指代消解：规则模式没有语义模型，
+ * 硬做指代只会猜错还说不清。补关键词是**可复现、可解释**的做法，
+ * 猜错了用户能从「承接上文」那行提示里立刻看出来。
+ */
+export function resolveFollowUp(question: string, history?: AgentTurn[]): FollowUp {
   const q = question.trim();
-  const hit = INTENTS.find((i) => i.test.test(q)) ?? FALLBACK;
+  if (!history?.length) return { effective: q, rewritten: false };
+  const stripped = q.replace(PUNCT, '');
+  if (!stripped) return { effective: q, rewritten: false };
+
+  const isNext = NEXT_TOPIC.test(q);
+  const referential = REFER.test(q) || /呢[？?]?\s*$/.test(q);
+  // 短句 + 省略特征才算追问；长句子按原样走（宁可少补，不可乱补）
+  if (stripped.length > 10 || !(referential || isNext)) return { effective: q, rewritten: false };
+  if (INTENTS.some((i) => i.test.test(q))) return { effective: q, rewritten: false };
+
+  const lastIntent = [...history].reverse().find((t) => t.role === 'assistant' && t.intent)?.intent;
+
+  // ① 带明确维度词 → 补成对应分层问法
+  if (/新用户|老用户|新老|人群/.test(q)) {
+    return { effective: '分层 新老用户', rewritten: true, why: '补成「按新老用户分层」', from: lastIntent };
+  }
+  if (/ios|安卓|设备|客户端|移动端|机型/i.test(q)) {
+    return { effective: '分层 设备 iOS Android', rewritten: true, why: '补成「按设备分层」', from: lastIntent };
+  }
+  // ② 「还有呢 / 继续」→ 按主题环换下一个
+  if (isNext) {
+    const i = lastIntent ? TOPIC_CYCLE.indexOf(lastIntent) : -1;
+    const key = TOPIC_CYCLE[(i + 1) % TOPIC_CYCLE.length];
+    return {
+      effective: TOPIC_SEED[key],
+      rewritten: true,
+      why: `接着上一轮往下问，切到「${INTENT_LABEL[key]}」`,
+      from: lastIntent,
+    };
+  }
+  // ③ 纯指代（「那它呢」）→ 沿用上一轮主题
+  if (lastIntent && TOPIC_SEED[lastIntent]) {
+    return {
+      effective: TOPIC_SEED[lastIntent],
+      rewritten: true,
+      why: `沿用上一轮主题「${INTENT_LABEL[lastIntent] ?? lastIntent}」`,
+      from: lastIntent,
+    };
+  }
+  return { effective: q, rewritten: false };
+}
+
+/** 规则模式：不需要任何密钥，纯确定性路由与模板 */
+export function answerQuestion(question: string, ctx: AgentCtx, history?: AgentTurn[]): AgentReply {
+  const q = question.trim();
+  const hist = history ?? ctx.history;
+  const fu = resolveFollowUp(q, hist);
+  const hit = INTENTS.find((i) => i.test.test(fu.effective)) ?? FALLBACK;
+  // 注意：路由用补全后的 fu.effective，但模板读到的仍是用户原话（ctx.question）——
+  // 像「有哪些被拦截的实验」这种要靠原文关键词选筛选条件的，不能被补全污染。
   const { calls, text } = hit.run({ ...ctx, question: q });
   const whitelist = buildWhitelist([ctx.analysis, ...calls.map((c) => c.data)]);
   const audit = auditNumbers(text, whitelist);
-  return { text, intent: hit.key, calls, audit, by: 'rules', violations: violationsOf(text, calls, audit) };
+  return {
+    text,
+    intent: hit.key,
+    calls,
+    audit,
+    by: 'rules',
+    violations: violationsOf(text, calls, audit),
+    ...(fu.rewritten
+      ? {
+          context: {
+            effective: INTENT_LABEL[hit.key] ?? hit.key,
+            why: fu.why ?? '',
+            from: fu.from ? (INTENT_LABEL[fu.from] ?? fu.from) : '上一轮',
+          },
+        }
+      : {}),
+  };
 }
 
 /** 给 LLM 的 system prompt：5 条铁律 */
@@ -303,6 +480,9 @@ export function systemPrompt(ctx: AgentCtx): string {
     '6. 数字照抄工具给的格式化字段（如 diffPP、pText、summary），小数最多两位；禁止把 16 位浮点原样写进回答。',
     `7. 只能引用口径字典里登记过的指标（${METRIC_LABELS.join('、')}）。用户问到字典外的指标（如 ARPU、留存），` +
       '必须先说「这个指标不在口径字典里，引擎没算过」，禁止自行定义口径或换算。',
+    '8. 多轮对话：历史消息只用来理解指代（「那新老用户呢」「还有呢」「它呢」），**不能当作证据来源**。' +
+      '历史里出现过的数字必须重新调用工具确认后才能再写一次，禁止直接复述历史里的数字——' +
+      '那些数字可能来自不同的实验或不同的口径。',
     '',
     `当前实验：${ctx.exp.id} ${ctx.exp.name}；主指标 ${ctx.exp.primaryMetric}；数据为固定种子合成数据。`,
     `引擎结论：${a.decision}（规则 ${a.reasonCode}）。`,

@@ -29,6 +29,7 @@ import {
   type Tone,
 } from '../lib/format';
 import { Forest, type ForestRow } from './Forest';
+import { ForecastPanel } from './Forecast';
 import { Trend } from './Trend';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { exportConclusionCard } from '../lib/exportCard';
@@ -356,6 +357,9 @@ export function ExperimentDetail({
           </p>
         </Panel>
       )}
+
+      {/* 还要跑几天 */}
+      <ForecastPanel rows={rows} diff={analysis.primary.diff} se={analysis.primary.se} />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
         <Panel>

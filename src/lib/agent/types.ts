@@ -1,6 +1,14 @@
 import type { Analysis } from '../decide.ts';
 import type { Dataset, Experiment } from '../types.ts';
 
+/** 一轮对话（旧→新）。规则模式用它做指代补全，智能模式把它塞进 messages */
+export interface AgentTurn {
+  role: 'user' | 'assistant';
+  text: string;
+  /** assistant 轮记录当轮的意图，多轮补全时用来判断「上一轮在聊什么」 */
+  intent?: string;
+}
+
 export interface AgentCtx {
   dataset: Dataset;
   analyses: Map<string, Analysis>;
@@ -8,6 +16,8 @@ export interface AgentCtx {
   analysis: Analysis;
   /** 当前提问原文（工具可按它选维度/筛选） */
   question?: string;
+  /** 之前的对话，用于多轮追问 */
+  history?: AgentTurn[];
 }
 
 /** 一次工具调用的记录：UI 直接渲染这些，回答里的 [E1] 就是 cites */
@@ -28,6 +38,7 @@ export type ToolName =
   | 'segment_breakdown'
   | 'check_guardrails'
   | 'compute_mde'
+  | 'forecast_days'
   | 'find_similar'
   | 'list_experiments'
   | 'explain_rules'
@@ -48,4 +59,9 @@ export interface AgentReply {
   note?: string;
   /** 违反铁律的地方（缺引用 / 出现无法溯源的数字），UI 直接展示 */
   violations?: string[];
+  /**
+   * 多轮补全的说明：当这轮是「省略式追问」（如「那新用户呢」「还有呢」）时，
+   * 记录系统把它理解成了什么、依据是哪一轮。规则模式必须可解释，不能偷偷猜。
+   */
+  context?: { effective: string; why: string; from: string };
 }

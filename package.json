@@ -15,7 +15,8 @@
     "calibrate": "tsx scripts/check_calibration.ts",
     "ablation": "tsx scripts/ablation.ts",
     "aa": "tsx scripts/aa_test.ts",
-    "cuped": "tsx scripts/cuped_report.ts"
+    "cuped": "tsx scripts/cuped_report.ts",
+    "forecast": "tsx scripts/forecast_report.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

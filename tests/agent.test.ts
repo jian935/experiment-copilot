@@ -20,8 +20,9 @@ const guardrailCtx = ctxOf('E001');
 const heteroCtx = ctxOf('E002');
 
 describe('Agent 工具（M4）', () => {
-  it('9 个工具都能调用，且引用的证据编号都真实存在', () => {
-    expect(TOOL_NAMES.length).toBe(10);
+  it('全部工具都能调用，且引用的证据编号都真实存在', () => {
+    // 数量硬编码在这里，是为了让「加了一个工具却忘了注册 schema / 忘加标签」必然报错
+    expect(TOOL_NAMES.length).toBe(11);
     const valid = new Set(guardrailCtx.analysis.evidence.map((e) => e.id));
     for (const name of TOOL_NAMES) {
       const call = runTool(name, guardrailCtx, name === 'segment_breakdown' ? { dimension: 'device' } : {});

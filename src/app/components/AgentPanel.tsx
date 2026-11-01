@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  CornerDownLeft,
   KeyRound,
   Loader2,
   Send,
@@ -12,7 +13,7 @@ import {
 } from 'lucide-react';
 import { answerQuestion } from '../../lib/agent/answer.ts';
 import { TOOL_LABEL } from '../../lib/agent/tools.ts';
-import type { AgentCtx, AgentReply, ToolCall } from '../../lib/agent/types.ts';
+import type { AgentCtx, AgentReply, AgentTurn, ToolCall } from '../../lib/agent/types.ts';
 import { askWithLlm } from '../lib/llm';
 import { useSettings } from '../lib/settings';
 import { Button, Drawer, cx } from './ui';
@@ -34,6 +35,7 @@ const SUGGESTIONS = [
   '新老用户有差异吗？',
   '护栏有没有恶化？',
   '样本够不够？',
+  '还要跑几天？',
   '有哪些实验被拦截了？',
 ];
 
@@ -87,6 +89,22 @@ export function AgentPanel({
       turns.reduce((n, t) => n + (t.role === 'assistant' ? t.reply.calls.length : 0), 0),
     [turns],
   );
+  // 多轮上下文：把已完成的轮次转成 AgentTurn（助手轮带上意图，规则模式靠它判断「上一轮在聊什么」）
+  const history = useMemo<AgentTurn[]>(
+    () =>
+      turns.map((t) =>
+        t.role === 'user'
+          ? { role: 'user' as const, text: t.text }
+          : { role: 'assistant' as const, text: t.reply.text, intent: t.reply.intent },
+      ),
+    [turns],
+  );
+
+  // 换实验就换会话：把上一题的上下文带过去只会答错
+  useEffect(() => {
+    setTurns([]);
+    setPendingTool(null);
+  }, [ctx.exp.id]);
 
   async function ask(q: string) {
     const question = q.trim();
@@ -96,9 +114,12 @@ export function AgentPanel({
     setBusy(true);
     setPendingTool(null);
 
+    // history 只含这次提问之前的轮次（turns 还没被 setState 刷新）
+    const withHistory: AgentCtx = { ...ctx, history };
+
     try {
       if (mode === 'llm' && apiKey) {
-        const reply = await askWithLlm(question, ctx, {
+        const reply = await askWithLlm(question, withHistory, {
           apiKey,
           baseUrl: settings.llm.baseUrl || undefined,
           model: settings.llm.model || undefined,
@@ -106,12 +127,12 @@ export function AgentPanel({
         });
         setTurns((p) => [...p, { role: 'assistant', reply }]);
       } else {
-        const reply = answerQuestion(question, ctx);
+        const reply = answerQuestion(question, withHistory, history);
         await new Promise((r) => setTimeout(r, 180)); // 让"思考中"可见，避免闪烁
         setTurns((p) => [...p, { role: 'assistant', reply }]);
       }
     } catch (e) {
-      const fallback = answerQuestion(question, ctx);
+      const fallback = answerQuestion(question, withHistory, history);
       setTurns((p) => [
         ...p,
         {
@@ -220,6 +241,18 @@ export function AgentPanel({
           <ShieldCheck size={11} className="text-ship" />
           数字不由模型生成
         </span>
+        {turns.length > 0 && (
+          <button
+            onClick={() => {
+              setTurns([]);
+              setPendingTool(null);
+            }}
+            className="rounded-lg border border-line bg-panel px-2 py-1 text-[10px] text-muted transition-colors hover:border-line2 hover:text-ink"
+            title="清空上下文并开始新会话"
+          >
+            新会话
+          </button>
+        )}
       </div>
 
       <div ref={listRef} className="min-h-[240px] space-y-3">
@@ -245,9 +278,11 @@ export function AgentPanel({
               可以直接点开看原始证据。
             </p>
             <div className="mt-3 border-t border-line/60 pt-2.5">
-              <div className="text-[10px] text-dim">可调用的 10 个工具（模型只能通过它们取数）</div>
+              <div className="text-[10px] text-dim">
+                可调用的 {Object.keys(TOOL_LABEL).length} 个工具（模型只能通过它们取数）
+              </div>
               <div className="mt-1.5 flex flex-wrap gap-1">
-                {['读取结论', '重算检验', '扫描分层', '检查护栏', '推算 MDE', '检索相似', '检索列表', '回溯规则', '贝叶斯视角', '口径字典'].map((t) => (
+                {Object.values(TOOL_LABEL).map((t) => (
                   <span key={t} className="rounded border border-line bg-panel px-1.5 py-0.5 text-[9.5px] text-muted">
                     {t}
                   </span>
@@ -317,6 +352,17 @@ function AssistantTurn({
           {ok ? `${reply.audit.total} 个数字全部可溯源` : `${reply.violations!.length} 处违规`}
         </span>
       </div>
+
+      {reply.context && (
+        <div className="mb-2 flex items-start gap-1.5 rounded-lg border border-brand/25 bg-brand/8 px-2 py-1 text-[10px] leading-4 text-brand2">
+          <CornerDownLeft size={10} className="mt-0.5 shrink-0" />
+          <span>
+            承接上文 → 理解为「{reply.context.effective}」
+            {reply.context.why ? ` · ${reply.context.why}` : ''}
+            <span className="text-dim">（原话太省略，这是规则模式的补全结果，不对可以换个说法）</span>
+          </span>
+        </div>
+      )}
 
       {reply.calls.length > 0 && (
         <div className="mb-2 space-y-1">

@@ -1,7 +1,7 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M6 完成（36s 演示视频 + 单文件作品集落地页 + 简历素材）** ｜ 2026-11-01
-> 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ M1 评测：[`docs/EVAL.md`](docs/EVAL.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
+> 状态：**M10 完成（统计深度 / 产品完整度 / CUPED / 还要跑几天 / 多轮上下文）** ｜ 2026-11-01
+> 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ 实测记录：[`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
 统计与决策全部由确定性引擎完成，模型只负责解释与追问——**每个数字都能点开看公式、样本量与数据版本，并能一键复算。**
@@ -54,13 +54,16 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 157 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED）
+npm test           # 190 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 还要跑几天 / 多轮上下文）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
 python scripts/build_portfolio.py                                    # 重建作品集页
 npm run gen        # 用固定种子重新生成 120 个实验（data/）
 npm run calibrate  # 120 例校准：混淆矩阵 + 五项指标
+npm run aa         # 1000 个零效应实验的 A/A 自校准（误报率）
+npm run cuped      # CUPED 方差缩减 + 稳健标准误的批量报告
+npm run forecast   # 「还要跑几天」在 120 个实验上的批量预测
 ```
 
 打开后：列表页点任意实验 → 详情页 → 右上角「证据链」→ 底部「一键复算」。
@@ -113,18 +116,27 @@ exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,新首页改版
 ## 目录
 
 ```
-src/lib/stats.ts        统计引擎（零依赖）：SRM / 两比例 z / Newcombe CI / Wilson / BH / 功效 / Welch
+src/lib/stats.ts        统计引擎（零依赖）：SRM / 两比例 z / Newcombe CI / Wilson / BH / 功效 / Welch /
+                        贝叶斯 Beta-Binomial / 非劣检验 / Bootstrap(BCa) / CUPED + 稳健标准误 / 覆盖率模拟
 src/lib/decide.ts       决策引擎：6 条规则的优先级 + 证据链生成
-src/lib/simulate.ts     数据生成器（固定种子，6 类原型）
+src/lib/forecast.ts     「还要跑几天」：点估计外推 + 概率模拟（含 peeking 口径说明）
+src/lib/config.ts       全部阈值（α / FDR / 护栏 margin / SE 口径 / CUPED 开关 / Bootstrap 次数）
+src/lib/metrics.ts      口径字典（唯一真源）：定义 / 方向 / 单位 / 计算式 / 统计方法 / 护栏容忍度
+src/lib/simulate.ts     数据生成器（固定种子，6 类原型，含日/设备/按臂异质性）
+src/lib/import.ts       JSON / CSV 导入解析（列名归一 + 行号报错）
+src/lib/agent/          Agent：11 个纯函数工具 / 规则路由 + 多轮补全 / 数字审计
 src/app/                UI：Vite + React 19 + TS + Tailwind v3
   components/Forest.tsx        手写 SVG 森林图（比图表库更可控）
+  components/Forecast.tsx      把握度曲线 + 天数预测面板
   components/Trend.tsx         Recharts 分日趋势
   components/ExperimentList.tsx / ExperimentDetail.tsx / EvidenceDrawer.tsx
+  components/SettingsScreen.tsx  第 6 屏：口径字典 + 阈值 + 护栏 + 模型，改完立刻显示影响面
 scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 / 作品集构建
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  157 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED 模拟 + 口径字典/阈值可配）
+tests/                  190 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
+                        + 口径字典/阈值可配/多轮上下文）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
 docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```
@@ -139,7 +151,7 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 | 决策引擎 | 6 条优先规则 → `ship / no-ship / iterate / inconclusive` + 证据链 |
 | 数据生成器 | 120 实验 / 6,720 行，固定种子可复现（null 40 / positive 25 / guardrail 15 / heterogeneous 15 / negative 15 / srm 10） |
 | 单测 | 18 个全绿，6 组 z 检验 p 值与 scipy 相对误差 < 1e-4 |
-| 校准 | **决策准确率 96.7%**（116/120）、null 误报 7.5%、正负效应漏判 0%、异质/ SRM / 护栏识别 100% |
+| 校准 | **决策准确率 96.7%**（116/120）、null 误报 7.5%、正负效应漏判 0%、异质/ SRM / 护栏识别 100% ← *M10 换成稳健标准误后为 93.3% / 5.0%，原因见 M8–M10 一节* |
 
 > 剩下 4 例全是 null 实验在 α=0.05 下的正常假阳性，**故意不修**——评测看板要如实展示失败案例。
 
@@ -166,7 +178,7 @@ docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 /
 
 | 模块 | 内容 |
 |---|---|
-| 10 个工具 | 读取结论 / 重算检验 / 扫描分层 / 检查护栏 / 推算 MDE / 检索相似 / 检索列表 / 回溯规则 / 贝叶斯视角 / 口径字典；全部纯函数只读引擎结果，未登记指标一律拒答 |
+| 11 个工具 | 读取结论 / 重算检验 / 扫描分层 / 检查护栏 / 推算 MDE / 预测天数 / 检索相似 / 检索列表 / 回溯规则 / 贝叶斯视角 / 口径字典；全部纯函数只读引擎结果，未登记指标一律拒答 |
 | 口径字典 | `src/lib/metrics.ts` 登记全部指标（定义/方向/单位/计算式/统计方法/护栏容忍度）；引擎与 Agent 只认字典内的口径 |
 | 设置页 | 第 6 屏（`#/settings`）：α / FDR / 交互 α / SRM 双阈值 / 三个护栏的 margin·α·口径·是否拦截 / Bootstrap 次数·种子 / 模型 provider；改完立刻显示「多少条结论会变」 |
 | 阈值可配 | `analyze(exp, rows, cfg)` 接受 `Partial<DecisionConfig>`；所有阈值集中在 `src/lib/config.ts`，代码里无判定魔数 |
@@ -207,7 +219,7 @@ node scripts/mock_llm.mjs          # 本地 mock，返回「先调工具、再�
 
 | 模块 | 内容 |
 |---|---|
-| 五个 KPI | 决策准确率 96.7%（116/120）、null 误报率 7.5%（3/40）、正/负效应漏判 0%、Agent 引用覆盖 100% |
+| 五个 KPI | 决策准确率（当前 **93.3%**，M10 换稳健标准误前为 96.7%）、null 误报率（**5.0%**，2/40）、正负效应漏判 0%、Agent 引用覆盖 100% |
 | 混淆矩阵 | 4×4，对角线绿、错判红，鼠标悬停看「真实 → 引擎」的计数 |
 | 证据强度分桶 | 按 p 值分四桶看准确率：p<0.001 是 100%，**0.01–0.05 是 0%（0/3）**——恰好跨过阈值的实验本就无法判定 |
 | 失败案例 | 4 条全部列出、可点开看证据链；不修是刻意的（改了反而像在挑数据） |
@@ -230,12 +242,33 @@ node scripts/mock_llm.mjs          # 本地 mock，返回「先调工具、再�
 2. 用 concat demuxer 的 `duration` 拼图片序列会漂移（实测 28.6s 拼成 33.1s）→ 改成 Python 侧按时间戳重采样成严格 30fps 序列；
 3. 录制脚本靠 sleep 等渲染不可靠（页面渲染比脚本慢）→ 全部改成轮询等元素出现再点，否则会点到还没挂载的按钮。
 
+### M8–M10 — 旗舰化（统计深度 / 产品完整度 / 差异化）
+
+| 模块 | 内容 | 复现 |
+|---|---|---|
+| CI 覆盖率模拟 | 在已知真值上重复抽样，量「95% CI 真的覆盖 95% 吗」；Wilson 与 Newcombe 两个口径分别验 | `npm test` |
+| Bootstrap（BCa） | 偏差校正 + 加速常数，回落百分位法；延迟护栏改用它（原来是一支 sd 硬编码 50 的假 t 检验） | `stats::bootstrapTwoSample` |
+| 非劣检验 | 护栏不再用「差值 > X 且 p < Y」的拍脑袋阈值，而是声明 margin 再做单侧检验；另给可判性诊断（这个 margin 在现有样本下能不能判） | `stats::nonInferiority` |
+| A/A 自校准 | 1000 个零效应实验 → 实测总误报率 **5.00%**（名义 5%）、贝叶斯 P(B>A)>0.95 占 **5.10%** | `npm run aa` |
+| 口径字典 + 设置页 | 第 6 屏 `#/settings`：α / FDR / 护栏 margin·口径·gating / Bootstrap / 模型；改完立刻显示「多少条结论会变」 | `#/settings` |
+| CUPED + 稳健标准误 | 方差缩减中位 **7.76%**；A/A 误报率 i.i.d. **11.33%** → 稳健 **5.67%** → CUPED **5.33%** | `npm run cuped` |
+| 还要跑几天 | 点估计外推 + 概率模拟双口径；120 个实验里未显著的 51 个当中，**33.3% 跑满 30 天也等不到** | `npm run forecast` |
+| 多轮上下文 | 规则模式做「省略式追问」的可解释补全（「那新用户呢」「还有呢」「那它呢」）；智能模式带 6 轮历史，且**历史里的数字不算证据** | `npm test` |
+
+**M10 最重要的一条**：给数据加上真实的按臂基线漂移后，经典 `p(1−p)/n` 标准误的 A/A 误报率是 **11.33%**，是名义值的 2.3 倍。
+也就是说早期那个 96.7% 的准确率里，有一部分是靠过于乐观的标准误换来的。修好它的是 `seMode='robust'`，不是 CUPED——
+CUPED 的功劳是在区间已经诚实的前提下再收窄 7.76%。这两件事在 UI、文档、注释三处分别写明。
+
+**「还要跑几天」踩到并改掉的一个口径错误**：第一版做「首次显著就停」（首达时间），
+实测把 50% 把握点放在理论功效 **37%** 的位置——那是 peeking bias（逐日反复看会抬高误报）。
+改成「第 d 天单独判一次」后，50% 点回到 40–64% 功效区间，并有单测锁住这条性质。
+
 ## 技术栈
 
-Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）+ Recharts（仅趋势图）；
-森林图手写 SVG；统计自研带单测；无后端、无数据库。后续 Agent 走 DeepSeek 浏览器直连，部署 GitHub Pages。
+Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）+ Recharts（仅趋势图）；森林图手写 SVG；统计自研带单测；无后端、无数据库。后续 Agent 走 DeepSeek 浏览器直连，部署 GitHub Pages。
 
 ## 里程碑
 
-M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → M4 Agent ✅ → M5 评测看板 ✅ → **M6 演示与包装 ✅** → 部署（等网络）。
-验收标准见蓝图 §13。
+M1 数据+统计 ✅ → M2 结论卡 UI ✅ → M3 证据链可验算 ✅ → M4 Agent ✅ → M5 评测看板 ✅ → M6 演示与包装 ✅ →
+M8 统计深度 ✅ → M9 产品完整度 ✅ → **M10 旗舰差异化（A1 CUPED / B3 还要跑几天 / D1 多轮上下文）✅** → M11 评测闭环 → 部署（等网络）。
+验收标准见蓝图 §13；扩展清单与实测记录见 [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md)。

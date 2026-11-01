@@ -1,6 +1,6 @@
 import { replyFromLlm, systemPrompt } from '../../lib/agent/answer.ts';
 import { TOOL_NAMES, TOOL_SCHEMA, runTool } from '../../lib/agent/tools.ts';
-import type { AgentCtx, AgentReply, ToolCall, ToolName } from '../../lib/agent/types.ts';
+import type { AgentCtx, AgentReply, AgentTurn, ToolCall, ToolName } from '../../lib/agent/types.ts';
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1';
 
@@ -43,6 +43,25 @@ export interface LlmOptions {
   onTool?: (call: ToolCall) => void;
 }
 
+/** 历史最多回传几轮（一问一答算 2 条）：再多只是浪费 token，还容易把旧数字带进来 */
+const MAX_HISTORY = 6;
+/** 单条历史的最大长度：助手回答可能很长，截断到足够理解指代的长度即可 */
+const MAX_HISTORY_CHARS = 600;
+
+/**
+ * 把之前的对话转成 messages。
+ *
+ * 只传纯文本，不传上一轮的工具调用记录：一来体积，二来**上一轮的工具结果不是这一轮的证据**。
+ * 历史里的数字如果被模型直接复述，会被数字审计抓住（本轮白名单里没有它）——
+ * 这是故意的：任何数字都必须在本轮重新取数。
+ */
+function historyMessages(turns: AgentTurn[]): ChatMessage[] {
+  return turns.slice(-MAX_HISTORY).map((t) => ({
+    role: t.role,
+    content: t.text.slice(0, MAX_HISTORY_CHARS),
+  }));
+}
+
 /**
  * 智能模式：让模型「只调用工具、不自己算数」。
  * 浏览器直连 DeepSeek（OpenAI 兼容接口 + function calling），Key 只存 sessionStorage。
@@ -56,6 +75,7 @@ export async function askWithLlm(
   const model = opts.model || modelOverride() || DEFAULT_MODEL;
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(ctx) },
+    ...historyMessages(ctx.history ?? []),
     { role: 'user', content: question },
   ];
   const calls: ToolCall[] = [];

@@ -16,12 +16,15 @@
 | 频率派统计 | 两比例 z、Newcombe CI、Wilson、SRM 卡方、BH、Welch、power、MDE | `src/lib/stats.ts` |
 | 决策引擎 | 6 条硬规则 + 证据链 + 逐步代入 + 规则轨迹 | `src/lib/decide.ts` |
 | 数据 | 120 例合成、6 类真值、固定种子、7 天 × 2 分层 × 2 设备 | `src/lib/simulate.ts` |
-| Agent | 8 工具、数字审计、引用强制、无 Key 降级 | `src/lib/agent/*` |
-| 评测 | 决策准确率 96.7%、混淆矩阵、按 p 分桶、4 失败案例 | `src/lib/evaluate.ts`、`src/app/components/EvalScreen.tsx` |
+| Agent | 11 工具、数字审计、引用强制、多轮补全、无 Key 降级 | `src/lib/agent/*` |
+| 评测 | 决策准确率 93.3%、混淆矩阵、按 p 分桶、8 失败案例 | `src/lib/evaluate.ts`、`src/app/components/EvalScreen.tsx` |
 | UI | 列表 / 详情 / 证据抽屉 / Agent / 评测 5 屏，浅色暖橙 | `src/app/*` |
 | 评测闭环 | ablation（规则 vs DeepSeek，24 题） | `scripts/ablation.ts` |
 
-**反复在蓝图里出现、但实现里"缺位"的三件事**：① 置信度/概率输出（蓝图结论卡要"大字结论 + 置信度"，实际只有类别决策）；② 设置页（蓝图第 6 屏，实际 Key 靠手动塞 localStorage）；③ 多轮追问上下文（Agent 目前是单轮）。
+**反复在蓝图里出现、但实现里"缺位"的三件事**（M8–M10 已全部补齐，此处保留作历史记录）：
+① 置信度/概率输出（蓝图结论卡要"大字结论 + 置信度"，实际只有类别决策）→ M8 贝叶斯视角补齐；
+② 设置页（蓝图第 6 屏，实际 Key 靠手动塞 localStorage）→ M9 `#/settings` 补齐；
+③ 多轮追问上下文（Agent 目前是单轮）→ M10 `resolveFollowUp` + LLM 历史补齐。
 
 ---
 

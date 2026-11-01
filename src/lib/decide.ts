@@ -79,7 +79,7 @@ export interface Analysis {
   /** CUPED：用前周期数据做方差缩减后的检验（无前周期数据时为 undefined） */
   cuped?: CupedResult;
   /** 主指标检验的「决策口径」：默认等于 overall；启用 CUPED 且有前周期数据时等于 CUPED 结果 */
-  primary: { diff: number; p: number; ci95: [number, number]; via: 'cuped' | 'robust' | 'ztest' };
+  primary: { diff: number; p: number; ci95: [number, number]; se: number; via: 'cuped' | 'robust' | 'ztest' };
   /** 贝叶斯视角（Beta-Binomial 后验）：P(treatment 更优)、可信区间、期望损失 */
   bayes: BayesResult;
   /** 置信度 = P(treatment 真正优于 control)；与频率派 p 值口径不同，但结论互补 */
@@ -216,10 +216,10 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   //   3) 否则 → 经典两比例 z 检验（要求 i.i.d.，真实数据上会偏乐观）
   const useCuped = !!cuped && cfg.useCuped !== false;
   const primary = useCuped
-    ? { diff: cuped!.diffAdj, p: cuped!.pAdj, ci95: cuped!.ciAdj, via: 'cuped' as const }
+    ? { diff: cuped!.diffAdj, p: cuped!.pAdj, ci95: cuped!.ciAdj, se: cuped!.seAdj, via: 'cuped' as const }
     : cuped && (cfg.seMode ?? 'robust') === 'robust'
-      ? { diff: cuped.diffRaw, p: cuped.pRaw, ci95: cuped.ciRaw, via: 'robust' as const }
-      : { diff: overall.diff, p: overall.p, ci95: overall.ci95, via: 'ztest' as const };
+      ? { diff: cuped.diffRaw, p: cuped.pRaw, ci95: cuped.ciRaw, se: cuped.seRaw, via: 'robust' as const }
+      : { diff: overall.diff, p: overall.p, ci95: overall.ci95, se: unpooledSe(overall), via: 'ztest' as const };
 
   // 贝叶斯视角：把两变体当作 Beta 后验，给出「treatment 真比 control 好」的概率。
   // 用 CUPED 测出的过离散因子折算有效样本量，否则后验会过度自信（与频率派口径不一致）。
