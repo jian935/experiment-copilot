@@ -29,6 +29,7 @@ SHOTS = [
     ('SHOT4', 'docs/screenshots/08-评测看板.png'),
     ('SHOT5', 'docs/screenshots/10-Agent-智能模式.png'),
     ('SHOT6', 'docs/screenshots/05-结论卡导出.png'),
+    ('SHOT7', 'docs/screenshots/14-实验对比.png'),
 ]
 
 LINKS = {

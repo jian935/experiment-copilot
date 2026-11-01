@@ -41,6 +41,9 @@ const ROUTES = [
   { hash: '#/e/E001', name: '详情 · 率口径 + 护栏拦截', must: ['退款率', '转化率', '序贯监控', '新颖效应', '期望损失决策'] },
   { hash: '#/e/E029', name: '详情 · 连续口径（ARPU + 因子分解）', must: ['ARPU', '因子分解', '客单价', '序贯监控', '新颖效应', '期望损失决策'] },
   { hash: '#/e/E002', name: '详情 · 分层异质', must: ['分层'] },
+  { hash: '#/compare', name: '对比 · 选择器', must: ['选择要对比的实验'] },
+  { hash: '#/compare?a=E001&b=E002', name: '对比 · 同单位（共用一条横轴）', must: ['实验对比', '逐项对照', '共用同一条横轴'] },
+  { hash: '#/compare?a=E001&b=E029', name: '对比 · 单位不同（必须拒绝同轴）', must: ['实验对比', '逐项对照', '不能画在同一条轴上'] },
   { hash: '#/eval', name: '评测看板', must: ['准确率', '分层检测', '幻觉数字率', 'F1'] },
   { hash: '#/settings', name: '设置 · 口径字典', must: ['口径'] },
 ];
@@ -237,6 +240,43 @@ async function runPersistScenario() {
   return problems;
 }
 
+/* ─────────── 第三阶段：从列表页勾两个进对比（F3 入口） ───────────
+ * 对比页能按 URL 打开不代表用户找得到它。这一步只验一件事：
+ * **在列表里勾两个、点一下，就能到共用横轴的对比页**。
+ */
+async function runCompareScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('实验列表'), '列表页加载');
+
+    for (const id of ['E001', 'E002']) {
+      const ok = await evaluate(`(() => {
+        const el = document.querySelector('[aria-label="加入对比 ${id}"]');
+        if (!el) return false;
+        el.click();
+        return true;
+      })()`);
+      if (!ok) throw new Error(`列表里找不到「加入对比 ${id}」的勾选框`);
+      await sleep(150);
+    }
+
+    const picked = await waitText((t) => t.includes('已选 2 个'), '选择条出现');
+    if (!picked.includes('对比这两个')) problems.push('勾满两个后没出现「对比这两个」按钮');
+
+    await clickText('button', '对比这两个');
+    const cmp = await waitText((t) => t.includes('实验对比'), '进入对比页');
+    if (!cmp.includes('逐项对照')) problems.push('对比页缺少逐项对照表');
+    // E001/E002 同为 pp 口径，必须共用一条横轴
+    if (!cmp.includes('共用同一条横轴')) problems.push('同单位的两次实验没有共用横轴');
+    const hash = await evaluate('location.hash');
+    if (!/^#\/compare\?a=E00[12]&b=E00[12]$/.test(hash)) problems.push(`对比页地址不对：${hash}`);
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -254,6 +294,18 @@ if (persistProblems.length) {
   for (const p of persistProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（刷新后数据仍在，两种数据源可来回切）');
+}
+console.log('');
+
+const compareProblems = await runCompareScenario();
+console.log(`\n对比入口（F3）：列表勾两个 → 对比这两个 → 共用横轴`);
+console.log('─'.repeat(70));
+if (compareProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of compareProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（选择条出现、跳转到 #/compare、同单位共用横轴）');
 }
 console.log('');
 

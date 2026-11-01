@@ -190,6 +190,9 @@ export function useHashRoute(): {
   isEval: boolean;
   isSettings: boolean;
   isCompare: boolean;
+  /** 对比视图的两个实验 id（可为 null：还没选） */
+  compareA: string | null;
+  compareB: string | null;
   go: (hash: string) => void;
 } {
   const [hash, setHash] = useState(() => window.location.hash);
@@ -204,7 +207,7 @@ export function useHashRoute(): {
     const m = /^#\/e\/([\w-]+)/.exec(hash);
     const qi = hash.indexOf('?');
     const q = new URLSearchParams(qi >= 0 ? hash.slice(qi + 1) : '');
-    return { expId: m ? m[1] : null, ev: q.get('ev') };
+    return { expId: m ? m[1] : null, ev: q.get('ev'), a: q.get('a'), b: q.get('b') };
   }, [hash]);
 
   return {
@@ -213,6 +216,8 @@ export function useHashRoute(): {
     isEval: /^#\/eval/.test(hash),
     isSettings: /^#\/settings/.test(hash),
     isCompare: /^#\/compare/.test(hash),
+    compareA: /^#\/compare/.test(hash) ? route.a : null,
+    compareB: /^#\/compare/.test(hash) ? route.b : null,
     go: (h) => {
       window.location.hash = h;
       window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });

@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
+  ArrowLeftRight,
   BadgeCheck,
   ChevronDown,
   CircleHelp,
@@ -54,6 +55,7 @@ export function ExperimentDetail({
   analyses,
   initialEv,
   onBack,
+  onCompare,
 }: {
   exp: Experiment;
   analysis: Analysis;
@@ -62,6 +64,7 @@ export function ExperimentDetail({
   analyses: Map<string, AnalysisT>;
   initialEv?: string | null;
   onBack: () => void;
+  onCompare: (a: string) => void;
 }) {
   const [drawer, setDrawer] = useState(!!initialEv);
   const [focusEv, setFocusEv] = useState<string | null>(initialEv ?? null);
@@ -172,6 +175,14 @@ export function ExperimentDetail({
           </Button>
           <Button variant="outline" size="sm" onClick={() => setAgentOpen(true)}>
             <MessageSquare size={13} /> 问这个实验
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onCompare(exp.id)}
+            title="把本实验和另一个实验放在同一条横轴上对照"
+          >
+            <ArrowLeftRight size={13} /> 与其它实验对比
           </Button>
           <Button
             variant="primary"

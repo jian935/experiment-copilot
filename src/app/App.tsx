@@ -7,6 +7,7 @@ import { ExperimentDetail } from './components/ExperimentDetail';
 import { EvalScreen } from './components/EvalScreen';
 import { ImportDialog } from './components/ImportDialog';
 import { DataSourceChip } from './components/DataSourceChip';
+import { CompareScreen, compareHref } from './components/CompareScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { Button } from './components/ui';
 
@@ -15,7 +16,7 @@ export default function App() {
   // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
   const { data, error, source, meta, storedMeta, importData, useBuiltin, useImported, forgetImport } =
     useDataset(settings.config);
-  const { expId, ev, isEval, isSettings, go } = useHashRoute();
+  const { expId, ev, isEval, isSettings, isCompare, compareA, compareB, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
 
   return (
@@ -154,18 +155,31 @@ export default function App() {
           />
         )}
 
-        {data && !expId && !isEval && !isSettings && (
+        {data && isCompare && (
+          <CompareScreen
+            dataset={data.dataset}
+            analyses={data.analyses}
+            aId={compareA}
+            bId={compareB}
+            onBack={() => go('#/')}
+            onOpen={(id) => go(`#/e/${id}`)}
+            go={go}
+          />
+        )}
+
+        {data && !expId && !isEval && !isSettings && !isCompare && (
           <ExperimentList
             dataset={data.dataset}
             analyses={data.analyses}
             onOpen={(id) => go(`#/e/${id}`)}
+            onCompare={(a, b) => go(compareHref(a, b))}
             seedNote={
               data.dataset.groundTruth === false ? '导入数据（无已知真值）' : `seed ${data.dataset.seedBase}`
             }
           />
         )}
 
-        {data && expId && !isEval && !isSettings && (() => {
+        {data && expId && !isEval && !isSettings && !isCompare && (() => {
           const exp = data.dataset.experiments.find((e) => e.id === expId);
           const analysis = data.analyses.get(expId);
           if (!exp || !analysis) {
@@ -188,6 +202,7 @@ export default function App() {
               analyses={data.analyses}
               initialEv={ev}
               onBack={() => go('#/')}
+              onCompare={(id) => go(compareHref(id))}
             />
           );
         })()}

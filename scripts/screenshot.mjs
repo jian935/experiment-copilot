@@ -109,10 +109,16 @@ if (preArg) {
 }
 
 const m = await send('Page.getLayoutMetrics');
-const h = Math.ceil(m.cssContentSize.height);
+// `--viewport`：只截当前视口高度。整页截图会把 fixed 元素（如列表页底部的选择条）
+// 顶到整页文档的最底部——8395px 长图里一个悬浮条毫无意义，那种 UI 只能按视口截。
+const viewportMode = args.includes('--viewport');
+const h = viewportMode ? Number(process.env.VH || 1250) : Math.ceil(m.cssContentSize.height);
 await send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: false });
 await sleep(300);
-const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true });
+const shot = await send('Page.captureScreenshot', {
+  format: 'png',
+  captureBeyondViewport: !viewportMode,
+});
 mkdirSync(dirname(out), { recursive: true });
 writeFileSync(out, Buffer.from(shot.data, 'base64'));
 console.log(`${out}  ${width}×${h}`);

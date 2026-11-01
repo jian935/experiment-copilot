@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Check, Link2, Search } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Check, Link2, Search, X } from 'lucide-react';
 import type { Analysis } from '../../lib/decide.ts';
 import type { Dataset, Experiment } from '../../lib/types.ts';
 import {
@@ -43,11 +43,14 @@ export function ExperimentList({
   dataset,
   analyses,
   onOpen,
+  onCompare,
   seedNote,
 }: {
   dataset: Dataset;
   analyses: Map<string, Analysis>;
   onOpen: (id: string) => void;
+  /** 进对比视图；只传一个 id 时进的是「选对手」状态 */
+  onCompare: (a: string, b?: string) => void;
   seedNote: string;
 }) {
   const initial = useMemo(() => readFilters(), []);
@@ -58,6 +61,11 @@ export function ExperimentList({
   /** 全局校正（Holm）：一起看 N 个实验时，「总有一个显著」是算术不是运气 */
   const [fwer, setFwer] = useState<boolean>(initial.fw === '1');
   const [linkCopied, setLinkCopied] = useState(false);
+  /** 对比选择：一次只服务「两个」——第三个进来时挤掉最早的那个，而不是拒绝 */
+  const [picks, setPicks] = useState<string[]>([]);
+
+  const togglePick = (id: string) =>
+    setPicks((p) => (p.includes(id) ? p.filter((x) => x !== id) : p.length < 2 ? [...p, id] : [p[1], id]));
 
   // 筛选状态写回 URL，方便把当前视图直接发给别人
   useEffect(() => {
@@ -244,6 +252,9 @@ export function ExperimentList({
           <table className="w-full min-w-[860px] border-collapse text-left">
             <thead>
               <tr className="border-b border-line text-[11px] font-medium text-dim">
+                <th className="w-9 pl-3 pr-0" title="勾选两个实验进对比视图">
+                  <ArrowLeftRight size={11} className="text-line2" />
+                </th>
                 <th className="px-4 py-2.5">实验</th>
                 <th className="px-3 py-2.5">结论</th>
                 <th className="px-3 py-2.5">主指标</th>
@@ -261,8 +272,27 @@ export function ExperimentList({
                   <tr
                     key={e.id}
                     onClick={() => onOpen(e.id)}
-                    className="group cursor-pointer border-b border-line/60 last:border-0 hover:bg-panel2/60"
+                    className={cx(
+                      'group cursor-pointer border-b border-line/60 last:border-0',
+                      picks.includes(e.id) ? 'bg-brand/[0.055]' : 'hover:bg-panel2/60',
+                    )}
                   >
+                    <td className="pl-3 pr-0" onClick={(ev) => ev.stopPropagation()}>
+                      <button
+                        onClick={() => togglePick(e.id)}
+                        title={picks.includes(e.id) ? '从对比中移除' : '加入对比（选两个）'}
+                        aria-pressed={picks.includes(e.id)}
+                        aria-label={`${picks.includes(e.id) ? '取消对比' : '加入对比'} ${e.id}`}
+                        className={cx(
+                          'flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border transition-colors',
+                          picks.includes(e.id)
+                            ? 'border-brand bg-brand text-white'
+                            : 'border-line2 bg-panel text-transparent hover:border-brand/70',
+                        )}
+                      >
+                        <Check size={10} strokeWidth={3.5} />
+                      </button>
+                    </td>
                     <td className="max-w-[280px] px-4 py-2.5">
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-[11px] text-dim">{e.id}</span>
@@ -318,7 +348,7 @@ export function ExperimentList({
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-xs text-dim">
+                  <td colSpan={9} className="px-4 py-12 text-center text-xs text-dim">
                     没有符合条件的实验。
                     <button
                       className="ml-2 text-brand2 underline-offset-2 hover:underline"
@@ -342,6 +372,53 @@ export function ExperimentList({
         差值 = treatment 转化率 − control 转化率（绝对值，pp）。CI 为 Newcombe 混合法 95% 区间；
         灰点表示 CI 跨 0（不显著）。点任意行进入详情，可查看证据链并一键复算。
       </p>
+
+      {picks.length > 0 && (
+        /* 固定在视口底部，而不是 sticky 在文末：120 行的清单里，用户勾了第一行往下翻，
+           sticky 要滚到最底部才看得见选择条——等于没有反馈。 */
+        <div className="fixed inset-x-0 bottom-5 z-30 flex justify-center px-6">
+          <div className="flex w-full max-w-[720px] flex-wrap items-center gap-2 rounded-xl border border-brand/35 bg-panel px-3 py-2.5 shadow-lift">
+            <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink">
+              <ArrowLeftRight size={12} className="text-brand" /> 对比
+            </span>
+            {picks.map((id) => {
+              const an = analyses.get(id);
+              return (
+                <span
+                  key={id}
+                  className="flex items-center gap-1.5 rounded-lg border border-line bg-panel2/70 px-2 py-1 text-[11px]"
+                >
+                  <b className="num text-ink">{id}</b>
+                  {an && <span className="text-dim">{an.primary.label}</span>}
+                  <button
+                    onClick={() => togglePick(id)}
+                    aria-label={`移出对比 ${id}`}
+                    className="text-dim transition-colors hover:text-noship"
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              );
+            })}
+            <span className="text-[10.5px] text-dim">
+              {picks.length === 1 ? '再勾一个就能对比' : '已选 2 个'}
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <Button variant="ghost" size="sm" onClick={() => setPicks([])}>
+                清空
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={picks.length !== 2}
+                onClick={() => picks.length === 2 && onCompare(picks[0], picks[1])}
+              >
+                对比这两个
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

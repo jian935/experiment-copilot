@@ -1,3 +1,4 @@
+import { forestScale, tickLabel } from '../../lib/forestScale.ts';
 import { fmtDiff, fmtP, type MetricUnit } from '../lib/format';
 import { C } from '../lib/palette';
 
@@ -10,20 +11,13 @@ export interface ForestRow {
   emphasized?: boolean;
 }
 
-/** 取「好看」的刻度步长：1 / 2 / 5 × 10^k */
-function niceStep(raw: number): number {
-  if (!(raw > 0) || !Number.isFinite(raw)) return 1;
-  const p = 10 ** Math.floor(Math.log10(raw));
-  const n = raw / p;
-  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
-}
-
 /**
  * 手写 SVG 森林图：比图表库更可控，且刻度/零点/CI 端点都能精确对齐。
  * 语义：点 = 差值（treatment − control），横线 = 95% CI；竖虚线 = 0。
  *
  * unit 必须显式传：ARPU 的差值以元为单位、转化率以 pp 为单位，
  * 刻度步长与小数位都由单位决定，混用会出现「0.42 元画在 +42pp 的轴上」这种错。
+ * 定标逻辑在 lib/forestScale.ts（纯函数，单测锁住刻度条数与量纲换算）。
  */
 export function Forest({ rows, height, unit = 'pp' }: { rows: ForestRow[]; height?: number; unit?: MetricUnit }) {
   const W = 680;
@@ -34,27 +28,13 @@ export function Forest({ rows, height, unit = 'pp' }: { rows: ForestRow[]; heigh
   const padBottom = 30;
   const H = height ?? padTop + rows.length * rowH + padBottom;
 
-  const lo = Math.min(0, ...rows.map((r) => r.ci[0]));
-  const hi = Math.max(0, ...rows.map((r) => r.ci[1]));
-  const span = Math.max(hi - lo, unit === '元' ? 0.02 : 0.004);
-  const pad = span * 0.14;
-  const x0 = lo - pad;
-  const x1 = hi + pad;
+  const { x0, x1, ticks, decimals } = forestScale(
+    rows.map((r) => r.ci),
+    unit,
+  );
   const plotW = W - labelW - valueW;
   const x = (v: number) => labelW + ((v - x0) / (x1 - x0)) * plotW;
   const zero = x(0);
-
-  const step = niceStep((x1 - x0) / 5);
-  const decimals =
-    unit === 'pp' ? (step >= 0.01 ? 0 : 1) : step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
-  const tickText = (v: number) => {
-    const scaled = unit === 'pp' ? v * 100 : v;
-    return `${v > 0 ? '+' : ''}${scaled.toFixed(decimals)}`;
-  };
-  const ticks: number[] = [];
-  const decUnit = unit === 'pp' ? 100 : 1;
-  const start = Math.ceil((x0 * decUnit) / step) * step;
-  for (let t = start; t <= x1 * decUnit + 1e-9; t += step) ticks.push(t / decUnit);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="差值 95% 置信区间">
@@ -62,7 +42,7 @@ export function Forest({ rows, height, unit = 'pp' }: { rows: ForestRow[]; heigh
         <g key={t}>
           <line x1={x(t)} x2={x(t)} y1={padTop - 4} y2={H - padBottom + 2} stroke={C.grid} strokeWidth={1} />
           <text x={x(t)} y={H - padBottom + 16} textAnchor="middle" className="num" fontSize={10} fill={C.dim}>
-            {tickText(t)}
+            {tickLabel(t, unit, decimals)}
           </text>
         </g>
       ))}
