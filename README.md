@@ -57,8 +57,8 @@
 | 全局搜索 ⌘K | 一张面板搜全部：实验（编号 / 名称 / 假设 / **规则名**）、功能动作；多词是 AND，编号精确匹配必排第一，↑↓ + ↵ 全程键盘可达 | [`17-全局搜索.png`](docs/screenshots/17-全局搜索.png) · [`18-全局搜索-功能分组.png`](docs/screenshots/18-全局搜索-功能分组.png) |
 | 主题切换 | 浅 / 深 / 跟随系统，顶栏一键循环；**全部颜色走 CSS 变量**，所以 SVG 图表与卡片一起换，不会出现「卡片黑了图表还是浅的」 | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
 
-**演示视频（36s）**：[`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) —— 真实操作录屏 + 中文旁白 + 字幕。
-**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 3.8MB，视频与 9 张 1600px 截图全部内联；点击任意截图可全屏查看并下载原图。
+**演示视频（52s）**：[`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) —— 10 个片段，真实操作录屏 + 中文旁白 + 字幕：拒绝下结论 → 护栏拦截 → 证据逐步代入 → 计算过程 → 期望损失 → 实验对比 → ⌘K → 评测看板。
+**作品集落地页**：[`portfolio/index.html`](portfolio/index.html) —— 单文件 4.2MB，视频（52s）与 9 张 1600px 截图全部内联；点击任意截图可全屏查看并下载原图。
 
 深链：`#/e/E001` 直达实验，`#/e/E001?ev=E6` 直接展开第 6 条证据，`#/?d=ship&s=diff` 还原筛选视图。
 
@@ -276,8 +276,8 @@ node scripts/mock_llm.mjs          # 本地 mock，返回「先调工具、再�
 
 | 模块 | 内容 | 复现 |
 |---|---|---|
-| 演示视频 | 36s / 1280×720 / 30fps，真实操作 + 旁白 + 字幕；8 个片段按「先展示拒绝、再展示解释」排序 | `node scripts/record_demo.mjs` → `python scripts/build_demo_video.py` |
-| 作品集落地页 | 单文件自包含（视频 0.79MB + 6 张截图内联），可单独发给面试官 | `python scripts/build_portfolio.py` |
+| 演示视频 | 52s / 1280×720 / 30fps，真实操作 + 旁白 + 字幕；10 个片段按「先展示拒绝、再展示解释」排序，覆盖 M12/M13 的新面板（期望损失、实验对比、⌘K） | `node scripts/record_demo.mjs` → `python scripts/build_demo_video.py` |
+| 作品集落地页 | 单文件自包含（视频 1.09MB + 9 张截图内联），可单独发给面试官 | `python scripts/build_portfolio.py` |
 | 简历素材 | 3 条 bullet、3 分钟面试动线、能说/不能说的数字、6 个高频追问 | `简历素材-项目链接与要点.md` |
 
 **视频流水线踩到的三个坑**（都写进了脚本注释）：

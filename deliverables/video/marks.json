@@ -1,51 +1,61 @@
 {
-  "url": "http://127.0.0.1:8080/",
+  "url": "http://127.0.0.1:4321/",
   "width": 1440,
-  "height": 900,
-  "everyNthFrame": 1,
-  "duration": 29.53,
-  "frames": 238,
-  "fps": 8.06,
+  "height": 810,
+  "everyNthFrame": 2,
+  "duration": 45.33,
+  "frames": 1340,
+  "fps": 29.56,
   "marks": [
     {
       "name": "s1_list",
-      "start": 0,
-      "end": 4.02
+      "start": 0.01,
+      "end": 4.95
     },
     {
       "name": "s2_srm",
-      "start": 4.02,
-      "end": 7.86
+      "start": 4.95,
+      "end": 9
     },
     {
       "name": "s3_guardrail",
-      "start": 7.86,
-      "end": 11.5
+      "start": 9,
+      "end": 14.18
     },
     {
       "name": "s4_evidence",
-      "start": 11.5,
-      "end": 14.85
+      "start": 14.18,
+      "end": 19.42
     },
     {
-      "name": "s5_audit",
-      "start": 14.85,
-      "end": 20.2
+      "name": "s5_calc",
+      "start": 19.42,
+      "end": 23.65
     },
     {
-      "name": "s6_agent",
-      "start": 20.2,
-      "end": 23.18
+      "name": "s6_loss",
+      "start": 23.65,
+      "end": 28.97
     },
     {
-      "name": "s7_eval",
-      "start": 23.18,
-      "end": 28.12
+      "name": "s7_compare",
+      "start": 28.97,
+      "end": 35
     },
     {
-      "name": "s8_close",
-      "start": 28.12,
-      "end": 29.52
+      "name": "s8_palette",
+      "start": 35,
+      "end": 38.66
+    },
+    {
+      "name": "s9_eval",
+      "start": 38.66,
+      "end": 43.82
+    },
+    {
+      "name": "s10_close",
+      "start": 43.82,
+      "end": 45.32
     }
   ]
 }

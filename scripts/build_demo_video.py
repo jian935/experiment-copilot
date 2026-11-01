@@ -32,26 +32,30 @@ W, H, FPS = 1280, 720, 30
 
 # 片段旁白：必须能在该片段时长内说完（超时会自动加速，最多 1.4x）
 NARRATION = {
-    's1_list': '120 个实验，每个都有结论，也都有证据。',
-    's2_srm': '这个实验分流不均，先被拒绝下结论。',
+    's1_list': '一百二十个实验，每个都有结论，也都有证据。',
+    's2_srm': '分流不均的，先拒绝下结论。',
     's3_guardrail': '主指标涨了，但退款率恶化，所以不能上。',
-    's4_evidence': '点开任意一条证据，看公式和代入的数字。',
-    's5_audit': '每一步计算都摊开，能手算核对，也能一键复算。',
-    's6_agent': '问它为什么，回答必须带证据编号。',
-    's7_eval': '准确率九十六点七，也照实报失败案例。',
+    's4_evidence': '每条证据都能展开，看公式和代入的数字。',
+    's5_calc': '计算过程全摊开，能手算核对。',
+    's6_loss': '显不显著，和值不值得上，是两件事。',
+    's7_compare': '两次实验放在同一条横轴上，线长就是不确定性。',
+    's8_palette': '命令面板，搜编号直达。',
+    's9_eval': '准确率九十三点三，失败案例也照实列出。',
 }
 TITLE_LINE = '一个 A/B 实验，到底能不能上线？'
 END_LINE = 'Experiment Copilot · 实验结论官'
 TITLE_SEC = 3.0
 END_SEC = 3.4
 SUBTITLE = {
-    's1_list': '120 个实验，每个都有结论，也都有证据',
-    's2_srm': '分流不均的实验，先被拒绝下结论',
+    's1_list': '120 个实验，每个都有结论和证据',
+    's2_srm': '分流不均的实验，先拒绝下结论',
     's3_guardrail': '主指标涨了，但退款率恶化 → 不能上',
     's4_evidence': '每条证据都能展开：公式 + 代入的数字',
-    's5_audit': '计算过程摊开，可手算核对、可一键复算',
-    's6_agent': '问它为什么，回答必须带证据编号',
-    's7_eval': '准确率 96.7%，也照实报失败案例',
+    's5_calc': '计算过程摊开，可手算核对、可一键复算',
+    's6_loss': '「显不显著」和「值不值得上」是两件事',
+    's7_compare': '两次实验共用一条横轴，线长即不确定性',
+    's8_palette': 'Ctrl+K 全局搜索，搜编号直达',
+    's9_eval': '准确率 93.3%，失败案例照实列出',
 }
 
 os.makedirs(WORK, exist_ok=True)
@@ -101,7 +105,7 @@ def make_card(path, lines, tone='#f97316'):
 title_jpg = os.path.join(WORK, 'title.jpg')
 end_jpg = os.path.join(WORK, 'end.jpg')
 make_card(title_jpg, ['Experiment Copilot', '实验结论官 · 可复算的实验决策', '不让模型算数，每个结论都能点开核对'])
-make_card(end_jpg, ['写作即造物 · 实验即证据', 'Experiment Copilot', '作者：jian935'], tone='#f97316')
+make_card(end_jpg, ['每个结论都能点开核对', 'Experiment Copilot · 实验结论官', '作者：jian935'], tone='#f97316')
 
 # ---------- 2. 用帧时间戳拼出真实时序的视频 ----------
 marks = json.load(open(os.path.join(VDIR, 'marks.json'), encoding='utf-8'))
@@ -216,8 +220,10 @@ with open(ass, 'w', encoding='utf-8') as f:
     f.write('[V4+ Styles]\n')
     f.write('Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, '
             'BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n')
-    # ASS 颜色是 &HAABBGGRR：深棕字 + 半透明白底框，压在浅色界面上也不糊
-    f.write('Style: Sub,微软雅黑,30,&H00121A24,&H40FFFFFF,&H58FFFFFF,0,0,3,1.2,0,2,80,80,54,1\n\n')
+    # ASS 颜色是 &HAABBGGRR。用「深棕字 + 白色粗描边」而不是透明底框：
+    # BorderStyle=3 的底框在 libass 下颜色不受控（实测底框没画出来，字幕直接压在表格上读不清），
+    # 而描边在各种底色上都稳——界面是浅色、偶尔压到深色图表上也能读。
+    f.write('Style: Sub,微软雅黑,29,&H00121A24,&H78FFFFFF,&H78FFFFFF,0,0,3,9,0,2,80,80,44,1\n\n')
     f.write('[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n')
     for a, b, text in subs:
         f.write(f'Dialogue: 0,{ass_time(a)},{ass_time(b)},Sub,,0,0,0,,{text}\n')
