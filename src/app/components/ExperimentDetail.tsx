@@ -481,25 +481,35 @@ export function ExperimentDetail({
           />
         </button>
         {showTruth && (
-          <div className="grid gap-px border-t border-line bg-line sm:grid-cols-2 lg:grid-cols-4">
-            <TruthCell label="注入的真实效应" value={fmtPP(exp.trueLiftOverall)} cls={liftClass(exp.trueLiftOverall)} />
-            <TruthCell
-              label="效应范围"
-              value={exp.trueLiftScope === 'overall' ? '整体' : `仅新用户（${fmtPP(exp.trueLift)}）`}
-            />
-            <TruthCell label="真实决策" value={DECISION_META[exp.trueDecision].label} />
-            <TruthCell
-              label="引擎判定"
-              value={truthMatch ? '一致 ✓' : '不一致 ✗'}
-              cls={truthMatch ? 'text-ship' : 'text-noship'}
-              sub={truthMatch ? undefined : '属于已知误差，见评测看板'}
-            />
-            <div className="sm:col-span-2 lg:col-span-4 px-4 py-2.5 text-[11px] text-dim">
-              实验类型：<span className="text-muted">{ARCHETYPE_LABEL[exp.archetype]}</span> · 数据版本{' '}
-              <InlineCode>{datasetVersion(dataset.generatedAt)}</InlineCode> · 生成种子{' '}
-              <InlineCode>{String(dataset.seedBase)}</InlineCode>
+          dataset.groundTruth === false ? (
+            <div className="border-t border-line px-4 py-3 text-[11px] leading-5 text-dim">
+              该数据为<b className="text-ink"> 导入数据，不含已知真值</b>，真值对比不可用。引擎判定仅基于数据本身（见上方证据链）。
+              <div className="mt-1.5">
+                数据类型：<span className="text-muted">{ARCHETYPE_LABEL[exp.archetype] ?? '未知'}</span> · 导入时间{' '}
+                <InlineCode>{datasetVersion(dataset.generatedAt)}</InlineCode>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="grid gap-px border-t border-line bg-line sm:grid-cols-2 lg:grid-cols-4">
+              <TruthCell label="注入的真实效应" value={fmtPP(exp.trueLiftOverall)} cls={liftClass(exp.trueLiftOverall)} />
+              <TruthCell
+                label="效应范围"
+                value={exp.trueLiftScope === 'overall' ? '整体' : `仅新用户（${fmtPP(exp.trueLift)}）`}
+              />
+              <TruthCell label="真实决策" value={DECISION_META[exp.trueDecision].label} />
+              <TruthCell
+                label="引擎判定"
+                value={truthMatch ? '一致 ✓' : '不一致 ✗'}
+                cls={truthMatch ? 'text-ship' : 'text-noship'}
+                sub={truthMatch ? undefined : '属于已知误差，见评测看板'}
+              />
+              <div className="sm:col-span-2 lg:col-span-4 px-4 py-2.5 text-[11px] text-dim">
+                实验类型：<span className="text-muted">{ARCHETYPE_LABEL[exp.archetype]}</span> · 数据版本{' '}
+                <InlineCode>{datasetVersion(dataset.generatedAt)}</InlineCode> · 生成种子{' '}
+                <InlineCode>{String(dataset.seedBase)}</InlineCode>
+              </div>
+            </div>
+          )
         )}
       </Panel>
 

@@ -29,6 +29,7 @@ export function EvalScreen({
 }) {
   const r = useMemo(() => evaluate(dataset, analyses), [dataset, analyses]);
   const [ablation, setAblation] = useState<Ablation | null>(null);
+  const noTruth = dataset.groundTruth === false;
 
   useEffect(() => {
     let alive = true;
@@ -42,6 +43,39 @@ export function EvalScreen({
   }, []);
 
   const maxCell = Math.max(1, ...r.confusion.flat());
+
+  // 导入的真实数据通常没有已知真值：评测指标（准确率/混淆/校准）依赖真值，整体隐藏并给出说明。
+  if (noTruth) {
+    return (
+      <div className="mx-auto w-full max-w-[1200px] px-6 pb-24 pt-6">
+        <button
+          onClick={onBack}
+          className="mb-4 inline-flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-ink"
+        >
+          <ArrowLeft size={14} /> 返回实验列表
+        </button>
+        <div className="anim-up">
+          <h1 className="text-[26px] font-semibold tracking-tight text-ink">评测看板</h1>
+          <p className="mt-1 text-[13px] text-muted">
+            {r.n} 个导入实验 · <b className="text-ink">不含已知真值</b> · 评测指标不适用
+          </p>
+        </div>
+        <Panel className="mt-5">
+          <div className="flex items-start gap-2.5 px-4 py-4">
+            <TriangleAlert size={15} className="mt-0.5 shrink-0 text-iterate" />
+            <div className="text-[12px] leading-5 text-muted">
+              <b className="text-ink">评测看板依赖已知真值</b>（合成数据有，导入的真实数据没有），因此准确率、混淆矩阵、
+              置信度校准等需要「真值对照」的指标暂不展示——展示它们会给出无意义的数字。
+              <br />
+              请改用 <span className="text-ink">实验列表 / 实验详情</span> 查看每个实验的分析结论、证据链与贝叶斯视角。
+              若你导入的 JSON 中每个实验都带有 <code className="rounded bg-white/[0.06] px-1">trueDecision</code> 与{' '}
+              <code className="rounded bg-white/[0.06] px-1">trueLiftOverall</code> 真值字段，评测看板会自动恢复。
+            </div>
+          </div>
+        </Panel>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-6 pb-24 pt-6">

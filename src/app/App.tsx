@@ -1,13 +1,16 @@
-import { Activity, Code2, Loader2, TriangleAlert } from 'lucide-react';
+import { Activity, Code2, Loader2, TriangleAlert, Upload } from 'lucide-react';
+import { useState } from 'react';
 import { useDataset, useHashRoute } from './lib/useDataset';
 import { ExperimentList } from './components/ExperimentList';
 import { ExperimentDetail } from './components/ExperimentDetail';
 import { EvalScreen } from './components/EvalScreen';
+import { ImportDialog } from './components/ImportDialog';
 import { Button } from './components/ui';
 
 export default function App() {
-  const { data, error } = useDataset();
+  const { data, error, importData } = useDataset();
   const { expId, ev, isEval, go } = useHashRoute();
+  const [importOpen, setImportOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-base bg-grid">
@@ -50,6 +53,9 @@ export default function App() {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)} title="导入自己的数据">
+              <Upload size={13} /> 导入数据
+            </Button>
             <span className="hidden items-center gap-1.5 rounded-full border border-line bg-panel2/60 px-2.5 py-1 text-[10.5px] text-muted sm:flex">
               <i className="h-1.5 w-1.5 rounded-full bg-ship" />
               确定性引擎 · 无模型参与计算
@@ -107,7 +113,9 @@ export default function App() {
             dataset={data.dataset}
             analyses={data.analyses}
             onOpen={(id) => go(`#/e/${id}`)}
-            seedNote={`seed ${data.dataset.seedBase}`}
+            seedNote={
+              data.dataset.groundTruth === false ? '导入数据（无已知真值）' : `seed ${data.dataset.seedBase}`
+            }
           />
         )}
 
@@ -145,10 +153,16 @@ export default function App() {
           <span className="text-line2">|</span>
           <span>统计与决策全部在浏览器端确定性计算</span>
           <span className="text-line2">|</span>
-          <span>数据为固定种子合成数据，用于已知真值评测</span>
+          {data && data.dataset.groundTruth === false ? (
+            <span>当前为导入数据（不含已知真值），评测看板指标不适用</span>
+          ) : (
+            <span>数据为固定种子合成数据，用于已知真值评测</span>
+          )}
           <span className="ml-auto">作者：jian935</span>
         </div>
       </footer>
+
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImport={importData} />
     </div>
   );
 }

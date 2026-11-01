@@ -163,6 +163,7 @@ export function generateDataset(seedBase = 20261031, days = 7): Dataset {
   return {
     generatedAt: new Date().toISOString(),
     seedBase,
+    groundTruth: true,
     spec: {
       days,
       segments: ['device', 'tenure'],

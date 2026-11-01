@@ -42,6 +42,9 @@ export interface Experiment {
 export interface Dataset {
   generatedAt: string;
   seedBase: number;
+  /** 是否为「已知真值」数据。合成数据 = true；用户导入的真实数据若无真值字段则为 false，
+   *  此时评测看板（准确率/混淆/校准）与详情页「真值对比」不可用。 */
+  groundTruth?: boolean;
   spec: {
     days: number;
     segments: string[];

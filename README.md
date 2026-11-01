@@ -54,7 +54,7 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 56 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径）
+npm test           # 85 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
@@ -64,6 +64,51 @@ npm run calibrate  # 120 例校准：混淆矩阵 + 五项指标
 ```
 
 打开后：列表页点任意实验 → 详情页 → 右上角「证据链」→ 底部「一键复算」。
+
+## 导入自己的数据（不用重新构建）
+
+页面右上角 **「导入数据」** → 选 JSON 或 CSV → 粘贴或上传文件 → **「载入并分析」**。
+全程在浏览器端完成：数据不上传服务器，也不过模型，导入后立即用同一套确定性引擎重算。
+
+### JSON
+
+需要 `experiments` 与 `daily` 两个数组：
+
+```json
+{
+  "experiments": [
+    { "id": "exp_001", "name": "新首页改版", "primaryMetric": "conversions",
+      "archetype": "positive", "trueLiftOverall": 0.012, "trueDecision": "ship" }
+  ],
+  "daily": [
+    { "expId": "exp_001", "date": "2026-01-05", "variant": "control", "device": "iOS",
+      "tenure": "new", "exposures": 5000, "conversions": 260, "refunds": 60,
+      "complaints": 5, "latencyP95": 800 }
+  ]
+}
+```
+
+- 必填：实验 `id`；daily 的 `expId / date / variant / exposures / conversions`。
+- `variant` 支持别名：`control/treatment`、`对照/实验组`、`A/B`、`0/1`。
+- `device` 仅 `iOS/Android`，`tenure` 仅 `new/old`；缺省时该行归入默认单层（仍能分析，只是没有分层）。
+- 若每个实验都带 `trueDecision` 与 `trueLiftOverall`，评测看板的准确率／混淆矩阵／校准曲线照常可用。
+
+### CSV（日级明细，一行 = 一天 × 一个变体 × 一个分层）
+
+```
+expId,date,variant,device,tenure,exposures,conversions,refunds,complaints,latencyP95,name
+exp_001,2026-01-05,control,iOS,new,5000,260,60,5,800,新首页改版
+exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,新首页改版
+```
+
+- 必需列：`expId, date, variant, exposures, conversions`；其余可选。
+- 实验元信息（名称、起止日期、有哪些护栏列）由明细自动推导，不用单独写。
+
+### 导入数据与合成数据的差别
+
+真实业务数据通常**没有已知真值**，此时 `groundTruth = false`，评测看板会**自动隐藏**依赖真值的指标
+（准确率、混淆矩阵、校准曲线）——给出无意义的数字不如不给。
+实验列表、实验详情、证据链、贝叶斯视角、Agent 问答照常可用。
 
 ## 目录
 
@@ -79,7 +124,7 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  18 个单测（含 6 组 scipy 对齐）
+tests/                  85 个单测（含 6 组 scipy 对齐）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
 docs/                   蓝图 / 数据需求 / 数据修正记录 / M1 评测 / UI 说明 / Ablation / 截图
 ```

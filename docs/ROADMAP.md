@@ -112,6 +112,18 @@
     - 现状：蓝图说"用真实 seed 数据做 sanity check"，未做（网络/隐私限制）。
     - 做：找一份公开 A/B 数据集（如 Kaggle 的 marketing A/B），跑引擎看结论是否合理，作为"合成之外的一瞥"。
 
+18. **应用内导入自己的数据（JSON / CSV）** ✅ 已完成（2026-11-01）
+    - 现状：数据只在构建期由 `simulate.ts → public/data/dataset.json` 写死，运行时只能 fetch 那一个文件，用户看不到自己的数据。
+    - 做：右上角「导入数据」弹窗 → 粘贴/上传 JSON 或 CSV → 浏览器端解析校验 → 立即重算。
+    - 落点：`src/lib/import.ts`（解析 + 校验 + 别名归一化）、`src/app/components/ImportDialog.tsx`（UI）、`useDataset.ts` 新增 `buildLoaded` / `importData`、`App.tsx` 接线。
+    - 关键设计：
+      - **CSV 只需 5 个必需列**（`expId, date, variant, exposures, conversions`），实验元信息由明细自动推导；可选 `device/tenure/refunds/complaints/latencyP95/name`。
+      - `variant` 支持别名（`对照/实验组/A/B/0/1`），`conversions > exposures` / 未知 `expId` / 非法枚举都会带行号报错。
+      - **真值缺失的诚实处理**：`Dataset` 新增 `groundTruth?: boolean`；CSV 导入 → `false`，JSON 导入由"是否每个实验都带 `trueDecision`+`trueLiftOverall`"推断。
+        为 `false` 时**评测看板整体隐藏**（准确率/混淆/校准都依赖真值，给无意义数字不如不给），详情页真值面板改提示，列表/详情/证据链/贝叶斯照常可用。
+      - 护栏判定是实验内 treatment vs control 自比，不依赖 `spec` 基线，所以导入数据（spec 全 0）不会误判护栏。
+    - 单测：`tests/import.test.ts` 14 条（JSON 校验 / CSV 解析 / 别名 / CRLF / 引号转义 / 解析后可直接跑 analyze）。
+
 ---
 
 ## 五、UI / UX 打磨（P2，但便宜）
