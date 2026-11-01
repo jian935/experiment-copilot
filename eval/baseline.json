@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T10:47:57.183Z",
+  "generatedAt": "2026-11-01T11:07:27.337Z",
   "dataset": {
     "seedBase": 20261031,
     "experiments": 120,
@@ -72,18 +72,18 @@
     "hetero.interactionOnly.tp": 13,
     "hetero.interactionOnly.fp": 5,
     "hetero.interactionOnly.f1": 0.7878787878787877,
-    "agent.n": 1960,
-    "agent.numbers": 11521,
+    "agent.n": 2200,
+    "agent.numbers": 13546,
     "agent.suspicious": 0,
     "agent.hallucinationRate": 0,
     "agent.dirtyAnswerRate": 0,
     "agent.citationRate": 1,
-    "agent.citableN": 1720,
+    "agent.citableN": 1840,
     "agent.violationRate": 0,
     "agent.scopeRate": 1,
     "agent.trapN": 80,
     "agent.routeAccuracy": 1,
-    "agent.routeN": 1320,
+    "agent.routeN": 1560,
     "agent.tool.get_overview": 720,
     "agent.tool.bayesian_view": 600,
     "agent.tool.run_test": 360,
@@ -97,6 +97,8 @@
     "agent.tool.metric_dictionary": 120,
     "agent.tool.peeking_check": 120,
     "agent.tool.novelty_check": 120,
+    "agent.tool.fwer_check": 120,
+    "agent.tool.loss_decide": 120,
     "agent.tool.metric_decompose": 40
   },
   "strings": {

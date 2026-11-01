@@ -14,6 +14,7 @@ import {
   liftClass,
   type Tone,
 } from '../lib/format';
+import { familyReport, type FamilyReport } from '../../lib/multiplicity.ts';
 import { copyText, readFilters, writeFilters } from '../lib/share';
 import { C } from '../lib/palette';
 import { Button, Chip, DecisionBadge, Panel, Stat, cx } from './ui';
@@ -54,12 +55,20 @@ export function ExperimentList({
   const [decision, setDecision] = useState<string | null>(initial.d ?? null);
   const [archetype, setArchetype] = useState<string>(initial.a ?? 'all');
   const [sort, setSort] = useState<SortKey>((initial.s as SortKey) ?? 'id');
+  /** 全局校正（Holm）：一起看 N 个实验时，「总有一个显著」是算术不是运气 */
+  const [fwer, setFwer] = useState<boolean>(initial.fw === '1');
   const [linkCopied, setLinkCopied] = useState(false);
 
   // 筛选状态写回 URL，方便把当前视图直接发给别人
   useEffect(() => {
-    writeFilters({ d: decision ?? undefined, a: archetype === 'all' ? undefined : archetype, q: q.trim() || undefined, s: sort === 'id' ? undefined : sort });
-  }, [q, decision, archetype, sort]);
+    writeFilters({
+      d: decision ?? undefined,
+      a: archetype === 'all' ? undefined : archetype,
+      q: q.trim() || undefined,
+      s: sort === 'id' ? undefined : sort,
+      fw: fwer ? '1' : undefined,
+    });
+  }, [q, decision, archetype, sort, fwer]);
 
   async function copyViewLink() {
     const ok = await copyText(window.location.href);
@@ -98,6 +107,31 @@ export function ExperimentList({
       return x.id.localeCompare(y.id);
     });
   }, [dataset.experiments, analyses, q, decision, archetype, sort]);
+
+  // 家族 = **全部**实验，不是当前筛选后的子集：
+  // 校正说的是「你扫了这一批、挑出显著的那些」这件事，中途筛掉一半不能免除这件事。
+  const family: FamilyReport = useMemo(
+    () =>
+      familyReport(
+        dataset.experiments.map((e) => {
+          const a = analyses.get(e.id);
+          return {
+            id: e.id,
+            name: e.name,
+            p: a ? a.primary.p : 1,
+            decision: a?.decision ?? 'inconclusive',
+            archetype: e.archetype,
+            trueEffect: e.trueLiftOverall,
+            trueDecision: e.trueDecision,
+          };
+        }),
+      ),
+    [dataset.experiments, analyses],
+  );
+  const familyRow = useMemo(() => {
+    const m = new Map(family.rows.map((r) => [r.id, r]));
+    return (id: string) => m.get(id);
+  }, [family]);
 
   const total = dataset.experiments.length;
   const continuousCount = useMemo(
@@ -183,12 +217,28 @@ export function ExperimentList({
                 {label}
               </Chip>
             ))}
+            <Chip active={fwer} onClick={() => setFwer(!fwer)} title="把全部实验当一个家族做 Holm 校正（控 FWER）">
+              全局校正
+            </Chip>
             <Button variant="ghost" size="sm" onClick={copyViewLink} className="ml-1" title="复制带筛选状态的链接">
               {linkCopied ? <Check size={12} className="text-ship" /> : <Link2 size={12} />}
               {linkCopied ? '已复制' : '复制视图'}
             </Button>
           </div>
         </div>
+
+        {fwer && (
+          <div className="border-b border-line bg-brand/[0.04] px-4 py-2.5 text-[11.5px] leading-5 text-muted">
+            把 <b className="text-ink">{family.n}</b> 个实验当成一个家族一起看：naive 口径有{' '}
+            <b className="text-ink">{family.naiveSig}</b> 个显著，<b className="text-ink">Holm 校正后 {family.holmSig} 个</b>
+            （Bonferroni 也是 {family.bonferroniSig} 个，BH q={family.fdr} 是 {family.bhSig} 个）。
+            收回 <b className="text-ink">{family.rescinded}</b> 条
+            {family.rescindedFalse !== null && <>，其中 {family.rescindedFalse} 条注入效应为 0（本就该收回）</>}。
+            全零假设下「至少一个显著」的概率是{' '}
+            <b className="text-ink">{(family.naiveAnySig * 100).toFixed(1)}%</b>
+            （1−0.95^{family.n}）——「总有一个能上线」不是运气。校正只标在清单上，<b className="text-ink">不改单个实验的结论</b>。
+          </div>
+        )}
 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] border-collapse text-left">
@@ -223,6 +273,11 @@ export function ExperimentList({
                     <td className="px-3 py-2.5">
                       <DecisionBadge decision={a.decision} size="sm" />
                       <div className="mt-1 text-[10px] text-dim">{REASON_META[a.reasonCode]}</div>
+                      {fwer && familyRow(e.id)?.rescinded && (
+                        <div className="mt-1 inline-flex rounded border border-iterate/30 bg-iterate/5 px-1.5 py-0.5 text-[9.5px] text-iterate">
+                          Holm 后不显著
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-xs text-muted">
                       {a.primary.label}
@@ -241,7 +296,14 @@ export function ExperimentList({
                         </span>
                       </div>
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-xs text-muted">{fmtP(a.primary.p)}</td>
+                    <td className="num px-3 py-2.5 text-right text-xs text-muted">
+                      {fmtP(a.primary.p)}
+                      {fwer && (
+                        <div className={cx('text-[10px]', familyRow(e.id)?.holmSig ? 'text-ship' : 'text-dim')}>
+                          Holm {fmtP(familyRow(e.id)?.pHolm ?? 1)}
+                        </div>
+                      )}
+                    </td>
                     <td className="num px-4 py-2.5 text-right text-xs text-muted">
                       {fmtNum(a.overall.n1 + a.overall.n2)}
                     </td>

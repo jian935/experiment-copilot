@@ -164,6 +164,49 @@ export function bhAdjust(pvals: number[], q = 0.1): BhResult {
   return { qvals, rejected: qvals.map((v) => v <= q) };
 }
 
+export interface MultiplicityResult {
+  /** 校正后的 p（与原数组同序，已做单调性保证） */
+  adjusted: number[];
+  /** 校正后是否仍 ≤ alpha */
+  rejected: boolean[];
+  /** 家族大小 */
+  m: number;
+  alpha: number;
+}
+
+/**
+ * Holm–Bonferroni 逐步下降（控制族错误率 FWER）。
+ *
+ * 与 BH 的区别必须说清：BH 控的是 **FDR**（被拒的原假设里被错拒的比例），
+ * Holm 控的是 **FWER**（整个家族里至少错拒一个的概率）。所以：
+ *   - "看 120 个实验里哪个有效" → 后续还要做决策，错一个就有代价 → 用 Holm（更严）
+ *   - "筛一遍找线索" → 允许少量假阳性 → 用 BH
+ * 这也是本项目里分层扫描用 BH（q=0.1，找线索）、跨实验清单用 Holm（α=0.05，要下结论）的原因。
+ *
+ * 调整后 p：p̃₍ᵢ₎ = max_{j≤i} min(1, (m−j+1)·p₍ⱼ₎)，下标按 p 升序排列。
+ * 单调性这一步不能省：否则出现"p 更小、校正后反而更大"的自相矛盾。
+ */
+export function holmAdjust(pvals: number[], alpha = 0.05): MultiplicityResult {
+  const m = pvals.length;
+  const order = pvals.map((p, i) => ({ p, i })).sort((a, b) => a.p - b.p);
+  const adjusted = new Array(m).fill(1);
+  let prev = 0;
+  for (let rank = 0; rank < m; rank++) {
+    const { p, i } = order[rank];
+    const v = Math.min(1, Math.max(prev, (m - rank) * p));
+    adjusted[i] = v;
+    prev = v;
+  }
+  return { adjusted, rejected: adjusted.map((v) => v <= alpha), m, alpha };
+}
+
+/** Bonferroni（阈值版，等价于 p̃ = m·p，但保留原始 p 与阈值两道信息） */
+export function bonferroniAdjust(pvals: number[], alpha = 0.05): MultiplicityResult {
+  const m = pvals.length;
+  const adjusted = pvals.map((p) => Math.min(1, m * p));
+  return { adjusted, rejected: pvals.map((p) => p <= alpha / m), m, alpha };
+}
+
 export function powerTwoProportion(p1: number, p2: number, nPerArm: number, alpha = 0.05): number {
   const za = normalInv(1 - alpha / 2);
   const se = Math.sqrt((p1 * (1 - p1)) / nPerArm + (p2 * (1 - p2)) / nPerArm);

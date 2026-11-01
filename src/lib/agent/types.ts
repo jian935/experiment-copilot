@@ -46,7 +46,9 @@ export type ToolName =
   | 'metric_decompose'
   | 'metric_dictionary'
   | 'peeking_check'
-  | 'novelty_check';
+  | 'novelty_check'
+  | 'fwer_check'
+  | 'loss_decide';
 
 export interface AgentReply {
   /** 最终回答（含 [E1] 这类引用标记） */

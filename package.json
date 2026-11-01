@@ -23,6 +23,8 @@
     "smoke": "node scripts/smoke_ui.mjs",
     "seq": "tsx scripts/sequential_report.ts",
     "novelty": "tsx scripts/novelty_report.ts",
+    "fwer": "tsx scripts/fwer_report.ts",
+    "loss": "tsx scripts/loss_report.ts",
     "shot": "node scripts/screenshot.mjs"
   },
   "devDependencies": {

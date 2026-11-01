@@ -1,0 +1,139 @@
+{
+  "generatedAt": "2026-11-01T11:15:25.212Z",
+  "seedBase": 20261031,
+  "sim": {
+    "m": 120,
+    "alpha": 0.05,
+    "trials": 2000,
+    "naive": 0.998,
+    "holm": 0.046,
+    "bonferroni": 0.046,
+    "bh": 0.0485,
+    "naiveTheory": 0.9978775736213018
+  },
+  "family": {
+    "n": 120,
+    "alpha": 0.05,
+    "fdr": 0.1,
+    "naiveSig": 68,
+    "holmSig": 53,
+    "bonferroniSig": 53,
+    "bhSig": 70,
+    "rescinded": 15,
+    "rescindedFalse": 5,
+    "naiveAnySig": 0.9978775736213018,
+    "rescindedIds": [
+      {
+        "id": "E004",
+        "archetype": "null",
+        "p": 0.04710984049597355,
+        "pHolm": 1,
+        "trueEffect": 0
+      },
+      {
+        "id": "E008",
+        "archetype": "heterogeneous",
+        "p": 0.025434932900750586,
+        "pHolm": 1,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E024",
+        "archetype": "srm",
+        "p": 0.018144495650667856,
+        "pHolm": 1,
+        "trueEffect": 0
+      },
+      {
+        "id": "E026",
+        "archetype": "heterogeneous",
+        "p": 0.0019976800414109046,
+        "pHolm": 0.1298492026917088,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E038",
+        "archetype": "heterogeneous",
+        "p": 0.028451453123670905,
+        "pHolm": 1,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E044",
+        "archetype": "heterogeneous",
+        "p": 0.0051042630295986815,
+        "pHolm": 0.31646430783511825,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E050",
+        "archetype": "heterogeneous",
+        "p": 0.0018620334841236402,
+        "pHolm": 0.12289420995216026,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E055",
+        "archetype": "guardrail",
+        "p": 0.0009241782938737898,
+        "pHolm": 0.06191994568954391,
+        "trueEffect": 0.018
+      },
+      {
+        "id": "E072",
+        "archetype": "heterogeneous",
+        "p": 0.008697345674859467,
+        "pHolm": 0.5300348529934852,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E077",
+        "archetype": "heterogeneous",
+        "p": 0.008689095950712872,
+        "pHolm": 0.5300348529934852,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E082",
+        "archetype": "heterogeneous",
+        "p": 0.0047703545001402375,
+        "pHolm": 0.30053233350883496,
+        "trueEffect": 0.0084
+      },
+      {
+        "id": "E083",
+        "archetype": "negative",
+        "p": 0.002126488833999294,
+        "pHolm": 0.1360952853759548,
+        "trueEffect": -0.015
+      },
+      {
+        "id": "E084",
+        "archetype": "null",
+        "p": 0.01515646940319395,
+        "pHolm": 0.894231694788443,
+        "trueEffect": 0
+      },
+      {
+        "id": "E102",
+        "archetype": "null",
+        "p": 0.04244408939723406,
+        "pHolm": 1,
+        "trueEffect": 0
+      },
+      {
+        "id": "E115",
+        "archetype": "null",
+        "p": 0.021561807741092863,
+        "pHolm": 1,
+        "trueEffect": 0
+      }
+    ]
+  },
+  "segments": {
+    "n": 120,
+    "bhHits": 271,
+    "holmHits": 242,
+    "bhOnlyExperiments": 24
+  }
+}

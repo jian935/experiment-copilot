@@ -251,6 +251,102 @@ const INTENTS: IntentDef[] = [
   },
 
   {
+    key: 'fwer',
+    // 「扫一遍 120 个实验，挑出显著的」这一步本身就是多重比较。
+    // 不校正的话，全零族下"至少一个显著"的概率是 99.8%——这题必须把算术摆出来。
+    test: /多重比较|全局校正|族错误|fwer|holm|bonferroni|一起看|看一遍|全部实验|所有实验|校正后|总有一个/i,
+    run: (ctx) => {
+      const t = runTool('fwer_check', ctx);
+      const d = t.data as {
+        available: boolean;
+        n: number;
+        naiveSig: number;
+        holmSig: number;
+        bonferroniSig: number;
+        bhSig: number;
+        fdr: number;
+        rescinded: number;
+        rescindedFalse: number | null;
+        naiveAnySigText: string;
+        ownPText: string | null;
+        ownPHolmText: string | null;
+        ownHolmSig: boolean | null;
+        ownRescinded: boolean | null;
+      };
+      if (!d.available) {
+        return { calls: [t], text: '只有这一个实验，谈不上多重比较——校正是在「一起看很多个」的时候才需要的。' };
+      }
+      const head =
+        `把 ${d.n} 个实验当成一个家族一起看：naive 口径有 ${d.naiveSig} 个显著，` +
+        `Holm 校正后 ${d.holmSig} 个（Bonferroni ${d.bonferroniSig} 个，BH(q=${d.fdr}) ${d.bhSig} 个），` +
+        `一共收回 ${d.rescinded} 条` +
+        (d.rescindedFalse !== null ? `（其中 ${d.rescindedFalse} 条注入效应为 0，本就该收回）` : '');
+      // 注意：这里不能再写「1−0.95^n」这种字面公式——数字审计只认引擎/工具返回过的数字，
+      // 字面常量在大多数实验上恰好撞上白名单里的某个值，于是"看起来没问题"，
+      // 直到某个实验的白名单里没这个值才报出来（E093 就是这样被抓到的）。
+      const why =
+        `全零假设下「至少一个显著」的概率是 ${d.naiveAnySigText}——` +
+        `「总有一个能上线」不是运气，是算术。`;
+      const mine =
+        d.ownPHolmText === null
+          ? ''
+          : d.ownHolmSig
+            ? `本实验 p=${d.ownPText}，校正后 ${d.ownPHolmText}，仍然显著。`
+            : `本实验 p=${d.ownPText}，校正后 ${d.ownPHolmText}${d.ownRescinded ? '——属于「单看不显著、校正后更不显著」的那一类' : ''}，不能算数。`;
+      return {
+        calls: [t],
+        text: `${withCites(head, t.cites)}${why}${mine}校正只标在清单上，不改任何单个实验的结论（决策仍按单实验口径 + 护栏判）。`,
+      };
+    },
+  },
+
+  {
+    key: 'loss',
+    // 「显不显著」和「该不该上」是两个问题。这条意图回答后者：
+    // 在你声明的成本下，上线相对不上线值多少。必须把 k 与 MMP 一起念出来，
+    // 否则同一句话换个默认参数就不成立。
+    test: /该不该上|值不值得上|值不值(得)?上|要不要上|期望损失|期望价值|决策论|期望净价值|划不划算|划算吗|亏不亏|风险厌恶|mmp|最小值得|上线(能|会|要)?(赚|亏)|成本.{0,6}(多|几)/i,
+    run: (ctx) => {
+      const t = runTool('loss_decide', ctx);
+      const d = t.data as {
+        unit: Unit;
+        riskAversionText: string;
+        mmpText: string;
+        diffText: string;
+        eGainText: string;
+        eHarmWeightedText: string;
+        netAfterMmpText: string;
+        actionText: string;
+        rawActionText: string;
+        vetoed: boolean;
+        vetoCode: string | null;
+        vetoReason: string | null;
+        caution: string | null;
+        breakEvenDiffText: string;
+        breakEvenGapText: string;
+        breakEvenIfNeutralText: string;
+      };
+      const head =
+        `主指标 ${d.diffText}，按 k=${d.riskAversionText}、MMP=${d.mmpText} 算：` +
+        `上线能拿到 ${d.eGainText} 的期望收益、要冒 ${d.eHarmWeightedText} 的期望损失，` +
+        `扣掉 MMP 后净价值 ${d.netAfterMmpText} → ${d.rawActionText}`;
+      const gate = d.vetoed
+        ? `但这条被 ${d.vetoCode} 否决了（${d.vetoReason}）——护栏是约束，不能拿主指标收益去抵，所以最终结论是${d.actionText}。`
+        : d.caution
+          ? `不过要补一句：${d.caution}。`
+          : '';
+      const tail =
+        `等价点是 ${d.breakEvenDiffText}：真实效应得高于它才划算，现在离它 ${d.breakEvenGapText}。` +
+        `如果把 k 调成 1（完全不厌恶风险），等价点会掉到 ${d.breakEvenIfNeutralText}，规则就退化成「点估计超过它就上线」——` +
+        `所以这个判断的价值全在 k 大于 1 和 MMP 大于 0 这两件事上，参数不同结论就不同。`;
+      return {
+        calls: [t],
+        text: `${withCites(head, t.cites)}${gate}${tail}这只给建议、不改结论（决策口径仍按主指标 + 护栏的标准判）。`,
+      };
+    },
+  },
+
+  {
     key: 'segment',
     test: /分层|新老|用户群|人群|设备|ios|安卓|哪类|细分|异质|个体差异/i,
     run: (ctx) => {

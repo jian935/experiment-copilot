@@ -1,5 +1,7 @@
 import { mdeTwoProportion, normalCdf, normalInv, powerTwoProportion } from '../stats.ts';
 import { dailyRatePerArm, forecast } from '../forecast.ts';
+import { familyReport } from '../multiplicity.ts';
+import { LOSS_CAUTIONS, LOSS_GATES, applyGates, defaultLoss, expectedLoss } from '../loss.ts';
 import type { Analysis, Evidence } from '../decide.ts';
 import type { Decision } from '../types.ts';
 import type { AgentCtx, ToolCall, ToolName } from './types.ts';
@@ -20,15 +22,34 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   metric_dictionary: '口径字典',
   peeking_check: '窥探校正（序贯）',
   novelty_check: '新颖效应（时间衰减）',
+  fwer_check: '多人比较校正（FWER）',
+  loss_decide: '期望损失决策',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
-const pp = (v: number, d = 2) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}pp`;
+/**
+ * 负零归一：`-k·E[损失]` 在损失为 0 时会算出 -0，toFixed 会印成「-0.00」。
+ *
+ * ⚠️ 阈值必须按**单位**算，不能按数值算：pp 的显示值是 v×100，末位 1e-2 对应 v 的 1e-4，
+ * 所以半位是 5e-5；元的末位就是 1e-2，半位 5e-3。两者差 100 倍——
+ * 一律用 0.5·10⁻ᵈ 会把 0.3pp 这种正常值误判成 0（实测少算 656 个数字，被基线比对抓到）。
+ */
+const snapZero = (v: number, unit: Unit, d = 2) => {
+  const half = unit === '元' ? 0.5 * 10 ** -d : 0.5 * 10 ** -(d + 2);
+  return Math.abs(v) < half ? 0 : v;
+};
+const pp = (v: number, d = 2) => {
+  const x = snapZero(v, 'pp', d);
+  return `${x > 0 ? '+' : ''}${(x * 100).toFixed(d)}pp`;
+};
 const pv = (p: number) => (p < 1e-16 ? '<1e-16' : p < 0.001 ? p.toExponential(1) : p.toFixed(3));
 
 /** 指标单位。Agent 回答里的每个差值都必须带对单位，否则「+0.42」是 pp 还是元没人知道 */
 type Unit = 'pp' | '元';
-const fmtDiff = (v: number, unit: Unit, d = 2) => (unit === '元' ? `${v >= 0 ? '+' : ''}${v.toFixed(d)}元` : pp(v, d));
+const fmtDiff = (v: number, unit: Unit, d = 2) => {
+  const x = snapZero(v, unit, d);
+  return unit === '元' ? `${x > 0 ? '+' : ''}${x.toFixed(d)}元` : pp(x, d);
+};
 const fmtLevel = (v: number, unit: Unit, d = 2) => (unit === '元' ? `${v.toFixed(d)}元` : pct(v, d));
 
 const DECISION_CN: Record<string, string> = {
@@ -631,6 +652,135 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
       };
     }
 
+    case 'fwer_check': {
+      // 「我看了一遍全部实验，哪个是真显著」——不校正的话，120 个零效应实验里
+      // 至少一个显著的概率是 99.8%，这题必须把算术摆出来。
+      const family = familyReport(
+        (dataset?.experiments ?? []).map((e) => {
+          const a = ctx.analyses?.get(e.id);
+          return {
+            id: e.id,
+            name: e.name,
+            p: a ? a.primary.p : 1,
+            decision: a?.decision ?? 'inconclusive',
+            archetype: e.archetype,
+            trueEffect: e.trueLiftOverall,
+          };
+        }),
+      );
+      const mine = family.rows.find((r) => r.id === exp.id);
+      return {
+        tool: name,
+        args,
+        summary:
+          `一起看 ${family.n} 个实验：naive 显著 ${family.naiveSig} 个，Holm 校正后 ${family.holmSig} 个` +
+          (mine ? `；本实验 p=${pv(mine.p)} → Holm ${pv(mine.pHolm)}${mine.holmSig ? '（仍显著）' : '（校正后不显著）'}` : ''),
+        data: {
+          available: family.n > 1,
+          n: family.n,
+          alpha: family.alpha,
+          fdr: family.fdr,
+          naiveSig: family.naiveSig,
+          holmSig: family.holmSig,
+          bonferroniSig: family.bonferroniSig,
+          bhSig: family.bhSig,
+          rescinded: family.rescinded,
+          rescindedFalse: family.rescindedFalse,
+          /** 全零假设下"至少一个显著"的概率：1−(1−α)^n —— 这就是"总有一个能上线" */
+          naiveAnySig: family.naiveAnySig,
+          naiveAnySigText: `${(family.naiveAnySig * 100).toFixed(1)}%`,
+          /** 本实验在家族里的位置 */
+          ownP: mine?.p ?? null,
+          ownPText: mine ? pv(mine.p) : null,
+          ownPHolm: mine?.pHolm ?? null,
+          ownPHolmText: mine ? pv(mine.pHolm) : null,
+          ownHolmSig: mine?.holmSig ?? null,
+          ownRescinded: mine?.rescinded ?? null,
+          /** 校正只标清单，不改 decision —— 回答里必须说清 */
+          affectsDecision: false,
+          top: family.rows
+            .slice()
+            .sort((x, y) => x.p - y.p)
+            .slice(0, 8)
+            .map((r) => ({ id: r.id, p: r.p, pHolm: r.pHolm, holmSig: r.holmSig })),
+        },
+        cites: cite(a, 'metric', '序贯'),
+      };
+    }
+
+    case 'loss_decide': {
+      // 「该不该上」不是「显不显著」。两个参数（风险厌恶 k、最小值得上线的 MMP）都由调用方给，
+      // 缺省用文档里的默认值；**必须把参数回显**，否则同一句话会随默认值变化而失去可复现性。
+      const unit = a.primary.unit;
+      const base = defaultLoss(unit);
+      const k = typeof args.riskAversion === 'number' ? args.riskAversion : base.riskAversion;
+      const mmp = typeof args.mmp === 'number' ? args.mmp : base.mmp;
+      const d = expectedLoss(a.primary.diff, a.primary.se, unit, { riskAversion: k, mmp });
+      const gate = applyGates(d.action, a.reasonCode);
+      const ACTION_CN: Record<string, string> = {
+        ship: '建议上线',
+        'no-ship': '不值得上线',
+        indistinguishable: '分不出高下',
+      };
+      return {
+        tool: name,
+        args,
+        summary:
+          `主指标 ${fmtDiff(a.primary.diff, unit)}、SE ${fmtDiff(a.primary.se, unit)}；` +
+          `在 k=${k}、MMP=${fmtDiff(mmp, unit)} 下净价值 ${fmtDiff(d.netAfterMmp, unit)} → ${ACTION_CN[gate.action]}` +
+          (gate.vetoed ? `（但被 ${gate.vetoCode} 否决）` : ''),
+        data: {
+          available: true,
+          unit,
+          /** 参数必须回显：结论依赖它们，藏起来就变成"引擎有个正确答案" */
+          riskAversion: k,
+          riskAversionText: `${k}×`,
+          mmp,
+          mmpText: fmtDiff(mmp, unit),
+          diff: a.primary.diff,
+          diffText: fmtDiff(a.primary.diff, unit),
+          se: a.primary.se,
+          seText: fmtDiff(a.primary.se, unit),
+          /** 两笔账：上线能拿到的期望收益 / 要冒的期望损失（乘 k 之后才是代价） */
+          eGain: d.eGain,
+          eGainText: fmtDiff(d.eGain, unit),
+          eHarm: d.eHarm,
+          eHarmText: fmtDiff(d.eHarm, unit),
+          eHarmWeightedText: fmtDiff(-k * d.eHarm, unit),
+          netValue: d.netValue,
+          netValueText: fmtDiff(d.netValue, unit),
+          netAfterMmp: d.netAfterMmp,
+          netAfterMmpText: fmtDiff(d.netAfterMmp, unit),
+          /** 净价值层自己的结论（门禁之前） */
+          rawAction: d.action,
+          rawActionText: ACTION_CN[d.action],
+          /** 门禁 + 建议之后的最终建议 */
+          action: gate.action,
+          actionText: ACTION_CN[gate.action],
+          vetoed: gate.vetoed,
+          vetoCode: gate.vetoCode,
+          vetoReason: gate.vetoReason,
+          cautionCode: gate.cautionCode,
+          caution: gate.caution,
+          /** 等价点：真实效应高于它才划算；gap 用 SE 计量，便于和"几个 sigma"对照 */
+          breakEvenDiff: d.breakEvenDiff,
+          breakEvenDiffText: fmtDiff(d.breakEvenDiff, unit),
+          breakEvenGapSe: d.breakEvenGapSe,
+          breakEvenGapText: `${d.breakEvenGapSe.toFixed(2)} 个 SE`,
+          /** k=1 时的等价点 = MMP：给"不厌恶风险时门槛在哪"做对账 */
+          breakEvenIfNeutral: d.breakEvenIfNeutral,
+          breakEvenIfNeutralText: fmtDiff(d.breakEvenIfNeutral, unit),
+          /** 两个参数的含义必须能原样念给用户听 */
+          paramsNote: `k=1 时这条规则等价于「点估计 > MMP 就上线」；k=${k} 时负向效应被放大 ${k} 倍`,
+          gates: Object.keys(LOSS_GATES),
+          cautions: Object.keys(LOSS_CAUTIONS),
+          /** 与 heterogeneity / sequential / novelty / fwer 一样，只出建议，不改 decision */
+          affectsDecision: false,
+        },
+        cites: cite(a, 'metric', '期望损失'),
+      };
+    }
+
     default:
       throw new Error(`未知工具：${name}`);
   }
@@ -783,6 +933,30 @@ export const TOOL_SCHEMA = [
       name: 'novelty_check',
       description: '新颖效应：按曝光量把观察期对半切，检验后半段效应是否显著低于（或高于）前半段，并给出可检出的最小衰减',
       parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'fwer_check',
+      description: '多重比较校正（Holm/Bonferroni/BH）：把全部实验当一个家族，返回校正后还有几个显著、本实验校正后的 p',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'loss_decide',
+      description:
+        '期望损失决策：在给定的风险厌恶系数与最小值得上线的提升下，算出「上线」相对「不上线」的期望净价值，并给出等价点与硬门禁否决结果',
+      parameters: {
+        type: 'object',
+        properties: {
+          riskAversion: { type: 'number', description: '风险厌恶系数 k（≥1，默认 2）' },
+          mmp: { type: 'number', description: '最小值得上线的提升（效应单位，默认率 0.001 / ARPU 0.02）' },
+        },
+        required: [],
+      },
     },
   },
 ];

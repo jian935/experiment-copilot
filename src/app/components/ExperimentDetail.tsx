@@ -35,6 +35,7 @@ import { Forest, type ForestRow } from './Forest';
 import { ForecastPanel } from './Forecast';
 import { SequentialPanel } from './SequentialPanel';
 import { NoveltyPanel } from './NoveltyPanel';
+import { LossPanel } from './LossPanel';
 import { Trend } from './Trend';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { exportConclusionCard } from '../lib/exportCard';
@@ -385,6 +386,9 @@ export function ExperimentDetail({
 
       {/* 新颖效应：累计值会把衰减平均掉 */}
       <NoveltyPanel analysis={analysis} />
+
+      {/* 期望损失：把「显不显著」翻译成「值不值得上」 */}
+      <LossPanel analysis={analysis} />
 
       {/* 还要跑几天 */}
       <ForecastPanel

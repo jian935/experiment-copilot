@@ -17,10 +17,17 @@ export type MetricUnit = 'pp' | '元';
  * 差值格式化（按单位）。
  * 这个函数存在的理由：0.42 元 和 +42pp 是完全不同的两件事，
  * 以前全站硬编码 fmtPP，接上 ARPU 后每一处都会写错口径。
+ *
+ * 负零归一：`-k·E[损失]` 在损失为 0 时会算出 `-0`（IEEE 754 里 -0 与 0 相等，
+ * 但 toFixed 会印出「-0.00」）。屏幕上出现「-0.00pp」会被读成"负的收益"，
+ * 所以比显示精度还小的量一律归零——这也是 fmtPP 的老问题，一并在这里修。
  */
 export function fmtDiff(v: number, unit: MetricUnit, digits = 2): string {
-  const s = unit === '元' ? v.toFixed(digits) : (v * 100).toFixed(digits);
-  return `${v > 0 ? '+' : ''}${s}${unit}`;
+  // 比末位精度还小的一半就归零（pp 的末位是 1e-2·1e-2，元的是 1e-2）
+  const halfUlp = unit === '元' ? 0.5 * 10 ** -digits : 0.5 * 10 ** -digits * 1e-2;
+  const x = Math.abs(v) < halfUlp ? 0 : v;
+  const s = unit === '元' ? x.toFixed(digits) : (x * 100).toFixed(digits);
+  return `${x > 0 ? '+' : ''}${s}${unit}`;
 }
 
 /** 指标本身的水平值（control / treatment 各自的绝对值） */
