@@ -543,6 +543,8 @@ export function ExperimentDetail({
             <button
               key={k}
               onClick={() => setTab(k)}
+              // 三个 tab 互斥，选中态只靠背景色表达，读屏读不出来
+              aria-pressed={tab === k}
               className={cx(
                 'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors',
                 tab === k ? 'bg-brand/15 text-brand2' : 'text-muted hover:bg-panel2 hover:text-ink',

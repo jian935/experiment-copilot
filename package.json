@@ -26,7 +26,8 @@
     "fwer": "tsx scripts/fwer_report.ts",
     "loss": "tsx scripts/loss_report.ts",
     "method": "tsx scripts/method_numbers.ts",
-    "shot": "node scripts/screenshot.mjs"
+    "shot": "node scripts/screenshot.mjs",
+    "audit:ui": "node scripts/audit_ui_controls.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

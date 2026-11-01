@@ -87,6 +87,8 @@ export function Chip({
       type="button"
       onClick={onClick}
       title={title}
+      // 选中态原来只靠颜色（border-brand / bg-brand），读屏和键盘用户读不出来
+      aria-pressed={active === undefined ? undefined : !!active}
       className={cx(
         'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors',
         active

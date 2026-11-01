@@ -80,6 +80,7 @@ npm run eval       # 评测报告：分层 F1 + 2200 条 Agent 问答的幻觉�
 npm run eval:check # 与 eval/baseline.json 逐指标比对，任何漂移 exit 1（CI 用的就是它）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
+npm run audit:ui   # 全量交互审查：逐个点 8 个屏上的 162 个控件，找「点了没反应 / 被遮挡 / 禁用没说」
 npm run smoke      # UI 冒烟（需先 npm run build && npx vite preview --port 4321）
                    # 真浏览器逐屏点：白屏 / undefined / NaN / 未捕获异常都会被抓出来
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频

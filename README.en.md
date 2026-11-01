@@ -61,7 +61,7 @@ The value is not the model. The value is that the number can be recomputed and t
 | Theme | Light / dark / follow-system, one button to cycle; **every colour is a CSS variable**, so SVG charts switch together with the cards — never "dark cards, light charts" | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
 
 **Demo video (52s, Chinese narration)**: [`deliverables/video/Experiment-Copilot-演示.mp4`](deliverables/video/Experiment-Copilot-演示.mp4) — 10 real-usage segments: refuse to conclude → guardrail block → step-by-step evidence → worked calculation → expected loss → two experiments on one axis → ⌘K → eval dashboard.
-**Portfolio page**: [`portfolio/index.html`](portfolio/index.html) — a single 4.2MB file with the 52s video and 9 inline 1600px screenshots.
+**Portfolio page**: [`portfolio/index.html`](portfolio/index.html) — a single 4.2MB file with the 52s video and 9 inline 1600px screenshots, plus scroll parallax (layered hero, in-view reveals, reading progress bar; disabled under `prefers-reduced-motion`).
 
 Deep links: `#/e/E001` opens an experiment, `#/e/E001?ev=E6` expands the 6th evidence entry, `#/?d=ship&s=diff` restores a filtered view.
 
