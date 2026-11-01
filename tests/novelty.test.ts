@@ -226,6 +226,8 @@ describe('新颖效应接进引擎', () => {
     expect(looks[looks.length - 1].se).toBeLessThan(looks[0].se);
   });
 
+  // 1000 个实验是这条断言的意义所在（少了区间就宽到没有信息量），
+  // 所以不要用「少跑几个」来换速度 —— 直接给足超时，免得机器一忙就随机红。
   it('A/A 上误报率受控（1000 个零效应实验，真引擎路径）', () => {
     const aa = generateAA(600, 20261101, 7);
     const byAa = new Map<string, typeof aa.daily>();
@@ -250,7 +252,7 @@ describe('新颖效应接进引擎', () => {
     expect(rate).toBeGreaterThan(0.01);
     // 零效应下不能有方向性偏差（判 growth 与 decay 应大致对半）
     expect(Math.min(up, down) / Math.max(up, down)).toBeGreaterThan(0.4);
-  });
+  }, 30000);
 
   it('真实数据上多数实验不判衰减（比例要能解释，不是全判或全不判）', () => {
     let flagged = 0;

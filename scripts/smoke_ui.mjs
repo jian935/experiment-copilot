@@ -418,6 +418,56 @@ async function runThemeScenario() {
   return problems;
 }
 
+/* ─────────── 第六阶段：趋势图（F9 去 Recharts） ───────────
+ * 换掉图表库最大的风险不是体积，是**交互悄悄没了**：折线还在，但悬停取不到点、
+ * 纵轴刻度没了——静态截图看不出来，只有真的把鼠标移上去才知道。
+ * 所以这里用 CDP 真发一次 mousemove。
+ */
+async function runTrendScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/e/E001` });
+    await waitText((t) => t.includes('分日趋势'), '详情页加载');
+
+    // 先滚到视野里：趋势图在详情页偏下，视口外的坐标发鼠标事件等于没发
+    await evaluate(`document.querySelector('svg[aria-label^="分日趋势"]')?.scrollIntoView({ block: 'center' })`);
+    await sleep(300);
+    const box = await evaluate(`(() => {
+      const r = document.querySelector('svg[aria-label^="分日趋势"] rect');
+      if (!r) return 'no-rect';
+      const b = r.getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) });
+    })()`);
+    if (box === 'no-rect') throw new Error('趋势图里找不到取点矩形');
+    const { x, y } = JSON.parse(box);
+
+    const ticks = await evaluate(`document.querySelectorAll('svg[aria-label^="分日趋势"] text').length`);
+    if (!(ticks >= 4)) problems.push(`趋势图刻度文字只有 ${ticks} 个（纵轴 + 日期至少该有 4 个）`);
+    const paths = await evaluate(`document.querySelectorAll('svg[aria-label^="分日趋势"] path').length`);
+    if (paths !== 2) problems.push(`趋势图折线数是 ${paths}（应当是 control + treatment 两条）`);
+
+    // 必须带 button:'none'，且发两次：只发一次时 Chrome 可能不产生 mousemove
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0, button: 'none' });
+    await sleep(150);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x + 4, y, buttons: 0, button: 'none' });
+    await sleep(300);
+    // 直接按提示框自己的类名找：祖先 div 的 innerText 里也有这两个词，find() 会先撞上祖先
+    const tip = await evaluate(`(() => {
+      const el = [...document.querySelectorAll('div.pointer-events-none.absolute')].find(
+        (d) => (d.innerText || '').includes('control') && (d.innerText || '').includes('treatment'),
+      );
+      return el ? el.innerText.replace(String.fromCharCode(10), ' | ') : '';
+    })()`);
+    // 十字准星出现 = React 的 hover state 真的更新了（比找提示框更直接，失败时也更好定位）
+    const cross = await evaluate(`document.querySelectorAll('svg[aria-label^="分日趋势"] line[stroke-dasharray="3 3"]').length`);
+    if (!tip) problems.push(`没有出现提示框（坐标 ${x},${y}；准星 ${cross} 条）`);
+    else if (!/n = /.test(tip)) problems.push('悬停提示里没有当日样本量 n');
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -471,6 +521,18 @@ if (themeProblems.length) {
   for (const p of themeProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（背景与图表配色都跟着变，且刷新后保留选择）');
+}
+console.log('');
+
+const trendProblems = await runTrendScenario();
+console.log(`\n趋势图（F9 去 Recharts）：悬停取点 + 纵轴刻度 + 两条线`);
+console.log('─'.repeat(70));
+if (trendProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of trendProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（手写 SVG 有纵轴刻度、两条线，悬停能取到那一天的 control/treatment）');
 }
 console.log('');
 
