@@ -158,6 +158,19 @@ function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>)
 }
 
 /**
+ * 会被「缺省填 0」的可选列。缺失与「真的是 0」在数据里长得一模一样，
+ * 所以必须在**解析阶段**就把「整列都没有这个键」记下来，
+ * 否则下游只能显示「0.00% → 0.00%，未恶化」——那是编数字。
+ */
+const OPTIONAL_COLUMNS = ['refunds', 'complaints', 'latencyP95', 'revenue', 'preExposures', 'preConversions', 'preRevenue'];
+
+/** 整列缺失的列名：所有行都没有这个键（任意一行有值就不算缺失） */
+function missingColumnsOf(rows: Record<string, unknown>[], cols: string[]): string[] {
+  if (!rows.length) return [];
+  return cols.filter((c) => !rows.some((r) => r && r[c] !== undefined && r[c] !== null && r[c] !== ''));
+}
+
+/**
  * 把用户提供的 JSON 解析成内部 Dataset。
  * - 校验 experiments / daily 的结构与引用关系，给出中文定位报错。
  * - groundTruth：显式给出用显式；否则若每个 experiment 都带 trueDecision + trueLiftOverall 则视为有真值。
@@ -193,6 +206,7 @@ export function parseDatasetJson(text: string): Dataset {
     spec,
     experiments,
     daily,
+    missingColumns: missingColumnsOf(raw.daily as Record<string, unknown>[], OPTIONAL_COLUMNS),
   };
 }
 
@@ -365,6 +379,8 @@ export function parseDatasetCsv(text: string): Dataset {
     });
   }
 
+  // CSV 的「缺失」看表头：没有这一列 = 整列缺失（空格子算有列，走填 0）
+  const missingCsv = OPTIONAL_COLUMNS.filter((c) => !header.includes(c));
   return {
     generatedAt: new Date().toISOString(),
     seedBase: 0,
@@ -372,6 +388,7 @@ export function parseDatasetCsv(text: string): Dataset {
     spec: defaultSpec(),
     experiments,
     daily,
+    missingColumns: missingCsv,
   };
 }
 

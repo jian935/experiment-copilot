@@ -51,6 +51,39 @@ describe('导入：JSON', () => {
     expect(d.experiments[0].trueDecision).toBe('inconclusive');
     expect(d.experiments[0].archetype).toBe('null');
   });
+  it('整列缺 refunds 必须被记下来（否则护栏会显示「0.00% → 0.00%，未恶化」）', () => {
+    // 「缺失」与「真的是 0」在数据里长得一样，所以只能在解析阶段记
+    const withAll = JSON.parse(SAMPLE_JSON);
+    const dsAll = parseDatasetJson(JSON.stringify(withAll));
+    expect(dsAll.missingColumns).toEqual([]);
+
+    const noRefund = JSON.parse(SAMPLE_JSON);
+    for (const r of noRefund.daily) delete r.refunds;
+    const dsNoRefund = parseDatasetJson(JSON.stringify(noRefund));
+    expect(dsNoRefund.missingColumns).toContain('refunds');
+    expect(dsNoRefund.missingColumns).not.toContain('complaints');
+    // 数值仍被填成 0（下游类型不变），但「曾经缺过」这件事被记住了
+    expect(dsNoRefund.daily[0].refunds).toBe(0);
+  });
+
+  it('CSV 的缺失看表头：没有这一列才算缺，空格子算「真的是 0」', () => {
+    const header = 'expId,date,variant,exposures,conversions';
+    const rows = [
+      header,
+      'exp_001,2026-01-05,control,1000,50',
+      'exp_001,2026-01-05,treatment,1000,55',
+    ].join('\n');
+    const ds = parseDatasetCsv(rows);
+    expect(ds.missingColumns).toContain('refunds');
+    expect(ds.missingColumns).toContain('latencyP95');
+    // revenue 也在缺失清单里：它决定 ARPU 能不能算
+    expect(ds.missingColumns).toContain('revenue');
+
+    const withEmpty = ['expId,date,variant,exposures,conversions,refunds', 'exp_001,2026-01-05,control,1000,50,'].join('\n');
+    const ds2 = parseDatasetCsv(withEmpty);
+    expect(ds2.missingColumns).not.toContain('refunds');
+  });
+
 });
 
 describe('导入：CSV', () => {

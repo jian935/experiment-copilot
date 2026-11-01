@@ -99,6 +99,11 @@ export function ExperimentDetail({
   const meta = DECISION_META[analysis.decision];
   const tone = meta.tone as Tone;
   const P = analysis.primary;
+  // 三检查里的「护栏」有三种结局：通过 / 未通过 / **不适用**。
+  // 注意 unavailable 项的 gating 被置成了 false，所以「硬门槛集合」不能用来判断是否评估过——
+  // 要看「已经评估过的硬门槛」还有没有剩，否则会写出「不适用」+「硬护栏未触发」这种自相矛盾的组合。
+  const evaluatedHard = analysis.guardrails.filter((g) => g.gating && !g.unavailable);
+  const naGuardrails = analysis.guardrails.filter((g) => g.unavailable);
 
   const forestRows = useMemo<ForestRow[]>(() => {
     const seg = (s: Analysis['segments']['tenure'][number]) => ({
@@ -280,12 +285,18 @@ export function ExperimentDetail({
           />
           <Check
             ok={!analysis.guardrails.some((g) => g.gating && g.worse)}
+            // 硬护栏一个都没评估时不能打勾——那等于说「查过了，没问题」
+            na={evaluatedHard.length === 0}
             icon={<ShieldAlert size={13} />}
             title="护栏"
             detail={
               analysis.guardrails.find((g) => g.gating && g.worse)
                 ? `${analysis.guardrails.find((g) => g.gating && g.worse)!.label}显著恶化`
-                : '硬护栏未触发'
+                : naGuardrails.length > 0
+                  ? `${naGuardrails.map((g) => g.label).join('、')} 缺列，未评估`
+                  : evaluatedHard.length === 0
+                    ? '没有护栏数据，未评估'
+                    : '硬护栏未触发'
             }
           />
         </div>
@@ -571,22 +582,37 @@ export function ExperimentDetail({
                     isMs ? `${v >= 0 ? '+' : ''}${v.toFixed(0)}ms` : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}pp`;
                   return (
                     <tr key={g.key} className="border-b border-line/60 last:border-0">
-                      <td className="px-4 py-2 text-ink">{g.label}</td>
-                      <td className="px-3 py-2 text-right text-muted">{f(g.controlRate)}</td>
-                      <td className="px-3 py-2 text-right text-muted">{f(g.treatmentRate)}</td>
-                      <td className={cx('px-3 py-2 text-right', g.diff > 0 && isMs ? 'text-iterate' : liftClass(-g.diff))}>
-                        {fd(g.diff)}
+                      <td className="px-4 py-2 text-ink">
+                        {g.label}
+                        {g.unavailable && <span className="ml-1 text-[10px] text-dim">（未评估）</span>}
                       </td>
-                      <td className="px-3 py-2 text-right text-muted">{fmtP(g.p)}</td>
+                      {/* 缺列时所有数字都写「—」：填 0 会读成「查过了，是 0」 */}
+                      <td className="px-3 py-2 text-right text-muted">{g.unavailable ? '—' : f(g.controlRate)}</td>
+                      <td className="px-3 py-2 text-right text-muted">{g.unavailable ? '—' : f(g.treatmentRate)}</td>
+                      <td
+                        className={cx(
+                          'px-3 py-2 text-right',
+                          g.unavailable ? 'text-dim' : g.diff > 0 && isMs ? 'text-iterate' : liftClass(-g.diff),
+                        )}
+                      >
+                        {g.unavailable ? '—' : fd(g.diff)}
+                      </td>
+                      <td className="px-3 py-2 text-right text-muted">{g.unavailable ? '—' : fmtP(g.p)}</td>
                       <td className="px-3 py-2 text-center">
-                        {g.gating ? (
+                        {g.unavailable ? (
+                          <span className="text-[10px] text-dim">—</span>
+                        ) : g.gating ? (
                           <span className="rounded bg-brand/15 px-1.5 py-0.5 text-[10px] text-brand2">硬门槛</span>
                         ) : (
                           <span className="text-[10px] text-dim">仅展示</span>
                         )}
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {g.worse ? (
+                        {g.unavailable ? (
+                          <span className="text-[11px] text-dim" title={g.unavailable}>
+                            不可用（缺列）
+                          </span>
+                        ) : g.worse ? (
                           <span className="text-[11px] font-medium text-noship">显著恶化</span>
                         ) : (
                           <span className="text-[11px] text-dim">未恶化</span>
@@ -708,22 +734,26 @@ function fmtProb(v: number): string {
 
 function Check({
   ok,
+  na,
   icon,
   title,
   detail,
 }: {
   ok: boolean;
+  /** 不适用（数据里没有这一列）：既不算通过也不算未通过——「没查」不能显示成「查过了」 */
+  na?: boolean;
   icon: ReactNode;
   title: string;
   detail: string;
 }) {
+  const tone = na ? 'text-dim' : ok ? 'text-ship' : 'text-noship';
   return (
     <div className="flex items-start gap-2.5 bg-panel px-4 py-3">
-      <span className={cx('mt-0.5', ok ? 'text-ship' : 'text-noship')}>{icon}</span>
+      <span className={cx('mt-0.5', tone)}>{icon}</span>
       <div>
         <div className="flex items-center gap-1.5 text-[11.5px] font-medium text-ink">
           {title}
-          <span className={cx('text-[10px]', ok ? 'text-ship' : 'text-noship')}>{ok ? '通过' : '未通过'}</span>
+          <span className={cx('text-[10px]', tone)}>{na ? '不适用' : ok ? '通过' : '未通过'}</span>
         </div>
         <div className="num mt-0.5 text-[10.5px] text-dim">{detail}</div>
       </div>

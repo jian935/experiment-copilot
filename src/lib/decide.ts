@@ -62,6 +62,11 @@ export interface GuardrailResult {
   bootstrap?: BootstrapResult;
   /** 本次判定使用的容忍度（展示用，让"凭什么是 0.4pp"有出处） */
   marginLabel?: string;
+  /**
+   * 该护栏**没被评估**的原因（数据里没有这一列）。
+   * 有值时所有数值字段都无意义，UI 必须显示「不可用」而不是 0。
+   */
+  unavailable?: string;
 }
 
 /** 证据条目里的「逐步代入」：把公式和实际数字摊开，任何一步都能手算核对 */
@@ -607,69 +612,104 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   // P95 延迟是分位数指标 → Bootstrap（拿日级 P95 做两样本重抽样），
   // 而不是像 v1 那样硬编码 sd=50 假装做了个 t 检验。
   // 注意：护栏口径与主指标无关——ARPU 实验的退款率仍然是率指标，不能跟着换。
+  //
+  // 三条护栏**各自独立**：缺一列不能连累另外两条。
+  // 第一版写成 `if (缺退款) {...} else if (有数据) {...三条一起...}`，
+  // 结果缺 refunds 时投诉率与延迟整行消失——表格里只剩一行，
+  // 比显示一个假的 0 更难被发现（截图核对时才发现）。
   const guardrails: GuardrailResult[] = [];
-  if (c.n > 0 && t.n > 0) {
-    const refundTest = twoProportionZ(c.refunds, c.n, t.refunds, t.n);
-    const rg = cfg.guardrails.refundRate;
-    const refundNi = nonInferiority(c.refunds, c.n, t.refunds, t.n, rg.margin, rg.alpha);
+  // 整列缺失的护栏不能「填 0 照常算」：那会在证据链里写出一句「0.00% → 0.00%，未恶化」，
+  // 读者会当成「查过了没问题」，实际是没数据。这里显式标成 unavailable，并让它不参与决策。
+  const missing = new Set(cfg.missingGuardrails ?? []);
+  const NA = (col: string) => `这份数据没有 ${col} 列：本护栏不参与判定`;
+  const hasData = c.n > 0 && t.n > 0;
+  const skip = (key: string, label: string, col: string) =>
     guardrails.push({
-      key: 'refund_rate',
-      label: '退款率',
-      controlRate: c.refunds / c.n,
-      treatmentRate: t.refunds / t.n,
-      diff: refundTest.diff,
-      p: refundTest.p,
-      worse: guardrailBlocks(refundNi, rg.mode),
-      gating: rg.gating,
-      propTest: refundTest,
-      nonInferiority: refundNi,
-      marginLabel: `≤ ${(rg.margin * 100).toFixed(2)}pp`,
+      key,
+      label,
+      controlRate: 0,
+      treatmentRate: 0,
+      diff: 0,
+      p: 1,
+      worse: false,
+      gating: false,
+      unavailable: NA(col),
     });
 
-    const complaintTest = twoProportionZ(c.complaints, c.n, t.complaints, t.n);
-    const cg = cfg.guardrails.complaintRate;
-    const complaintNi = nonInferiority(c.complaints, c.n, t.complaints, t.n, cg.margin, cg.alpha);
-    guardrails.push({
-      key: 'complaint_rate',
-      label: '投诉率',
-      controlRate: c.complaints / c.n,
-      treatmentRate: t.complaints / t.n,
-      diff: complaintTest.diff,
-      p: complaintTest.p,
-      worse: guardrailBlocks(complaintNi, cg.mode),
-      gating: cg.gating, // 低基数、噪声大，仅提示不拦截
-      propTest: complaintTest,
-      nonInferiority: complaintNi,
-      marginLabel: cg.margin > 0 ? `≤ ${(cg.margin * 100).toFixed(3)}pp` : '任何确认的上升都要提示',
-    });
+  if (hasData) {
+    if (missing.has('refunds')) {
+      skip('refund_rate', '退款率', 'refunds');
+    } else {
+      const refundTest = twoProportionZ(c.refunds, c.n, t.refunds, t.n);
+      const rg = cfg.guardrails.refundRate;
+      const refundNi = nonInferiority(c.refunds, c.n, t.refunds, t.n, rg.margin, rg.alpha);
+      guardrails.push({
+        key: 'refund_rate',
+        label: '退款率',
+        controlRate: c.refunds / c.n,
+        treatmentRate: t.refunds / t.n,
+        diff: refundTest.diff,
+        p: refundTest.p,
+        worse: guardrailBlocks(refundNi, rg.mode),
+        gating: rg.gating,
+        propTest: refundTest,
+        nonInferiority: refundNi,
+        marginLabel: `≤ ${(rg.margin * 100).toFixed(2)}pp`,
+      });
+    }
 
-    const lc = c.latencyWeighted / c.n;
-    const lt = t.latencyWeighted / t.n;
-    const lg = cfg.guardrails.latencyP95;
-    const latC = rows.filter((r) => r.variant === 'control').map((r) => r.latencyP95);
-    const latT = rows.filter((r) => r.variant === 'treatment').map((r) => r.latencyP95);
-    const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
-    // 延迟用相对容忍度：margin 读作「相对 control 的比例」
-    const latMargin = lg.relative ? lc * lg.margin : lg.margin;
-    const latBoot = bootstrapTwoSample(latC, latT, (x, y) => mean(y) - mean(x), {
-      reps: cfg.bootstrapReps,
-      seed: cfg.simSeed,
-      // Bootstrap 百分位检验：p = 比例{θ* ≤ margin}，p 小 → 有证据认为恶化已超过容忍度
-      threshold: latMargin,
-    });
-    const latP = latBoot.pBelow ?? 1;
-    guardrails.push({
-      key: 'latency_p95',
-      label: 'P95 延迟',
-      controlRate: lc,
-      treatmentRate: lt,
-      diff: lt - lc,
-      p: latP,
-      worse: latP < lg.alpha,
-      gating: lg.gating, // 延迟噪声大且与损失非线性，v1 仅展示
-      bootstrap: latBoot,
-      marginLabel: `≤ +${(lg.margin * 100).toFixed(0)}%（${latMargin.toFixed(1)}ms）`,
-    });
+    if (missing.has('complaints')) {
+      skip('complaint_rate', '投诉率', 'complaints');
+    } else {
+      const complaintTest = twoProportionZ(c.complaints, c.n, t.complaints, t.n);
+      const cg = cfg.guardrails.complaintRate;
+      const complaintNi = nonInferiority(c.complaints, c.n, t.complaints, t.n, cg.margin, cg.alpha);
+      guardrails.push({
+        key: 'complaint_rate',
+        label: '投诉率',
+        controlRate: c.complaints / c.n,
+        treatmentRate: t.complaints / t.n,
+        diff: complaintTest.diff,
+        p: complaintTest.p,
+        worse: guardrailBlocks(complaintNi, cg.mode),
+        gating: cg.gating, // 低基数、噪声大，仅提示不拦截
+        propTest: complaintTest,
+        nonInferiority: complaintNi,
+        marginLabel: cg.margin > 0 ? `≤ ${(cg.margin * 100).toFixed(3)}pp` : '任何确认的上升都要提示',
+      });
+    }
+
+    if (missing.has('latencyP95')) {
+      skip('latency_p95', 'P95 延迟', 'latencyP95');
+    } else {
+      const lc = c.latencyWeighted / c.n;
+      const lt = t.latencyWeighted / t.n;
+      const lg = cfg.guardrails.latencyP95;
+      const latC = rows.filter((r) => r.variant === 'control').map((r) => r.latencyP95);
+      const latT = rows.filter((r) => r.variant === 'treatment').map((r) => r.latencyP95);
+      const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
+      // 延迟用相对容忍度：margin 读作「相对 control 的比例」
+      const latMargin = lg.relative ? lc * lg.margin : lg.margin;
+      const latBoot = bootstrapTwoSample(latC, latT, (x, y) => mean(y) - mean(x), {
+        reps: cfg.bootstrapReps,
+        seed: cfg.simSeed,
+        // Bootstrap 百分位检验：p = 比例{θ* ≤ margin}，p 小 → 有证据认为恶化已超过容忍度
+        threshold: latMargin,
+      });
+      const latP = latBoot.pBelow ?? 1;
+      guardrails.push({
+        key: 'latency_p95',
+        label: 'P95 延迟',
+        controlRate: lc,
+        treatmentRate: lt,
+        diff: lt - lc,
+        p: latP,
+        worse: latP < lg.alpha,
+        gating: lg.gating, // 延迟噪声大且与损失非线性，v1 仅展示
+        bootstrap: latBoot,
+        marginLabel: `≤ +${(lg.margin * 100).toFixed(0)}%（${latMargin.toFixed(1)}ms）`,
+      });
+    }
   }
 
   const evidence: Evidence[] = [];
@@ -963,6 +1003,11 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
 
   // ---- 护栏 ----
   for (const g of guardrails) {
+    if (g.unavailable) {
+      // 没有数据就没有「逐步代入」可给——给一条说明，并把结论导向「补齐这一列」
+      add('guardrail', `护栏：${g.label}（未评估）`, `${g.unavailable}。**不能把未评估当成未恶化**：要判断这条护栏，需要 refunds / complaints / latencyP95 这几列。`);
+      continue;
+    }
     const isMs = g.key === 'latency_p95';
     const fmt = (v: number) => (isMs ? `${v.toFixed(0)}ms` : `${(v * 100).toFixed(2)}%`);
     const fmtDiffV = (v: number) => (isMs ? `${v >= 0 ? '+' : ''}${v.toFixed(0)}ms` : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}pp`);

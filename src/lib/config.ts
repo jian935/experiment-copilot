@@ -69,6 +69,14 @@ export interface DecisionConfig {
    */
   useCuped?: boolean;
 
+  /**
+   * 数据里整列缺失、因此无法评估的护栏（由导入器填，内置数据为空）。
+   *
+   * 为什么不用「填 0 然后照常算」：那会让护栏显示「0.00% → 0.00%，未恶化」，
+   * 读者会以为「查过了，没问题」，实际是**没数据**。缺数据必须显示成缺数据。
+   */
+  missingGuardrails?: Array<'refunds' | 'complaints' | 'latencyP95'>;
+
   /** Bootstrap 重抽样次数（蓝图 §8 要求 10k） */
   bootstrapReps: number;
   /** 蒙特卡洛 / Bootstrap 的固定种子：保证结论可复现 */

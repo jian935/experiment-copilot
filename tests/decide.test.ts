@@ -106,6 +106,46 @@ describe('决策规则', () => {
     expect(a.decision).toBe('iterate');
     expect(a.reasonCode).toBe('HETEROGENEOUS');
   });
+  it('缺 refunds 列：护栏标「不可用」并退出决策，绝不冒充「未恶化」', () => {
+    // 导入的数据常常没有退款列。归一化会把它填 0，于是「0.00% → 0.00%，未恶化」——
+    // 这句话在证据链里就是编数字。正确行为：标成未评估，并且不再参与决策。
+    const exp = mkExp();
+    const rows = mkRows(exp.id, {
+      cNew: { c: 200, n: 4000 }, tNew: { c: 280, n: 4000 },
+      cOld: { c: 800, n: 16000 }, tOld: { c: 1120, n: 16000 },
+      refundC: 48, refundT: 120,
+    });
+    const full = analyze(exp, rows);
+    const gFull = full.guardrails.find((g) => g.key === 'refund_rate')!;
+    expect(gFull.worse).toBe(true);
+    expect(full.decision).toBe('no-ship');
+
+    const noRefund = analyze(exp, rows, { missingGuardrails: ['refunds'] });
+    const g = noRefund.guardrails.find((g) => g.key === 'refund_rate')!;
+    expect(g.unavailable).toContain('refunds');
+    expect(g.gating).toBe(false);
+    expect(g.worse).toBe(false);
+    // 缺数据时门少了一道，决策会变——这个代价必须可见（证据里明确写「未评估」），
+    // 而不是靠一个假的 0.00% 让它看起来「查过了」
+    expect(noRefund.evidence.some((ev) => ev.label.includes('未评估'))).toBe(true);
+    expect(noRefund.decision).not.toBe('no-ship');
+    // 缺一列不能让另外两条从表里消失（第一版写成 else-if 链，缺 refunds 时只剩一行）
+    expect(noRefund.guardrails.map((g) => g.key)).toEqual(['refund_rate', 'complaint_rate', 'latency_p95']);
+    expect(noRefund.guardrails.filter((g) => !g.unavailable).length).toBe(2);
+  });
+
+  it('只缺投诉率时，退款率照常评估（缺一列不能连累另一列）', () => {
+    const exp = mkExp();
+    const rows = mkRows(exp.id, {
+      cNew: { c: 200, n: 4000 }, tNew: { c: 280, n: 4000 },
+      cOld: { c: 800, n: 16000 }, tOld: { c: 1120, n: 16000 },
+      refundC: 48, refundT: 120,
+    });
+    const a = analyze(exp, rows, { missingGuardrails: ['complaints'] });
+    expect(a.guardrails.find((g) => g.key === 'refund_rate')!.unavailable).toBeUndefined();
+    expect(a.guardrails.find((g) => g.key === 'complaint_rate')!.unavailable).toContain('complaints');
+  });
+
 });
 
 describe('贝叶斯置信度', () => {

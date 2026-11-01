@@ -26,8 +26,13 @@ export function buildLoaded(dataset: Dataset, cfg?: Partial<DecisionConfig>): Lo
     else rowsByExp.set(r.expId, [r]);
   }
 
+  // 整列缺失的护栏要传到引擎里：缺 refunds 就不能算出一个「0.00% → 0.00%，未恶化」的假结论
+  const missingGuardrails = (dataset.missingColumns ?? []).filter(
+    (c): c is 'refunds' | 'complaints' | 'latencyP95' => c === 'refunds' || c === 'complaints' || c === 'latencyP95',
+  );
+  const cfgWithMissing = { ...cfg, missingGuardrails };
   const analyses = new Map<string, Analysis>();
-  for (const e of dataset.experiments) analyses.set(e.id, analyze(e, rowsByExp.get(e.id) ?? [], cfg));
+  for (const e of dataset.experiments) analyses.set(e.id, analyze(e, rowsByExp.get(e.id) ?? [], cfgWithMissing));
 
   return { dataset, analyses, rowsByExp };
 }

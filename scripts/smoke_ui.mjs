@@ -248,6 +248,71 @@ async function runPersistScenario() {
   return problems;
 }
 
+/* ─────────── 第七阶段：导入的数据缺列时，护栏必须说「不可用」 ───────────
+ * 这一条防的不是崩溃，是**编数**：refunds 缺失会被归一化成 0，
+ * 于是表格写成「0.00% → 0.00%，未恶化」，读起来像「查过了，没问题」。
+ * 所以这里验的是文案：出现「不可用（缺列）」、且没有冒充的 0.00%。
+ */
+async function runMissingColumnScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('实验列表'), '列表页加载');
+
+    await clickText('button', '导入数据');
+    await waitText((t) => t.includes('载入并分析'), '导入对话框打开');
+
+    const expId = await evaluate(`(async () => {
+      const ds = await (await fetch('data/dataset.json')).json();
+      const e = ds.experiments[0];
+      const daily = ds.daily
+        .filter((r) => r.expId === e.id)
+        .map((r) => {
+          const { refunds, complaints, latencyP95, ...rest } = r;
+          return rest; // 三列护栏全缺
+        });
+      const ta = document.querySelector('textarea');
+      if (!ta) return 'no-textarea';
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, JSON.stringify({ ...ds, experiments: [e], daily }));
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return e.id;
+    })()`);
+    if (!expId || expId === 'no-textarea') throw new Error('找不到 textarea');
+
+    await clickText('button', '载入并分析');
+    await waitText((t) => t.includes('导入 · 1 例'), '缺列数据导入完成');
+    await sleep(1300);
+
+    await send('Page.navigate', { url: `${BASE}/#/e/${expId}` });
+    await waitText((t) => t.includes('证据链'), '详情页加载');
+    await clickText('button', '护栏指标');
+    await sleep(300);
+
+    const text = await evaluate('document.body.innerText');
+    if (!text.includes('不可用（缺列）')) problems.push('缺 refunds 列时护栏没标「不可用（缺列）」');
+    if (!text.includes('未评估')) problems.push('缺列时没有出现「未评估」字样');
+    // 三检查里那一格必须是「不适用」，不是「通过」
+    if (!text.includes('不适用')) problems.push('硬护栏未评估时，三检查没有显示「不适用」');
+    // 「不适用」与「硬护栏未触发」同时出现是自相矛盾的（一个是没查、一个是查了没问题）
+    if (text.includes('不适用') && text.includes('硬护栏未触发')) problems.push('三检查同时写了「不适用」和「硬护栏未触发」');
+    // 不能出现冒充的 0.00%（表格里应全是「—」）
+    const fake = /退款率[\s\S]{0,40}0\.00%/.test(text);
+    if (fake) problems.push('缺列时护栏仍显示了 0.00%（把「没数据」当成了「是 0」）');
+
+    // 收尾：切回内置，别把后面的场景（与人工看页面）留在导入态
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('导入 · 1 例'), '回到列表页');
+    await clickText('button', '导入 ·');
+    await sleep(250);
+    await clickText('button', '内置合成数据');
+    await waitText((t) => t.includes('内置 · 120 例'), '切回内置');
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 /* ─────────── 第三阶段：从列表页勾两个进对比（F3 入口） ───────────
  * 对比页能按 URL 打开不代表用户找得到它。这一步只验一件事：
  * **在列表里勾两个、点一下，就能到共用横轴的对比页**。
@@ -485,6 +550,18 @@ if (persistProblems.length) {
   for (const p of persistProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（刷新后数据仍在，两种数据源可来回切）');
+}
+console.log('');
+
+const missingProblems = await runMissingColumnScenario();
+console.log(`\n缺列数据（护栏）：导入没有 refunds 列的数据 → 护栏标「不可用」而不是 0.00%`);
+console.log('─'.repeat(70));
+if (missingProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of missingProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（护栏写「不可用（缺列）」，三检查写「不适用」，没有冒充的 0.00%）');
 }
 console.log('');
 
