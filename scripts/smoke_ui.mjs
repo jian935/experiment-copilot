@@ -121,6 +121,14 @@ function send(method, params = {}) {
 
 async function evaluate(expr) {
   const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true });
+  // 求值失败（语法错误 / 抛异常）时 CDP 只回 exceptionDetails、没有 result。
+  // 以前这里静默返回 undefined，于是「表达式报错」和「页面没渲染」在调用侧长得一模一样
+  // ——排查时只能靠猜。这里直接抛，顺带把页面里的第一行错误带出来。
+  if (!r.result) {
+    throw new Error(
+      `Runtime.evaluate 没有返回值（表达式大概率写错了）：${JSON.stringify(r.exceptionDetails ?? r).slice(0, 220)}`,
+    );
+  }
   return r.result?.value;
 }
 
@@ -147,7 +155,7 @@ for (const route of ROUTES) {
   for (const bad of ['undefined', 'NaN', '[object Object]']) {
     if (text.includes(bad)) {
       const at = text.indexOf(bad);
-      problems.push(`正文出现「${bad}」：…${text.slice(Math.max(0, at - 40), at + 20).replace(/\n/g, ' ')}…`);
+      problems.push(`正文出现「${bad}」：…${text.slice(Math.max(0, at - 40), at + 20).replace(/\\n/g, ' ')}…`);
     }
   }
   for (const k of route.must) {
@@ -277,6 +285,79 @@ async function runCompareScenario() {
   return problems;
 }
 
+/* ─────────── 第四阶段：⌘K 全局搜索（F4） ───────────
+ * URL 能进的页面不代表找得到这一段验证三件事：
+ * ① Ctrl+K 能唤出面板；② 输入后有命中，且编号精确匹配排第一；
+ * ③ **回车直达**——键盘走完全程，而不是只能鼠标点。
+ */
+async function runPaletteScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('实验列表'), '列表页加载');
+
+    const opened = await evaluate(`(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+      return true;
+    })()`);
+    if (!opened) throw new Error('派发 Ctrl+K 失败');
+    await waitText((t) => t.includes('输入关键词开始搜索'), '面板打开', 40);
+
+    await send('Input.insertText', { text: 'E001' });
+    await sleep(250);
+    const hits = await waitText((t) => t.includes('结算页改版'), '搜到 E001', 40);
+    if (!hits.includes('支付转化率')) problems.push('命中项缺少副标题（主指标）');
+
+    // 居首断言：第一条必须就是 E001，而不是某个正文里含 e001 的实验
+    const first = await evaluate(`(() => {
+      const el = document.querySelector('[data-idx="0"]');
+      return el ? el.innerText.replace(/\\n/g, ' ') : 'NO_ROW';
+    })()`);
+    if (!first.includes('E001')) problems.push(`编号精确搜索时第一条不是 E001：${first.slice(0, 40)}`);
+
+    // 键盘走完全程：↓ 一次再 ↑ 回来，然后回车
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 40, code: 'ArrowDown', key: 'ArrowDown' });
+    await sleep(120);
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 38, code: 'ArrowUp', key: 'ArrowUp' });
+    await sleep(120);
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter' });
+    await sleep(400);
+    const hash = await evaluate('location.hash');
+    if (!hash.startsWith('#/e/E001')) problems.push(`回车没有直达 E001 详情：${hash}`);
+
+    // 上一步回车已经跳到详情页，面板随之关闭 —— 重新唤开
+    await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`);
+    await waitText((t) => t.includes('输入关键词开始搜索'), '第二次打开面板', 40);
+
+    // 面板里写着「试：护栏（按规则名找）」——这是**对外承诺**，必须真的能搜到
+    const guardRows = await evaluate(`(() => {
+      const el = document.querySelector('input[placeholder^="搜实验"]');
+      if (!el) return 'no-input';
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      set.call(el, '护栏');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'ok';
+    })()`);
+    if (guardRows !== 'ok') throw new Error(`重设输入框失败：${guardRows}`);
+    await sleep(350);
+    const nGuard = await evaluate(`document.querySelectorAll('[data-idx]').length`);
+    if (!(nGuard > 0)) problems.push('搜「护栏」没有结果：面板空状态里承诺过可以这样找');
+    const guardFirst = await evaluate(`(() => { const el = document.querySelector('[data-idx="0"]'); return el ? el.innerText.replace(/\\n/g, ' ') : ''; })()`);
+    if (!guardFirst.includes('E001')) problems.push(`搜「护栏」的第一条不是被护栏拦住的 E001：${guardFirst.slice(0, 40)}`);
+
+    // Esc 能关
+    await evaluate(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))`);
+    await sleep(200);
+    await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 27, code: 'Escape', key: 'Escape' });
+    await sleep(250);
+    const closed = await evaluate(`!!document.querySelector('[data-idx="0"]')`);
+    if (closed) problems.push('Esc 没有关闭面板');
+  } catch (e) {
+    problems.push(`${e && e.message ? e.message : e} @ ${String(e && e.stack ? e.stack : '').split('\n')[1] ?? ''}`);
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -306,6 +387,18 @@ if (compareProblems.length) {
   for (const p of compareProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（选择条出现、跳转到 #/compare、同单位共用横轴）');
+}
+console.log('');
+
+const paletteProblems = await runPaletteScenario();
+console.log(`\n⌘K 全局搜索（F4）：Ctrl+K → 输入 E001 → ↑↓ → 回车直达 → Esc 关闭`);
+console.log('─'.repeat(70));
+if (paletteProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of paletteProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（键盘可用、编号精确匹配排第一、回车直达详情）');
 }
 console.log('');
 

@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowLeftRight, Check, Info, TriangleAlert } from 'lucide-re
 import type { Analysis } from '../../lib/decide.ts';
 import type { Dataset, Experiment } from '../../lib/types.ts';
 import { compareExperiments } from '../../lib/compare.ts';
+import { searchExperiments } from '../../lib/search.ts';
 import { ARCHETYPE_LABEL, DECISION_META, fmtDiff, fmtNum, fmtP } from '../lib/format';
 import { C } from '../lib/palette';
 import { Forest, type ForestRow } from './Forest';
@@ -346,11 +347,15 @@ function Picker({
   onPick: (id: string) => void;
 }) {
   const [kw, setKw] = useState('');
+  // 与 ⌘K 共用同一个检索函数（`lib/search.ts`）：
+  // 两处各写一份 includes，迟早会出现「⌘K 搜得到、这里搜不到」这种说不清的差异。
+  const matched = useMemo(() => {
+    if (!kw.trim()) return null;
+    return new Set(searchExperiments(dataset.experiments, analyses, kw));
+  }, [dataset.experiments, analyses, kw]);
   const list = dataset.experiments.filter((e) => {
     if (pinned && e.id === pinned.id) return false;
-    if (!kw.trim()) return true;
-    const k = kw.trim().toLowerCase();
-    return `${e.id} ${e.name} ${e.hypothesis} ${e.primaryMetric}`.toLowerCase().includes(k);
+    return matched ? matched.has(e.id) : true;
   });
   const pinnedAn = pinned ? analyses.get(pinned.id) : undefined;
 

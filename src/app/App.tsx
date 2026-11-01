@@ -1,5 +1,5 @@
-import { Activity, Code2, Loader2, Settings2, TriangleAlert, Upload } from 'lucide-react';
-import { useState } from 'react';
+import { Activity, Code2, Loader2, Search, Settings2, TriangleAlert, Upload } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { useDataset, useHashRoute } from './lib/useDataset';
 import { useSettings } from './lib/settings';
 import { ExperimentList } from './components/ExperimentList';
@@ -9,7 +9,11 @@ import { ImportDialog } from './components/ImportDialog';
 import { DataSourceChip } from './components/DataSourceChip';
 import { CompareScreen, compareHref } from './components/CompareScreen';
 import { SettingsScreen } from './components/SettingsScreen';
+import { CommandPalette } from './components/CommandPalette';
+import { buildDocs, type SearchDoc } from '../lib/search.ts';
 import { Button } from './components/ui';
+// 面板里承诺了「能按规则名搜」：引擎只有英文规则码，中文标签得从这里补进去
+import { DECISION_META, REASON_META } from './lib/format';
 
 export default function App() {
   const { settings, patchConfig, patchLlm, reset } = useSettings();
@@ -18,6 +22,112 @@ export default function App() {
     useDataset(settings.config);
   const { expId, ev, isEval, isSettings, isCompare, compareA, compareB, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // ⌘K / Ctrl+K：Win/Linux 上没有 ⌘，两个都收；输入框里也放行（浏览器默认 Ctrl+K 是跳浏览器搜索栏）
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+
+  /** ⌘K 里能执行的动作：静态页 + 需要回调的事（导入、切数据源）。
+   *  数据源相关的两条按当前状态给——没有存档时不该出现「切回导入」。 */
+  /**
+   * ⌘K 里能执行的动作：静态页 + 需要回调的事（导入、切数据源）。
+   * 数据源相关的两条按当前状态给——没有存档时不该出现「切回导入」。
+   *
+   * 每个动作**显式声明 `extra` 关键词**，`subtitle` 只作展示：
+   * 早期把副标题也当可搜内容，结果搜「护栏」第一条蹦出来的是设置页——
+   * 因为它的副标题写着「α、护栏 margin、SRM 阈值」。那是解说字段名，不是这个名字。
+   */
+  const actions = useMemo<SearchDoc[]>(
+    () => [
+      {
+        kind: 'action',
+        id: 'act:list',
+        target: '#/',
+        title: '回到实验列表',
+        subtitle: '全部 120 个实验，可再筛选',
+        extra: '实验列表 全部 清选 排序',
+        group: '功能',
+      },
+      {
+        kind: 'action',
+        id: 'act:eval',
+        target: '#/eval',
+        title: '评测看板',
+        subtitle: '准确率 / FPR / 分层 F1 / 幻觉数字率',
+        extra: '评测 看板 准确率 FPR 分层 F1 幻觉 数字 混淆矩阵 自校准',
+        group: '功能',
+      },
+      {
+        kind: 'action',
+        id: 'act:settings',
+        target: '#/settings',
+        title: '口径字典 / 设置',
+        subtitle: 'α、护栏 margin、SRM 阈值、判定口径',
+        extra: '设置 口径字典 字典 α margin SRM 阈值 判定口径',
+        group: '功能',
+      },
+      {
+        kind: 'action',
+        id: 'act:compare',
+        target: '#/compare',
+        title: '实验对比',
+        subtitle: '选两个实验共用一条横轴对照',
+        extra: '对比 对照 横轴 两次实验',
+        group: '功能',
+      },
+      {
+        kind: 'action',
+        id: 'act:import',
+        target: 'import',
+        title: '导入数据',
+        subtitle: '支持本产品导出的 JSON / CSV，存在本机刷新不丢',
+        extra: '导入 上传 JSON CSV 本机存储 IndexedDB',
+        group: '功能',
+      },
+      ...(storedMeta
+        ? [
+            {
+              kind: 'action' as const,
+              id: 'act:use-imported',
+              target: 'use-imported',
+              title: `切到导入的数据（${storedMeta.experiments} 例）`,
+              subtitle: storedMeta.name,
+              extra: '数据源 切换 导入的数据 存档',
+              group: '功能',
+            },
+            {
+              kind: 'action' as const,
+              id: 'act:forget',
+              target: 'forget',
+              title: '删除本机存档',
+              subtitle: '删掉这份导入数据，回到内置 120 例',
+              extra: '删除 存档 数据源 内置',
+              group: '功能',
+            },
+          ]
+        : []),
+    ],
+    [storedMeta],
+  );
+  const searchDocsAll = useMemo(
+    () =>
+      data
+        ? buildDocs(data.dataset, data.analyses, actions, (an) => [
+            REASON_META[an.reasonCode] ?? '',
+            DECISION_META[an.decision]?.label ?? '',
+          ])
+        : actions,
+    [data, actions],
+  );
 
   return (
     <div className="min-h-screen bg-base bg-grid">
@@ -70,6 +180,15 @@ export default function App() {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => setPaletteOpen(true)}
+              title="全局搜索（⌘K / Ctrl+K）"
+              className="hidden items-center gap-2 rounded-lg border border-line bg-panel2/70 py-1.5 pl-2.5 pr-2 text-[11.5px] text-dim transition-colors hover:border-line2 hover:text-muted md:flex"
+            >
+              <Search size={13} />
+              搜索
+              <kbd className="rounded border border-line2 px-1 text-[10px]">⌘K</kbd>
+            </button>
             <DataSourceChip
               source={source}
               meta={meta}
@@ -226,6 +345,21 @@ export default function App() {
           <span className="ml-auto">作者：jian935</span>
         </div>
       </footer>
+
+      <CommandPalette
+        open={paletteOpen}
+        docs={searchDocsAll}
+        onClose={() => setPaletteOpen(false)}
+        hint={source === 'user' ? '当前为导入数据' : `内置 ${data?.dataset.experiments.length ?? 0} 例`}
+        onRun={(h) => {
+          setPaletteOpen(false);
+          const t = h.doc.target;
+          if (t === 'import') setImportOpen(true);
+          else if (t === 'use-imported') void useImported();
+          else if (t === 'forget') void forgetImport();
+          else go(t);
+        }}
+      />
 
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} onImport={importData} />
     </div>
