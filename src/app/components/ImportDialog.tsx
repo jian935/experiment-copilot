@@ -19,7 +19,8 @@ export function ImportDialog({
 }: {
   open: boolean;
   onClose: () => void;
-  onImport: (dataset: Dataset) => void;
+  /** 返回落盘结果：persisted=false 时说明只在本标签页有效，必须显示给用户看 */
+  onImport: (dataset: Dataset, name: string) => Promise<{ persisted: boolean; persistedNote?: string }>;
 }) {
   const [tab, setTab] = useState<Tab>('json');
   const [text, setText] = useState('');
@@ -45,22 +46,31 @@ export function ImportDialog({
     }
   }
 
-  function handleImport() {
+  async function handleImport() {
     setError(null);
     setOk(null);
     if (!text.trim()) {
       setError('请先粘贴数据，或上传一个文件');
       return;
     }
+    let dataset: Dataset;
     try {
-      const dataset = tab === 'json' ? parseDatasetJson(text) : parseDatasetCsv(text);
-      const gtNote = dataset.groundTruth ? '（含已知真值，评测看板可用）' : '（无已知真值，评测看板将隐藏）';
-      onImport(dataset);
-      setOk(`已载入 ${dataset.experiments.length} 个实验、${dataset.daily.length} 行明细 ${gtNote}`);
-      setTimeout(onClose, 600);
+      dataset = tab === 'json' ? parseDatasetJson(text) : parseDatasetCsv(text);
     } catch (e) {
       if (e instanceof ImportError) setError(e.message);
       else setError(`导入失败：${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    const gtNote = dataset.groundTruth ? '（含已知真值，评测看板可用）' : '（无已知真值，评测看板将隐藏）';
+    const name = fileName ?? (tab === 'csv' ? '粘贴的 CSV' : '粘贴的 JSON');
+    const head = `已载入 ${dataset.experiments.length} 个实验、${dataset.daily.length} 行明细 ${gtNote}`;
+    try {
+      const meta = await onImport(dataset, name);
+      // 存不下必须说出来：静默失败比不持久化更糟（用户会以为下次还在）
+      setOk(meta.persisted ? `${head}，已保存在本机，刷新不丢` : `${head}。${meta.persistedNote ?? '本次只在当前标签页有效'}`);
+      setTimeout(onClose, meta.persisted ? 900 : 2600);
+    } catch (e) {
+      setError(`导入失败：${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

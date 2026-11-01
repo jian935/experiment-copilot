@@ -17,6 +17,9 @@
  *   ③ 全程没有未捕获异常、没有 console.error
  */
 import { spawn } from 'node:child_process';
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const EDGE = process.env.EDGE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const BASE = (process.env.BASE || 'http://127.0.0.1:4321/').replace(/\/$/, '');
@@ -25,6 +28,11 @@ const W = Number(process.env.W || 1440);
 const H = Number(process.env.H || 1000);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 每次跑用一个全新的浏览器 profile。
+// 为什么必须：这一版开始脚本要写/读 IndexedDB（导入持久化），
+// 复用默认 profile 会让上一次运行的存档漏进这一次，测试就变成"看运气"。
+const PROFILE = join(tmpdir(), `expcopilot-smoke-${process.pid}`);
 
 // 每条路由都要覆盖到不同的代码路径：列表（混排两种口径）、
 // 率口径详情、连续口径详情（ARPU 面板 + 因子分解）、异质、护栏拦截、评测、设置
@@ -45,6 +53,7 @@ const edge = spawn(
     '--no-sandbox',
     '--hide-scrollbars',
     `--window-size=${W},${H}`,
+    `--user-data-dir=${PROFILE}`,
     'about:blank',
   ],
   { stdio: 'ignore' },
@@ -150,6 +159,84 @@ for (const route of ROUTES) {
   if (problems.length) failed++;
 }
 
+/* ─────────── 第二阶段：导入持久化往返（C3） ───────────
+ * 这一段的判据只有一条，但它是 C3 的全部意义：**导入后刷新，数据还在**。
+ * 做法是真的走 UI：点「导入数据」→ 往 textarea 里填一份 1 个实验的数据 →
+ * 点「载入并分析」→ 等芯片变成「导入 · 1 例」→ 硬刷新 → 再验一遍。
+ * 顺带验「切回内置」可用，且切回后存档入口不该被禁用（否则就切不回来了）。
+ */
+async function waitText(pred, label, tries = 80) {
+  for (let i = 0; i < tries; i++) {
+    await sleep(120);
+    const t = (await evaluate('document.querySelector("#root")?.innerText ?? ""')) || '';
+    if (pred(t)) return t;
+  }
+  throw new Error(`等待超时：${label}`);
+}
+
+/** 点一个「文字包含」的按钮（对话框与芯片都走真实点击，不调内部 API） */
+async function clickText(selector, text) {
+  const ok = await evaluate(`(() => {
+    const els = [...document.querySelectorAll(${JSON.stringify(selector)})];
+    const el = els.find((e) => (e.innerText || '').trim().includes(${JSON.stringify(text)}));
+    if (!el) return false;
+    el.click();
+    return true;
+  })()`);
+  if (!ok) throw new Error(`点不到「${text}」`);
+}
+
+async function runPersistScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('内置'), '列表页加载');
+
+    await clickText('button', '导入数据');
+    await waitText((t) => t.includes('载入并分析'), '导入对话框打开');
+
+    // 造一份「1 个实验」的合法数据：从内置数据里切一个出来，schema 必然正确
+    const filled = await evaluate(`(async () => {
+      const ds = await (await fetch('data/dataset.json')).json();
+      const e = ds.experiments[0];
+      const mini = { ...ds, experiments: [e], daily: ds.daily.filter((r) => r.expId === e.id) };
+      const ta = document.querySelector('textarea');
+      if (!ta) return 'no-textarea';
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(ta, JSON.stringify(mini));
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+      return e.id;
+    })()`);
+    if (!filled || filled === 'no-textarea') throw new Error('找不到 textarea');
+
+    await clickText('button', '载入并分析');
+    await waitText((t) => t.includes('导入 · 1 例'), '导入后芯片切换');
+    await sleep(1300); // 等 dialog 自动关闭（存成功时 900ms 后关）
+
+    // 关键一步：硬刷新。这一行就是 C3 的验收条件。
+    await send('Page.reload', { ignoreCache: true });
+    const after = await waitText((t) => t.includes('导入 · 1 例'), '刷新后仍在');
+    if (!after.includes(filled)) problems.push(`刷新后看不到导入的实验 ${filled}`);
+    if (after.includes('内置 · 120 例')) problems.push('刷新后芯片退回了内置数据源');
+
+    // 切回内置：导入的存档不能因此被删掉（还能切回来）
+    await clickText('button', '导入 ·');
+    await sleep(250);
+    await clickText('button', '内置合成数据');
+    await waitText((t) => t.includes('内置 · 120 例'), '切回内置');
+    await clickText('button', '内置 ·');
+    await sleep(250);
+    const canSwitchBack = await evaluate(`(() => {
+      const el = [...document.querySelectorAll('button')].find((e) => (e.innerText || '').includes('导入：'));
+      return !!el && !el.disabled;
+    })()`);
+    if (!canSwitchBack) problems.push('切回内置后，存档入口被禁用了（应该还能切回导入的数据）');
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -158,6 +245,31 @@ for (const r of rows) {
 }
 console.log('');
 
+const persistProblems = await runPersistScenario();
+console.log(`\n导入持久化（C3）：导入 → 硬刷新 → 切回内置 → 切回导入`);
+console.log('─'.repeat(70));
+if (persistProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of persistProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（刷新后数据仍在，两种数据源可来回切）');
+}
+console.log('');
+
 ws.close();
 edge.kill();
+// 等浏览器真的退出再删 profile：kill 是异步的，立刻删会 EBUSY（临时目录删不掉不影响结论，别让清理反过来弄崩测试）
+await new Promise((resolve) => {
+  const t = setTimeout(resolve, 2000);
+  edge.once('exit', () => {
+    clearTimeout(t);
+    resolve();
+  });
+});
+try {
+  rmSync(PROFILE, { recursive: true, force: true });
+} catch {
+  /* 留给系统清理 */
+}
 process.exit(failed ? 1 : 0);

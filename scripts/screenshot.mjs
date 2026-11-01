@@ -14,12 +14,17 @@
  * 或者把 BASE 用 --base 显式给全（脚本会把两者拼起来，不做任何解析）。
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { dirname } from 'node:path';
 
 const EDGE = process.env.EDGE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
 const BASE = (process.env.BASE || 'http://127.0.0.1:4321').replace(/\/$/, '');
 const PORT = Number(process.env.CDP_PORT || 9466);
+// 独立 profile：截图跑完会留下 IndexedDB（导入过的数据源），
+// 复用默认 profile 会让「数据源」这类状态在两次截图之间互相污染。
+const PROFILE = join(tmpdir(), `expcopilot-shot-${process.pid}`);
 
 const args = process.argv.slice(2);
 const hash = args[0] || '#/';
@@ -36,7 +41,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const edge = spawn(
   EDGE,
-  ['--headless=new', `--remote-debugging-port=${PORT}`, '--no-sandbox', '--hide-scrollbars', `--window-size=${width},1200`, 'about:blank'],
+  ['--headless=new', `--remote-debugging-port=${PORT}`, '--no-sandbox', '--hide-scrollbars', `--window-size=${width},1200`,
+    `--user-data-dir=${PROFILE}`, 'about:blank'],
   { stdio: 'ignore' },
 );
 
@@ -93,6 +99,15 @@ for (let i = 0; i < 80; i++) {
 if (!ready) console.warn('⚠ 12 秒内没等到渲染完成，可能是白屏；仍按当前状态截图');
 await sleep(400);
 
+// 可选：截图前先执行一段 JS（用来抓「点开下拉 / 切换 tab」这类默认不可见的状态）。
+// 传 `@path` 表示从文件读——长脚本塞进命令行会被引号转义搞死。
+const preArg = args[3];
+if (preArg) {
+  const pre = preArg.startsWith('@') ? readFileSync(preArg.slice(1), 'utf8') : preArg;
+  await send('Runtime.evaluate', { expression: pre, returnByValue: true, awaitPromise: true });
+  await sleep(450);
+}
+
 const m = await send('Page.getLayoutMetrics');
 const h = Math.ceil(m.cssContentSize.height);
 await send('Emulation.setDeviceMetricsOverride', { width, height: h, deviceScaleFactor: 1, mobile: false });
@@ -104,4 +119,16 @@ console.log(`${out}  ${width}×${h}`);
 
 ws.close();
 edge.kill();
+await new Promise((resolve) => {
+  const t = setTimeout(resolve, 1500);
+  edge.once('exit', () => {
+    clearTimeout(t);
+    resolve();
+  });
+});
+try {
+  rmSync(PROFILE, { recursive: true, force: true });
+} catch {
+  /* 删不掉不影响截图结果 */
+}
 process.exit(0);

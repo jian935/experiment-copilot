@@ -6,13 +6,15 @@ import { ExperimentList } from './components/ExperimentList';
 import { ExperimentDetail } from './components/ExperimentDetail';
 import { EvalScreen } from './components/EvalScreen';
 import { ImportDialog } from './components/ImportDialog';
+import { DataSourceChip } from './components/DataSourceChip';
 import { SettingsScreen } from './components/SettingsScreen';
 import { Button } from './components/ui';
 
 export default function App() {
   const { settings, patchConfig, patchLlm, reset } = useSettings();
   // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
-  const { data, error, importData } = useDataset(settings.config);
+  const { data, error, source, meta, storedMeta, importData, useBuiltin, useImported, forgetImport } =
+    useDataset(settings.config);
   const { expId, ev, isEval, isSettings, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
 
@@ -67,7 +69,17 @@ export default function App() {
           </div>
 
           <div className="ml-auto flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)} title="导入自己的数据">
+            <DataSourceChip
+              source={source}
+              meta={meta}
+              storedMeta={storedMeta}
+              builtinCount={data?.dataset.experiments.length ?? 0}
+              hasImport={storedMeta !== null}
+              onUseBuiltin={useBuiltin}
+              onUseImported={useImported}
+              onForget={forgetImport}
+            />
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)} title="导入自己的数据（保存在本机，刷新不丢）">
               <Upload size={13} /> 导入数据
             </Button>
             <button
@@ -187,8 +199,12 @@ export default function App() {
           <span className="text-line2">|</span>
           <span>统计与决策全部在浏览器端确定性计算</span>
           <span className="text-line2">|</span>
-          {data && data.dataset.groundTruth === false ? (
-            <span>当前为导入数据（不含已知真值），评测看板指标不适用</span>
+          {source === 'user' ? (
+            data && data.dataset.groundTruth === false ? (
+              <span>当前为导入数据（不含已知真值），评测看板指标不适用</span>
+            ) : (
+              <span>当前为导入数据（含已知真值），已保存在本机</span>
+            )
           ) : (
             <span>数据为固定种子合成数据，用于已知真值评测</span>
           )}
