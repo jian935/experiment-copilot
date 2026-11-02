@@ -137,14 +137,25 @@ npm run method     # 方法论长文里的每个数字：覆盖率 / 多重比�
 ### CSV（日级明细，一行 = 一天 × 一个变体 × 一个分层）
 
 ```
-expId,date,variant,device,tenure,exposures,conversions,refunds,complaints,latencyP95,revenue,pre_exposures,pre_conversions,pre_revenue,name
-exp_001,2026-01-05,control,iOS,new,5000,260,60,5,800,新首页改版
-exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,新首页改版
+expId,date,variant,device,tenure,exposures,conversions,refunds,complaints,latencyP95,revenue,preExposures,preConversions,preRevenue,name,primaryMetric,metricType
+exp_001,2026-01-05,control,iOS,new,5000,260,60,5,800,18200,4800,250,17500,新首页改版,ARPU,continuous
+exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,22400,4800,248,17360,新首页改版,ARPU,continuous
 ```
+
+> 列名是**驼峰**（`preExposures` 而不是 `pre_exposures`）；列数少一个就会整行错位，所以用 Excel 导出后请核一遍表头。
 
 - 必需列：`expId, date, variant, exposures, conversions`；其余可选。
 - 实验元信息（名称、起止日期、有哪些护栏列）由明细自动推导，不用单独写。
 以 ARPU 为主指标时，元信息里写 `primaryMetric`（指标名）+ `metricType=continuous`；CSV 同名列直接映射。
+
+### 两份现成的样例（可直接下载导入）
+
+| 文件 | 内容 | 导入后能看到什么 |
+|---|---|---|
+| [`docs/import-sample.csv`](docs/import-sample.csv) | 2 个实验 × 2 天 × 2 设备 × 2 臂（16 行），一个率口径、一个 ARPU 口径 | 列表里出现 2 个实验，都判 `ship`；ARPU 那个走连续指标口径（差值以元计） |
+| [`docs/import-sample.json`](docs/import-sample.json) | 1 个实验，**主指标显著提升但退款率从 1.20% 涨到 3.00%** | 详情页出现红色 `GUARDRAIL` 否决横幅——这正是「先看硬前置检查，再谈显著性」的意思 |
+
+两份都是**编造的**数据，只用来演示格式；里面的 `trueDecision` / `trueLiftOverall` 是为了让评测看板可用。
 
 ### 导入数据与合成数据的差别
 

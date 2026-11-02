@@ -1,0 +1,17 @@
+﻿expId,date,variant,device,tenure,exposures,conversions,refunds,complaints,latencyP95,revenue,primaryMetric,metricType,name
+exp_101,2026-01-05,control,iOS,new,4200,214,42,4,780,,支付转化率,binary,结算页改版
+exp_101,2026-01-05,treatment,iOS,new,4180,268,44,5,795,,支付转化率,binary,结算页改版
+exp_101,2026-01-05,control,Android,old,3900,190,38,3,760,,支付转化率,binary,结算页改版
+exp_101,2026-01-05,treatment,Android,old,3920,244,39,4,772,,支付转化率,binary,结算页改版
+exp_101,2026-01-06,control,iOS,new,4300,221,44,5,782,,支付转化率,binary,结算页改版
+exp_101,2026-01-06,treatment,iOS,new,4280,275,45,5,798,,支付转化率,binary,结算页改版
+exp_101,2026-01-06,control,Android,old,3980,196,39,4,758,,支付转化率,binary,结算页改版
+exp_101,2026-01-06,treatment,Android,old,3990,250,40,4,770,,支付转化率,binary,结算页改版
+exp_102,2026-01-05,control,iOS,new,3100,155,31,3,800,18600,ARPU,continuous,会员包提价
+exp_102,2026-01-05,treatment,iOS,new,3080,170,33,3,812,23500,ARPU,continuous,会员包提价
+exp_102,2026-01-05,control,Android,old,2950,140,28,2,790,15800,ARPU,continuous,会员包提价
+exp_102,2026-01-05,treatment,Android,old,2960,158,29,3,805,19900,ARPU,continuous,会员包提价
+exp_102,2026-01-06,control,iOS,new,3150,158,32,3,802,18900,ARPU,continuous,会员包提价
+exp_102,2026-01-06,treatment,iOS,new,3120,174,33,3,815,23800,ARPU,continuous,会员包提价
+exp_102,2026-01-06,control,Android,old,3000,143,29,2,792,16000,ARPU,continuous,会员包提价
+exp_102,2026-01-06,treatment,Android,old,3010,161,30,3,808,20200,ARPU,continuous,会员包提价

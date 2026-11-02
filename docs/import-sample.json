@@ -1,0 +1,26 @@
+{
+  "_note": "编造的示例数据，不是任何真实业务。用途：导入后可直接看到「主指标显著提升，但护栏恶化 → 判不上线」。真实数据不会有 trueDecision/trueLiftOverall，那两个字段只决定「评测看板能不能用」。",
+  "experiments": [
+    {
+      "id": "demo_guardrail_01",
+      "name": "结算页默认勾选优惠券",
+      "hypothesis": "默认勾选优惠券会提升支付转化率",
+      "startDate": "2026-01-05",
+      "endDate": "2026-01-06",
+      "variants": ["control", "treatment"],
+      "trafficSplit": "50/50",
+      "primaryMetric": "支付转化率",
+      "metricType": "binary",
+      "guardrailMetrics": ["refunds"],
+      "archetype": "guardrail",
+      "trueLiftOverall": 0.015,
+      "trueDecision": "no-ship"
+    }
+  ],
+  "daily": [
+    { "expId": "demo_guardrail_01", "date": "2026-01-05", "variant": "control", "exposures": 2000, "conversions": 100, "refunds": 24, "complaints": 4, "latencyP95": 780 },
+    { "expId": "demo_guardrail_01", "date": "2026-01-05", "variant": "treatment", "exposures": 2000, "conversions": 130, "refunds": 60, "complaints": 5, "latencyP95": 795 },
+    { "expId": "demo_guardrail_01", "date": "2026-01-06", "variant": "control", "exposures": 2000, "conversions": 100, "refunds": 24, "complaints": 4, "latencyP95": 782 },
+    { "expId": "demo_guardrail_01", "date": "2026-01-06", "variant": "treatment", "exposures": 2000, "conversions": 130, "refunds": 60, "complaints": 5, "latencyP95": 798 }
+  ]
+}

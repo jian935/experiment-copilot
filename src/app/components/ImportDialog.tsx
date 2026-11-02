@@ -113,7 +113,11 @@ export function ImportDialog({
               <>
                 CSV 必需列：<code className="rounded bg-panel2 px-1">expId, date, variant, exposures, conversions</code>
                 ；可选：<code className="rounded bg-panel2 px-1">device, tenure, refunds, complaints, latencyP95, name</code>
-                。真实数据通常无真值 → 评测看板自动隐藏。
+                。要按 <b className="text-ink">ARPU</b> 算就再加{' '}
+                <code className="rounded bg-panel2 px-1">revenue</code>（该行总收入，元）+
+                <code className="rounded bg-panel2 px-1">metricType=continuous</code>；要开 CUPED 再加{' '}
+                <code className="rounded bg-panel2 px-1">preExposures, preConversions, preRevenue</code>
+                （驼峰，不是下划线）。列头少一个会让整行错位。真实数据通常无真值 → 评测看板自动隐藏。
               </>
             )}
           </p>
