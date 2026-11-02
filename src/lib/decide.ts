@@ -6,6 +6,11 @@ import {
   type PropTest, type RatioCell, type RatioTest, type SrmResult,
 } from './stats.ts';
 import { DEFAULT_CONFIG, mergeConfig, type DecisionConfig } from './config.ts';
+import { armsOf, allocationOf, armLabel, controlArmOf } from './arms.ts';
+import {
+  dunnettTwoSided, globalTest, probabilityBest, winnerCurse,
+  type BestResult, type DunnettResult, type GlobalTestResult,
+} from './multiarm.ts';
 import { buildPeekReport, type LookInput, type PeekReport } from './sequential.ts';
 import { noveltyReport, planExposureSplit, type NoveltyReport } from './novelty.ts';
 
@@ -110,6 +115,14 @@ export interface PrimaryView {
   relativeLift: number;
   /** 决策实际采用的口径 */
   via: 'cuped' | 'robust' | 'ztest' | 'delta';
+  /** 多臂：未经多重比较校正的边际 p（k=2 时不存在） */
+  pRaw?: number;
+  /** 多臂：边际 95% 区间（未校正） */
+  ciRaw95?: [number, number];
+  /** 是否已做多重比较校正（k>2） */
+  adjusted?: boolean;
+  /** 比较次数 m = k − 1 */
+  comparisons?: number;
 }
 
 /**
@@ -196,6 +209,13 @@ export interface Analysis {
   reasonCode: 'SRM' | 'GUARDRAIL' | 'NOT_SIG' | 'NEGATIVE' | 'HETEROGENEOUS' | 'POSITIVE';
   evidence: Evidence[];
   rules: RuleTrace[];
+  /**
+   * 逐臂比较（A/B/n）。两臂实验也有值（两行），但 `multiArm` 只在 k>2 时给出——
+   * 这样「是不是多臂」只看一个字段，不用数数组长度。
+   */
+  arms: ArmComparison[];
+  /** 多臂专属信息（校正口径、全局检验、P(best)、焦点臂与理由） */
+  multiArm?: MultiArmInfo;
 }
 
 /** 证据文本里的 p 值：erfc 大 |z| 下溢到 0 时写 <1e-16，避免出现 0.00e+0 */
@@ -268,17 +288,24 @@ function unpooledSe(t: PropTest): number {
 export type PrimaryMode = 'cuped' | 'robust' | 'ztest' | 'delta';
 
 /** 把明细折成 CUPED 需要的格子（协变量与主指标同口径） */
-function cupedCellsOf(rows: DailyRow[], kind: 'rate' | 'continuous'): CupedCell[] {
+function cupedCellsOf(
+  rows: DailyRow[],
+  kind: 'rate' | 'continuous',
+  control = 'control',
+  treatment = 'treatment',
+): CupedCell[] {
   const cells: CupedCell[] = [];
   for (const r of rows) {
     if (!(r.preExposures && r.exposures > 0)) continue;
+    const isTreatment = r.variant === treatment;
     if (kind === 'continuous') {
       if (r.preRevenue === undefined) continue;
-      cells.push({ n: r.exposures, c: r.revenue ?? 0, nPre: r.preExposures, cPre: r.preRevenue, treatment: r.variant === 'treatment' });
+      cells.push({ n: r.exposures, c: r.revenue ?? 0, nPre: r.preExposures, cPre: r.preRevenue, treatment: isTreatment });
     } else if (r.preConversions !== undefined) {
-      cells.push({ n: r.exposures, c: r.conversions, nPre: r.preExposures, cPre: r.preConversions, treatment: r.variant === 'treatment' });
+      cells.push({ n: r.exposures, c: r.conversions, nPre: r.preExposures, cPre: r.preConversions, treatment: isTreatment });
     }
   }
+  void control;
   return cells;
 }
 
@@ -304,41 +331,53 @@ function cupedCellsOf(rows: DailyRow[], kind: 'rate' | 'continuous'): CupedCell[
  */
 const MIN_CELLS_FOR_ROBUST = 24;
 
+export interface PairEstimate {
+  diff: number;
+  se: number;
+  via: PrimaryMode;
+  /** 该口径下的双侧 p（cuped→pAdj，robust→pRaw，ztest/delta→各自检验的 p） */
+  p: number;
+  /** 自由度：率口径的稳健估计用格子数，z 检验为 Infinity，连续口径用 Welch df */
+  df: number;
+}
+
 export function estimateAt(
   rows: DailyRow[],
   kind: 'rate' | 'continuous',
   mode: PrimaryMode,
-): { diff: number; se: number; via: PrimaryMode } | null {
+  control = 'control',
+  treatment = 'treatment',
+): PairEstimate | null {
   if (kind === 'continuous') {
-    const rt = ratioTest(ratioCellsOf(rows));
+    const rt = ratioTest(ratioCellsOf(rows, treatment));
     if (!rt) return null;
     if (mode === 'cuped') {
-      const cuCells = cupedCellsOf(rows, 'continuous');
+      const cuCells = cupedCellsOf(rows, 'continuous', control, treatment);
       const nPerArm = cuCells.filter((c) => c.treatment).length;
       const cu = cuCells.length >= MIN_CELLS_FOR_ROBUST && nPerArm >= 4
         ? cupedAdjust(cuCells, 'continuous')
         : null;
-      if (cu) return { diff: cu.diffAdj, se: cu.seAdj, via: 'cuped' };
+      if (cu) return { diff: cu.diffAdj, se: cu.seAdj, via: 'cuped', p: cu.pAdj, df: cu.df };
     }
-    return { diff: rt.diff, se: rt.se, via: 'delta' };
+    return { diff: rt.diff, se: rt.se, via: 'delta', p: rt.p, df: rt.df };
   }
-  const c = aggregate(rows, 'control');
-  const t = aggregate(rows, 'treatment');
+  const c = aggregate(rows, control);
+  const t = aggregate(rows, treatment);
   if (!(c.n > 0) || !(t.n > 0)) return null;
   const zt = twoProportionZ(c.c, c.n, t.c, t.n);
   if (mode === 'cuped' || mode === 'robust') {
-    const cuCells = cupedCellsOf(rows, 'rate');
+    const cuCells = cupedCellsOf(rows, 'rate', control, treatment);
     const nPerArm = cuCells.filter((x) => x.treatment).length;
     const cu = cuCells.length >= MIN_CELLS_FOR_ROBUST && nPerArm >= 4
       ? cupedAdjust(cuCells, 'rate')
       : null;
     if (cu) {
       return mode === 'cuped'
-        ? { diff: cu.diffAdj, se: cu.seAdj, via: 'cuped' }
-        : { diff: cu.diffRaw, se: cu.seRaw, via: 'robust' };
+        ? { diff: cu.diffAdj, se: cu.seAdj, via: 'cuped', p: cu.pAdj, df: cu.df }
+        : { diff: cu.diffRaw, se: cu.seRaw, via: 'robust', p: cu.pRaw, df: cu.df };
     }
   }
-  return { diff: zt.diff, se: unpooledSe(zt), via: 'ztest' };
+  return { diff: zt.diff, se: unpooledSe(zt), via: 'ztest', p: zt.p, df: Infinity };
 }
 
 /**
@@ -347,17 +386,23 @@ export function estimateAt(
  * 只看「日期」这一维，不按天重置——序贯检验针对的正是**累计**统计量的重复窥探。
  * 天数相同则按日期字符串升序（数据里是 YYYY-MM-DD，字典序即时间序）。
  */
-export function dailyLooks(rows: DailyRow[], kind: 'rate' | 'continuous', mode: PrimaryMode): LookInput[] {
+export function dailyLooks(
+  rows: DailyRow[],
+  kind: 'rate' | 'continuous',
+  mode: PrimaryMode,
+  control = 'control',
+  treatment = 'treatment',
+): LookInput[] {
   const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
   if (dates.length < 2) return [];
   const out: LookInput[] = [];
   for (let i = 0; i < dates.length; i++) {
     const upto = new Set(dates.slice(0, i + 1));
     const cum = rows.filter((r) => upto.has(r.date));
-    const est = estimateAt(cum, kind, mode);
+    const est = estimateAt(cum, kind, mode, control, treatment);
     if (!est || !(est.se > 0)) continue;
-    const c = aggregate(cum, 'control');
-    const t = aggregate(cum, 'treatment');
+    const c = aggregate(cum, control);
+    const t = aggregate(cum, treatment);
     out.push({ day: i + 1, date: dates[i], nPerArm: (c.n + t.n) / 2, diff: est.diff, se: est.se });
   }
   return out;
@@ -369,15 +414,21 @@ export function dailyLooks(rows: DailyRow[], kind: 'rate' | 'continuous', mode: 
  * 与 dailyLooks 的区别必须记清楚：序贯检验要累计值（看板就是这么刷的），
  * 新颖效应要分段值（两段误差必须独立）。混用会把 SE 低估、把一切判成衰减。
  */
-export function dailySegments(rows: DailyRow[], kind: 'rate' | 'continuous', mode: PrimaryMode): LookInput[] {
+export function dailySegments(
+  rows: DailyRow[],
+  kind: 'rate' | 'continuous',
+  mode: PrimaryMode,
+  control = 'control',
+  treatment = 'treatment',
+): LookInput[] {
   const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
   const out: LookInput[] = [];
   for (let i = 0; i < dates.length; i++) {
     const sub = rows.filter((r) => r.date === dates[i]);
-    const est = estimateAt(sub, kind, mode);
+    const est = estimateAt(sub, kind, mode, control, treatment);
     if (!est || !(est.se > 0)) continue;
-    const c = aggregate(sub, 'control');
-    const t = aggregate(sub, 'treatment');
+    const c = aggregate(sub, control);
+    const t = aggregate(sub, treatment);
     out.push({ day: i + 1, date: dates[i], nPerArm: (c.n + t.n) / 2, diff: est.diff, se: est.se });
   }
   return out;
@@ -456,10 +507,11 @@ function ratioSteps(r: RatioTest, breakdown?: ArpuBreakdown): CalcStep[] {
 }
 
 /** 把明细行折成「格子」：一行就是一个格子（日期 × 设备 × 新老 × 变体） */
-function ratioCellsOf(rows: DailyRow[]): RatioCell[] {
+function ratioCellsOf(rows: DailyRow[], treatment = 'treatment'): RatioCell[] {
   const out: RatioCell[] = [];
-  for (const r of rows) {    if (r.revenue === undefined || !(r.exposures > 0)) continue;
-    out.push({ n: r.exposures, sum: r.revenue, treatment: r.variant === 'treatment' });
+  for (const r of rows) {
+    if (r.revenue === undefined || !(r.exposures > 0)) continue;
+    out.push({ n: r.exposures, sum: r.revenue, treatment: r.variant === treatment });
   }
   return out;
 }
@@ -495,13 +547,15 @@ function scanDimension(
   labels: Record<string, string>,
   fdr: number,
   kind: 'rate' | 'continuous',
+  control = 'control',
+  treatment = 'treatment',
 ): SegmentTest[] {
   const keys = Array.from(new Set(rows.map((r) => String(r[dim]))));
   const raw = keys.map((key): Omit<SegmentTest, 'q'> => {
     const sub = rows.filter((r) => String(r[dim]) === key);
     const label = labels[key] || key;
     if (kind === 'continuous') {
-      const rt = ratioTest(ratioCellsOf(sub));
+      const rt = ratioTest(ratioCellsOf(sub, treatment));
       if (rt) {
         return {
           key, label, kind: 'continuous',
@@ -510,8 +564,8 @@ function scanDimension(
         };
       }
     }
-    const c = aggregate(sub, 'control');
-    const t = aggregate(sub, 'treatment');
+    const c = aggregate(sub, control);
+    const t = aggregate(sub, treatment);
     const pt = twoProportionZ(c.c, c.n, t.c, t.n);
     return {
       key, label, kind: 'rate',
@@ -523,36 +577,260 @@ function scanDimension(
   return raw.map((x, i) => ({ ...x, q: qvals[i] }));
 }
 
+/** 单个臂与对照的比较（多臂表的一行） */
+export interface ArmComparison {
+  id: string;
+  label: string;
+  isControl: boolean;
+  n: number;
+  conversions: number;
+  revenue: number;
+  /** 主指标水平（率或 ARPU） */
+  value: number;
+  /** 与对照的差值（对照自身为 0） */
+  diff: number;
+  se: number;
+  relativeLift: number;
+  /** 边际 p（单次比较，未校正） */
+  pRaw: number;
+  /** Dunnett 校正后 p（k=2 时等于 pRaw） */
+  pAdj: number;
+  /** 同时 95% 区间（Dunnett），跨 0 ⟺ pAdj > α */
+  ci: [number, number];
+  /** P(这个臂是最优) —— 决策视角，不是显著性视角 */
+  pBest: number;
+  via: 'cuped' | 'robust' | 'ztest' | 'delta' | 'control';
+  /** 该臂自己的护栏（只提示，不参与决策；决策看焦点臂那一套） */
+  guardrails: Array<{ key: string; label: string; diff: number; worse: boolean; unavailable?: string }>;
+}
+
+export interface MultiArmInfo {
+  k: number;
+  control: string;
+  /** 决策实际对比的那个处理臂 */
+  focus: string;
+  focusReason: 'declared' | 'best-significant' | 'best-point';
+  alpha: number;
+  /** 比较次数 = k−1 */
+  comparisons: number;
+  /** Dunnett 同时临界值（z 单位） */
+  crit: number;
+  /** Bonferroni 的临界值（并排展示「不用相关性要多付多少」） */
+  bonferroniCritZ: number;
+  /** 全局检验：这个实验到底测出东西没有 */
+  global: GlobalTestResult;
+  /** 赢家诅咒：全零时「挑最大」也会看起来有这个量级的效应 */
+  winnerCurse: number;
+  /** SRM 用的分流比例与来源（猜的比例会把正常实验判成异常） */
+  srmRatios: number[];
+  srmSource: 'declared' | 'trafficSplit' | 'equal';
+  /** 没被选中的臂里点估计最高的那个（解释「为什么不选它」） */
+  runnerUp?: { id: string; diff: number; pAdj: number };
+}
+
+/**
+ * 主指标口径的自动选择：与决策口径**同一套规则**，否则多臂表与详情页会对不上。
+ * 顺序：连续指标 → CUPED（有前周期且格子够）→ 否则 delta；率指标 → CUPED → 稳健 → z 检验。
+ */
+function autoMode(rows: DailyRow[], kind: 'rate' | 'continuous', cfg: DecisionConfig): PrimaryMode {
+  if (cfg.useCuped !== false) {
+    const cells = cupedCellsOf(rows, kind);
+    const nPerArm = cells.filter((x) => x.treatment).length;
+    if (cells.length >= MIN_CELLS_FOR_ROBUST && nPerArm >= 4) return 'cuped';
+  }
+  if (kind === 'continuous') return 'delta';
+  return (cfg.seMode ?? 'robust') === 'robust' ? 'robust' : 'ztest';
+}
+
+/** 对照臂均值的标准误（多臂校正与 P(best) 都要用） */
+function controlSe(rows: DailyRow[], control: string, kind: 'rate' | 'continuous'): number {
+  const c = aggregate(rows, control);
+  if (!(c.n > 0)) return 0;
+  if (kind === 'rate') {
+    const p = c.c / c.n;
+    return Math.sqrt((p * (1 - p)) / c.n);
+  }
+  // 连续口径：用格子级方差（与 ratioTest 同一个估计量），没有格子时退回 n=1 的粗略值
+  const vals = rows.filter((r) => r.variant === control && r.revenue !== undefined && r.exposures > 0);
+  if (vals.length >= 2) {
+    const rt = ratioTest(vals.map((r) => ({ n: r.exposures, sum: r.revenue ?? 0, treatment: false })));
+    if (rt) return rt.seControl;
+  }
+  return 0;
+}
+
+/**
+ * 逐臂算一遍「vs 对照」：多臂表的唯一数据源。
+ *
+ * 关键：每臂用的是**同一个估计器**（`estimateAt`），与详情页主指标逐字相同。
+ * 如果这里另写一套（比如都退回 z 检验），就会出现「表里 p=0.03、点进去 p=0.06」
+ * 这种最伤信任的不一致。
+ */
+function compareArms(
+  rows: DailyRow[],
+  arms: string[],
+  control: string,
+  kind: 'rate' | 'continuous',
+  cfg: DecisionConfig,
+): { list: ArmComparison[]; seControl: number; mode: PrimaryMode } {
+  const mode = autoMode(rows, kind, cfg);
+  const se0 = controlSe(rows, control, kind);
+  const list: ArmComparison[] = arms.map((id) => {
+    const agg = aggregate(rows, id);
+    const base = {
+      id,
+      label: armLabel(id),
+      isControl: id === control,
+      n: agg.n,
+      conversions: agg.c,
+      revenue: agg.revenue,
+      value: kind === 'continuous' ? (agg.n > 0 ? agg.revenue / agg.n : 0) : agg.n > 0 ? agg.c / agg.n : 0,
+      diff: 0,
+      se: 0,
+      relativeLift: 0,
+      pRaw: 1,
+      pAdj: 1,
+      ci: [0, 0] as [number, number],
+      pBest: 0,
+      via: 'control' as ArmComparison['via'],
+      guardrails: [] as ArmComparison['guardrails'],
+    };
+    if (id === control) return base;
+    const pair = rows.filter((r) => r.variant === control || r.variant === id);
+    const est = estimateAt(pair, kind, mode, control, id);
+    const cAgg = aggregate(pair, control);
+    const guardrails = armGuardrails(pair, control, id, cAgg, agg, cfg);
+    if (!est) return { ...base, guardrails };
+    return {
+      ...base,
+      diff: est.diff,
+      se: est.se,
+      relativeLift: base.value !== 0 && !base.isControl ? est.diff / (kind === 'continuous' ? (cAgg.n > 0 ? cAgg.revenue / cAgg.n : 0) : cAgg.n > 0 ? cAgg.c / cAgg.n : 0) : 0,
+      pRaw: est.p,
+      pAdj: est.p,
+      ci: [est.diff, est.diff],
+      via: est.via,
+      guardrails,
+    };
+  });
+  return { list, seControl: se0, mode };
+}
+
+/** 每臂的护栏摘要：只做「这一臂有没有把硬护栏打坏」的提示，决策仍看焦点臂 */
+function armGuardrails(
+  pair: DailyRow[],
+  control: string,
+  arm: string,
+  cAgg: VariantAgg,
+  aAgg: VariantAgg,
+  cfg: DecisionConfig,
+): ArmComparison['guardrails'] {
+  const out: ArmComparison['guardrails'] = [];
+  const missing = new Set(cfg.missingGuardrails ?? []);
+  const push = (key: string, label: string, c: number, a: number) => {
+    const ni = nonInferiority(c, cAgg.n, a, aAgg.n, key === 'refund_rate' ? cfg.guardrails.refundRate.margin : cfg.guardrails.complaintRate.margin, key === 'refund_rate' ? cfg.guardrails.refundRate.alpha : cfg.guardrails.complaintRate.alpha);
+    const spec = key === 'refund_rate' ? cfg.guardrails.refundRate : cfg.guardrails.complaintRate;
+    out.push({
+      key,
+      label,
+      diff: cAgg.n > 0 && aAgg.n > 0 ? a / aAgg.n - c / cAgg.n : 0,
+      worse: guardrailBlocks(ni, spec.mode),
+    });
+  };
+  if (!missing.has('refunds')) push('refund_rate', '退款率', cAgg.refunds, aAgg.refunds);
+  if (!missing.has('complaints')) push('complaint_rate', '投诉率', cAgg.complaints, aAgg.complaints);
+  void pair;
+  void control;
+  void arm;
+  return out;
+}
+
+/** 两臂时代的下标工具：只看对照 + 焦点臂 */
+function pairOf(rows: DailyRow[], control: string, arm: string): DailyRow[] {
+  return rows.filter((r) => r.variant === control || r.variant === arm);
+}
+
 export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Partial<DecisionConfig>): Analysis {
   const cfg = mergeConfig(cfgOverride);
-  const rows = allRows.filter((r) => r.expId === exp.id);
-  const c = aggregate(rows, 'control');
-  const t = aggregate(rows, 'treatment');
-  const overall = twoProportionZ(c.c, c.n, t.c, t.n);
+  const rowsAll = allRows.filter((r) => r.expId === exp.id);
+  const control = controlArmOf(exp);
+  const arms = armsOf(exp, rowsAll);
+  const isMulti = arms.length > 2;
 
-  // ---- 口径判定 ----
-  // 实验声明了 ARPU 但数据里没有收入字段时，不能"当成率算"糊过去，也不能假装有数：
-  // 退回转化率口径，并把原因写进 metricFallback 让 UI 显式提示。
-  const revenueOk = hasRevenue(rows);
+  // ---- 口径判定（在**全部臂**上判，避免「换了个焦点臂就换了个口径」）----
+  const revenueOk = hasRevenue(rowsAll);
   const wantContinuous = exp.metricType === 'continuous';
-  // ARPU 是「总量/人数」的比值指标，方差要靠**多个独立格子**估（多天或多分层）。
-  // 只有一个格子（比如只有 1 天 × 2 臂）时 ratioTest 返回 null，此时绝不能拿转化率硬凑成 ARPU——
-  // 但也不能静默退回，否则读者会看到「主指标 ARPU」却读到一个 pp 的差值。
-  const arpu = revenueOk ? ratioTest(ratioCellsOf(rows)) ?? undefined : undefined;
-  const metricKind: 'rate' | 'continuous' = wantContinuous && arpu ? 'continuous' : 'rate';
+  // ARPU 是「总量/人数」的比值指标，方差要靠多个独立格子估。这里要求**每个处理臂**都够，
+  // 否则会出现「B 用元、C 用 pp」这种单位混排——比退回率口径更糟。
+  const enoughCells = (a: string) => ratioTest(ratioCellsOf(pairOf(rowsAll, control, a), a)) !== null;
+  const continuousOk = wantContinuous && revenueOk && arms.slice(1).every(enoughCells);
+  const metricKind: 'rate' | 'continuous' = continuousOk ? 'continuous' : 'rate';
   const metricFallback = !wantContinuous
     ? undefined
     : !revenueOk
       ? '该实验声明以 ARPU 为主指标，但数据中没有 revenue 字段，已退回转化率口径（结论仍然有效，只是主指标换了）'
-      : !arpu
-        ? '该实验声明以 ARPU 为主指标，但每个臂的独立格子不足 2 个（只有 1 天且没有分层）——ARPU 的方差估不出来，已退回转化率口径。多导几天数据即可恢复'
+      : !continuousOk
+        ? '该实验声明以 ARPU 为主指标，但有臂的独立格子不足 2 个（只有 1 天且没有分层）——ARPU 的方差估不出来，已退回转化率口径。多导几天数据即可恢复'
         : undefined;
+
+  // ---- 多臂：先逐臂估一遍，再定焦点臂 ----
+  // 两臂时代这一步是「无操作」，但仍然要走同一条代码路径：
+  // 臂名不再写死（可能是 baseline / v2），臂 id 必须一路传下去。
+  const cmp = compareArms(rowsAll, arms, control, metricKind, cfg);
+  const candidates = cmp.list.filter((a) => !a.isControl);
+  let focus = candidates[0]?.id ?? (arms[1] ?? 'treatment');
+  let focusReason: MultiArmInfo['focusReason'] = 'best-point';
+  let dunnett: DunnettResult | null = null;
+  let best: BestResult | null = null;
+  let global: GlobalTestResult | null = null;
+
+  if (isMulti && candidates.length) {
+    dunnett = dunnettTwoSided(
+      { diff: candidates.map((a) => a.diff), se: candidates.map((a) => a.se), seControl: cmp.seControl },
+      cfg.alpha,
+    );
+    for (let i = 0; i < candidates.length; i++) {
+      candidates[i].pAdj = dunnett.adjP[i];
+      candidates[i].ci = dunnett.ci[i];
+    }
+    // P(best) 要把对照也算作一个「候选」：它也可能确实是最好的
+    best = probabilityBest({
+      estimate: [0, ...candidates.map((a) => a.diff)],
+      se: [Math.max(cmp.seControl, 1e-12), ...candidates.map((a) => Math.max(a.se, 1e-12))],
+      label: [control, ...candidates.map((a) => a.id)],
+    });
+    const all = [cmp.list.find((a) => a.isControl)!, ...candidates];
+    const order = [0, ...candidates.map((a) => all.indexOf(a))];
+    for (let i = 0; i < all.length; i++) {
+      const k = order.indexOf(i);
+      if (k >= 0) all[i].pBest = best.prob[k];
+    }
+    global = globalTest({ diff: candidates.map((a) => a.diff), se: candidates.map((a) => a.se), seControl: cmp.seControl });
+
+    // 焦点臂：先看「校正后仍显著为正」的，再退回「点估计最大」。
+    // 前者是决策口径（可以上），后者只是「详情页先看哪一臂」——两者必须分开，
+    // 否则「都不显著」时会把某一臂的 raw p 当成结论。
+    const sig = candidates.filter((a) => a.pAdj < cfg.alpha && a.diff > 0);
+    const pool = sig.length ? sig : candidates;
+    const win = pool.reduce((a, b) => (b.diff > a.diff ? b : a));
+    focus = win.id;
+    focusReason = sig.length ? 'best-significant' : 'best-point';
+  }
+
+  const treatment = focus;
+  // 两臂不过滤（数据里就这两臂）；多臂只把「对照 + 焦点臂」交给下游管线，
+  // 于是序贯 / 新颖 / 分层 / 护栏全部只讲这一对，不会把别的臂混进同一个差值里。
+  const rows = isMulti ? pairOf(rowsAll, control, treatment) : rowsAll;
+  const c = aggregate(rows, control);
+  const t = aggregate(rows, treatment);
+  const overall = twoProportionZ(c.c, c.n, t.c, t.n);
+  const arpu = revenueOk ? ratioTest(ratioCellsOf(rows, treatment)) ?? undefined : undefined;
   const arpuBreakdown = arpu ? breakdownOf(c, t) : undefined;
 
   // CUPED：只有明细行带前周期数据时才算（导入的真实数据常常没有，那就自动退回普通检验）。
   // 协变量必须与主指标同口径：率指标用前周期转化数，ARPU 用前周期收入。
   // 格子构造与 estimateAt 共用同一个函数，避免「主指标走 A、逐日监控走 B」的口径漂移。
-  const cells = cupedCellsOf(rows, metricKind);
+  const cells = cupedCellsOf(rows, metricKind, control, treatment);
   const cuped = cells.length ? cupedAdjust(cells, metricKind) : null;
 
   // 决策口径，按优先级选：
@@ -574,9 +852,28 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     primary = { kind: 'rate', label: exp.primaryMetric, unit: 'pp', controlValue: overall.controlRate, treatmentValue: overall.treatmentRate, diff: overall.diff, p: overall.p, ci95: overall.ci95, se: unpooledSe(overall), relativeLift: overall.relativeLift, via: 'ztest' };
   }
 
+  // ---- 多臂把「校正后 p + 同时区间」换成决策口径 ----
+  // 为什么必须换：焦点臂是「从 k−1 个里挑出来的赢家」，用它的边际 p 就是把
+  // 「挑最大」的偏差藏起来。Dunnett 校正后的 p 与同时区间自洽（跨 0 ⟺ p>α），
+  // 而且边际值仍保留在 pRaw / ciRaw 里，读者能看到「校正前有多显著」。
+  if (isMulti && dunnett) {
+    const idx = candidates.findIndex((a) => a.id === treatment);
+    if (idx >= 0) {
+      primary = {
+        ...primary,
+        pRaw: primary.p,
+        ciRaw95: primary.ci95,
+        p: dunnett.adjP[idx],
+        ci95: dunnett.ci[idx],
+        adjusted: true,
+        comparisons: dunnett.m,
+      };
+    }
+  }
+
   // 序贯监控：沿用**同一个口径**（primary.via）逐日重估，再换算出三套阈值。
   // 逐日重估而不是按天重置，是因为偷看的人看的就是累计看板。
-  const sequential = buildPeekReport(dailyLooks(rows, metricKind, primary.via), { alpha: cfg.alpha });
+  const sequential = buildPeekReport(dailyLooks(rows, metricKind, primary.via, control, treatment), { alpha: cfg.alpha });
 
   // 新颖效应：逐日**分段**（互不重叠）估一次，按曝光量对半切，两半各自再估一次。
   //
@@ -584,7 +881,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   // 「前后半段差异」误报率是 12%（率）/ 15%（ARPU），因为半段只有 3–4 天、16 个格子，
   // 任何当天 SE 都会漏掉日间整体漂移。改用日级聚类（每天一个观测单位）+ Welch t，
   // 同一套 A/A 落到 4.8% / 6.4%（见 scripts/novelty_report.ts 与 tests/novelty.test.ts）。
-  const segs = dailySegments(rows, metricKind, primary.via);
+  const segs = dailySegments(rows, metricKind, primary.via, control, treatment);
   const novelty = noveltyReport({ points: segs, alpha: cfg.noveltyAlpha });
 
   // 贝叶斯视角：率口径用 Beta-Binomial（把过离散折算成有效样本量，否则后验过度自信）；
@@ -594,12 +891,22 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       ? bayesNormal(primary.diff, primary.se)
       : bayesBetaBinomial(c.c, c.n, t.c, t.n, cuped?.dispersion ?? 1);
 
-  const srm = srmChi2([c.n, t.n], [0.5, 0.5], cfg.srmAlpha, cfg.srmMaxRelImb);
+  /**
+   * SRM 的分流期望。
+   * 两臂沿用「等分」：内置数据里的 trafficSplit 是**描述实际分流**的字段，
+   * 拿它当期望会把「本来就跑歪的 40/60 坏实验」检查成正常（历史上的 srm 原型就是这样标的）。
+   * 多臂则用声明比例（"50/25/25"）——三臂实验的等分假设几乎总是不成立，
+   * 用等分去查会把正常实验判成异常。比例来源会写进 `multiArm.srmSource` 并在 UI 上标明。
+   */
+  const alloc = allocationOf(exp, arms);
+  const srmCounts = isMulti ? arms.map((a) => aggregate(rowsAll, a).n) : [c.n, t.n];
+  const srmRatios = isMulti ? alloc.ratios : [0.5, 0.5];
+  const srm = srmChi2(srmCounts, srmRatios, cfg.srmAlpha, cfg.srmMaxRelImb);
 
   // 分层也必须跟主指标同口径：ARPU 实验按转化率分层会答错问题
   const segments = {
-    tenure: scanDimension(rows, 'tenure', { new: '新用户', old: '老用户' }, cfg.segmentFdr, metricKind),
-    device: scanDimension(rows, 'device', { iOS: 'iOS', Android: 'Android' }, cfg.segmentFdr, metricKind),
+    tenure: scanDimension(rows, 'tenure', { new: '新用户', old: '老用户' }, cfg.segmentFdr, metricKind, control, treatment),
+    device: scanDimension(rows, 'device', { iOS: 'iOS', Android: 'Android' }, cfg.segmentFdr, metricKind, control, treatment),
   };
 
   // 分层交互：新老效应差是否显著
@@ -690,8 +997,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       const lc = c.latencyWeighted / c.n;
       const lt = t.latencyWeighted / t.n;
       const lg = cfg.guardrails.latencyP95;
-      const latC = rows.filter((r) => r.variant === 'control').map((r) => r.latencyP95);
-      const latT = rows.filter((r) => r.variant === 'treatment').map((r) => r.latencyP95);
+      const latC = rows.filter((r) => r.variant === control).map((r) => r.latencyP95);
+      const latT = rows.filter((r) => r.variant === treatment).map((r) => r.latencyP95);
       const mean = (a: number[]) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0);
       // 延迟用相对容忍度：margin 读作「相对 control 的比例」
       const latMargin = lg.relative ? lc * lg.margin : lg.margin;
@@ -724,38 +1031,75 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   };
 
   // ---- SRM ----
-  const expC = srm.expected[0];
-  const expT = srm.expected[1];
-  add(
-    'srm',
-    'SRM 分流检查',
-    `control ${c.n} vs treatment ${t.n}；χ²=${srm.chi2.toFixed(1)}，p=${ep(srm.p)}，相对偏差 ${(srm.relImb * 100).toFixed(2)}%${srm.flagged ? ' → 异常' : ' → 通过'}`,
-    srm.p,
-    [
-      {
-        title: '① 期望样本（按 50/50 分流）',
-        formula: 'E = 总样本 × 分流比',
-        value: `N = ${c.n} + ${t.n} = ${c.n + t.n}；E₁ = E₂ = ${expC.toFixed(1)}`,
-      },
-      {
-        title: '② 卡方统计量',
-        formula: 'χ² = Σ (观测 − 期望)² / 期望',
-        value:
-          `(${c.n} − ${expC.toFixed(1)})² / ${expC.toFixed(1)} + (${t.n} − ${expT.toFixed(1)})² / ${expT.toFixed(1)} = ` +
-          `${(((c.n - expC) ** 2) / expC).toFixed(3)} + ${(((t.n - expT) ** 2) / expT).toFixed(3)} = ${srm.chi2.toFixed(3)}`,
-      },
-      {
-        title: '③ p 值与判定',
-        formula: `p = erfc(√(χ²/2))；异常 = p < ${cfg.srmAlpha} 且 相对偏差 > ${(cfg.srmMaxRelImb * 100).toFixed(0)}%`,
-        value: `p = ${ep(srm.p)}，相对偏差 ${(srm.relImb * 100).toFixed(3)}% → ${srm.flagged ? '判定异常' : '判定通过'}`,
-      },
-      {
-        title: '④ 为什么还要看相对偏差',
-        formula: '大样本下 p 值会过度敏感',
-        value: `本实验样本 ${c.n + t.n}；仅 ${(cfg.srmMaxRelImb * 100).toFixed(0)}% 以下的不均衡也可能算出 p<${cfg.srmAlpha}，所以加了实际阈值`,
-      },
-    ],
-  );
+  if (!isMulti) {
+    const expC = srm.expected[0];
+    const expT = srm.expected[1];
+    add(
+      'srm',
+      'SRM 分流检查',
+      `control ${c.n} vs treatment ${t.n}；χ²=${srm.chi2.toFixed(1)}，p=${ep(srm.p)}，相对偏差 ${(srm.relImb * 100).toFixed(2)}%${srm.flagged ? ' → 异常' : ' → 通过'}`,
+      srm.p,
+      [
+        {
+          title: '① 期望样本（按 50/50 分流）',
+          formula: 'E = 总样本 × 分流比',
+          value: `N = ${c.n} + ${t.n} = ${c.n + t.n}；E₁ = E₂ = ${expC.toFixed(1)}`,
+        },
+        {
+          title: '② 卡方统计量',
+          formula: 'χ² = Σ (观测 − 期望)² / 期望',
+          value:
+            `(${c.n} − ${expC.toFixed(1)})² / ${expC.toFixed(1)} + (${t.n} − ${expT.toFixed(1)})² / ${expT.toFixed(1)} = ` +
+            `${(((c.n - expC) ** 2) / expC).toFixed(3)} + ${(((t.n - expT) ** 2) / expT).toFixed(3)} = ${srm.chi2.toFixed(3)}`,
+        },
+        {
+          title: '③ p 值与判定',
+          formula: `p = erfc(√(χ²/2))；异常 = p < ${cfg.srmAlpha} 且 相对偏差 > ${(cfg.srmMaxRelImb * 100).toFixed(0)}%`,
+          value: `p = ${ep(srm.p)}，相对偏差 ${(srm.relImb * 100).toFixed(3)}% → ${srm.flagged ? '判定异常' : '判定通过'}`,
+        },
+        {
+          title: '④ 为什么还要看相对偏差',
+          formula: '大样本下 p 值会过度敏感',
+          value: `本实验样本 ${c.n + t.n}；仅 ${(cfg.srmMaxRelImb * 100).toFixed(0)}% 以下的不均衡也可能算出 p<${cfg.srmAlpha}，所以加了实际阈值`,
+        },
+      ],
+    );
+  } else {
+    const ratioText = srmRatios.map((r) => `${(r * 100).toFixed(0)}%`).join(' / ');
+    const sourceText = alloc.source === 'declared' ? '实验元信息声明' : alloc.source === 'trafficSplit' ? 'trafficSplit 字段' : '按等分（数据里没有分流声明）';
+    const items = arms.map((a, i) => `(${srmCounts[i]} − ${srm.expected[i].toFixed(1)})² / ${srm.expected[i].toFixed(1)}`).join(' + ');
+    add(
+      'srm',
+      'SRM 分流检查（多臂）',
+      `${arms.map((a, i) => `${armLabel(a)} ${srmCounts[i]}`).join(' / ')}；χ²=${srm.chi2.toFixed(1)}，p=${ep(srm.p)}，最大相对偏差 ${(srm.relImb * 100).toFixed(2)}%${srm.flagged ? ' → 异常' : ' → 通过'}`,
+      srm.p,
+      [
+        {
+          title: `① 期望样本（按 ${ratioText} 分流，来源：${sourceText}）`,
+          formula: 'E = 总样本 × 分流比',
+          value: `N = ${srmCounts.reduce((x, y) => x + y, 0)}；期望 ${srm.expected.map((e) => e.toFixed(1)).join(' / ')}`,
+        },
+        {
+          title: '② 卡方统计量（k−1 个自由度）',
+          formula: 'χ² = Σ (观测 − 期望)² / 期望，df = 臂数 − 1',
+          value: `${items} = ${srm.chi2.toFixed(3)}，df = ${arms.length - 1}`,
+        },
+        {
+          title: '③ p 值与判定',
+          formula: `p 取 χ²_{${arms.length - 1}} 上尾；异常 = p < ${cfg.srmAlpha} 且 相对偏差 > ${(cfg.srmMaxRelImb * 100).toFixed(0)}%`,
+          value: `p = ${ep(srm.p)}，最大相对偏差 ${(srm.relImb * 100).toFixed(3)}% → ${srm.flagged ? '判定异常' : '判定通过'}`,
+        },
+        {
+          title: '④ 多臂的 SRM 更容易误报，所以口径必须写死',
+          formula: '期望比例来自声明，不是猜的',
+          value:
+            alloc.source === 'equal'
+              ? '⚠ 没有找到分流声明，这里按等分检查。如果实际是 50/25/25，这条 SRM 结论不可信——请在数据里补 trafficSplit（例如 "50/25/25"）。'
+              : `按 ${ratioText} 检查（${sourceText}）。比例一旦猜错，正常实验会被判成异常，所以来源要显式写出来。`,
+        },
+      ],
+    );
+  }
 
   // ---- 主指标 ----
   if (metricKind === 'continuous' && arpu) {
@@ -805,6 +1149,66 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
         (useCuped ? `（CUPED 调整后口径）` : ''),
       primary.p,
       propSteps(overall),
+    );
+  }
+
+  // ---- 多臂比较（A/B/n）----
+  // 放在主指标之后、副指标之前：读者先看到「这一臂 vs 对照」的结论，
+  // 紧接着就要看到「你为什么选了这一臂、其余臂差在哪」。
+  if (isMulti && dunnett && best && global) {
+    const others = candidates.filter((a) => a.id !== treatment);
+    const reasonText =
+      focusReason === 'best-significant'
+        ? `「${armLabel(treatment)}」在校正后仍显著为正，且是显著臂里点估计最大的`
+        : focusReason === 'best-point'
+          ? `没有任何臂通过校正，这里只是先把点估计最大的「${armLabel(treatment)}」摊开看（结论仍是不确定）`
+          : `按元信息里指定的主推臂「${armLabel(treatment)}」`;
+    add(
+      'metric',
+      '多臂比较（Dunnett 校正）',
+      `共 ${arms.length} 臂、${dunnett.m} 次比较；` +
+        candidates.map((a) => `${armLabel(a.id)} ${a.diff >= 0 ? '+' : ''}${primary.unit === '元' ? `${a.diff.toFixed(2)}元` : `${(a.diff * 100).toFixed(2)}pp`}（校正 p=${ep(a.pAdj)}，P(best)=${(a.pBest * 100).toFixed(0)}%）`).join('，') +
+        `；全局检验 χ²=${global.chi2.toFixed(1)}，df=${global.df}，p=${ep(global.p)}`,
+      dunnett.adjP[0],
+      [
+        {
+          title: '① 为什么「多跑几次两臂检验」不行',
+          formula: `m 次比较、每次 α=${cfg.alpha} → 全零族下至少一次误报 = 1−(1−α)^m`,
+          value: `m = ${dunnett.m} → 1−0.95^${dunnett.m} = ${((1 - (1 - cfg.alpha) ** dunnett.m) * 100).toFixed(1)}%；臂越多，越容易挑出一个假赢家`,
+        },
+        {
+          title: '② 但各臂并不独立：它们共享同一个对照',
+          formula: 'ρᵢⱼ = se₀² / (seᵢ·seⱼ)，等样本量时 ≈ 0.5',
+          value: `对照臂 SE = ${cmp.seControl.toExponential(3)}；本例 ρ ≈ ${dunnett.correlation.map((r) => r.toFixed(2)).join('、')}（正相关 → 可以用比 Bonferroni 更省的办法）`,
+        },
+        {
+          title: '③ Dunnett 同时临界值（利用相关性）',
+          formula: 'P(所有 |Zⱼ| ≤ c) = E_u[∏ Φ(·)] = 1−α，对 c 二分',
+          value: `c = ${dunnett.crit.toFixed(3)}；Bonferroni 需要 ${dunnett.bonferroniCritZ.toFixed(3)}（差了 ${(dunnett.bonferroniCritZ - dunnett.crit).toFixed(3)}，就是「不用相关性」的代价）`,
+        },
+        {
+          title: '④ 逐臂：校正 p 与同时区间',
+          formula: 'pᵢ = 1 − P(所有 |Zⱼ| ≤ |Zᵢ|)；区间 = Δ ± c·SE（同时覆盖全部臂，不是逐条 95%）',
+          value:
+            candidates
+              .map((a) => `${armLabel(a.id)}：边际 p=${ep(a.pRaw)} → 校正 p=${ep(a.pAdj)}，区间 [${fmtDiff(a.ci[0], primary.unit)}, ${fmtDiff(a.ci[1], primary.unit)}]`)
+              .join('；'),
+        },
+        {
+          title: '⑤ 全局检验：这个实验到底测出东西没有',
+          formula: 'Q = ΔᵀΣ⁻¹Δ ~ χ²_{k−1}（Σ 对角是差值方差、非对角是共享对照的协方差）',
+          value: `Q = ${global.chi2.toFixed(2)}，df = ${global.df}，p = ${ep(global.p)} → ${global.p < cfg.alpha ? '至少有一臂与对照不同' : '整体没有证据说明任何一臂不同'}`,
+        },
+        {
+          title: '⑥ 焦点臂怎么定的，以及「赢家诅咒」',
+          formula: '先看校正后显著为正者，再退回点估计最大；E[max] 的偏差约 se·(√(2lnk) − …)',
+          value:
+            `焦点 = 「${armLabel(treatment)}」（${reasonText}）。` +
+            `全零假设下「挑最大」也会看起来有 ${primary.unit === '元' ? `+${best.winnerCurse.toFixed(2)}元` : `+${(best.winnerCurse * 100).toFixed(2)}pp`} 的效应，` +
+            `所以结论不能只看「谁最大」，要看校正后的 p 与同时区间。` +
+            (others.length ? `其余臂：${others.map((a) => `${armLabel(a.id)} 校正 p=${ep(a.pAdj)}`).join('、')}。` : ''),
+        },
+      ],
     );
   }
 
@@ -970,7 +1374,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       s.p,
       [
         ...(s.kind === 'continuous' && s.ratio
-          ? ratioSteps(s.ratio, breakdownOf(aggregate(segRows, 'control'), aggregate(segRows, 'treatment')))
+          ? ratioSteps(s.ratio, breakdownOf(aggregate(segRows, control), aggregate(segRows, treatment)))
           : propSteps(s.rate ?? overall)),
         {
           title: '⑤ 多重比较校正（BH）',
@@ -1130,6 +1534,10 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     reason = `主指标（${primary.label}）显著正向（${D(primary.diff)}，p=${ep(primary.p)}），护栏无显著恶化，建议上线。`;
   }
 
+  if (isMulti && dunnett) {
+    reason += ` 多臂口径：在 ${arms.length} 个臂里选出「${armLabel(treatment)}」，p 已按 Dunnett 校正（同比较 ${dunnett.m} 次，临界值 ${dunnett.crit.toFixed(2)}）。`;
+  }
+
   const rules: RuleTrace[] = [
     {
       code: 'SRM',
@@ -1212,5 +1620,33 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     reasonCode,
     evidence,
     rules,
+    arms: cmp.list,
+    ...(isMulti && dunnett && best && global
+      ? {
+          multiArm: {
+            k: arms.length,
+            control,
+            focus: treatment,
+            focusReason,
+            alpha: cfg.alpha,
+            comparisons: dunnett.m,
+            crit: dunnett.crit,
+            bonferroniCritZ: dunnett.bonferroniCritZ,
+            global,
+            winnerCurse: best.winnerCurse,
+            srmRatios,
+            srmSource: alloc.source,
+            ...(candidates.filter((a) => a.id !== treatment).length
+              ? {
+                  runnerUp: (() => {
+                    const rest = candidates.filter((a) => a.id !== treatment);
+                    const r = rest.reduce((a, b) => (b.diff > a.diff ? b : a));
+                    return { id: r.id, diff: r.diff, pAdj: r.pAdj };
+                  })(),
+                }
+              : {}),
+          },
+        }
+      : {}),
   };
 }

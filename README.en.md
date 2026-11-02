@@ -80,9 +80,9 @@ npm run dev        # local dev (regenerates data first)
 npm run build      # dist/ (tsc --noEmit + vite build)
 npm run preview    # preview the build
 
-npm test           # 402 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
+npm test           # 468 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
                    #   import parsing / A-A calibration / metric dictionary / configurable thresholds / CUPED /
-                   #   sequential / novelty / multiplicity / expected loss / comparison / forest scaling / ⌘K /
+                   #   sequential / novelty / multiplicity / A-B-n multi-arm / expected loss / comparison / forest scaling / ⌘K /
                    #   methodology cross-check / days-to-significance / multi-turn / ARPU / heterogeneity F1 / baseline)
 npm run eval       # eval report: heterogeneity F1 + hallucinated-number rate over 2200 Agent Q&A
 npm run eval:check # compare against eval/baseline.json; any drift exits 1 (this is what CI runs)
@@ -96,6 +96,7 @@ npm run cuped      # CUPED variance reduction + robust standard errors
 npm run seq        # sequential testing: false-positive rate under repeated looks
 npm run novelty    # novelty effect: A/A calibration + detection rate on injected decay
 npm run fwer       # multiplicity: FWER simulation + Holm/BH on the 120 experiments
+npm run multiarm   # A/B/n: all-null naive vs Dunnett false-positive rate, winner-pick rate, P(best) calibration
 npm run loss       # expected loss: gates + net value vs the frequentist rule, on realised truth
 npm run forecast   # "how many more days" across the 120 experiments
 npm run method     # every number quoted in the methodology doc
@@ -177,7 +178,7 @@ src/app/                UI: Vite + React 19 + TS + Tailwind v3
   components/CompareScreen.tsx  Two experiments on one shared axis, or a refusal
   components/CommandPalette.tsx ⌘K palette (keyboard-only path works end to end)
 scripts/                Generation / calibration / data export / screen recording / video / portfolio build
-tests/                  402 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
+tests/                  468 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
                         simulations + metric dictionary/configurability/multi-turn + heterogeneity F1/baseline self-test)
 eval/baseline.json      Regression baseline: 86 metrics + a data fingerprint
 data/                   120 experiments / 6,720 rows
@@ -204,13 +205,14 @@ right-hand column of `docs/EVAL.md`.
 | Sequential testing | Peeking daily for 7 days: naive false-positive **16.37%** → O'Brien–Fleming **4.93%**; mSPRT costs 3.09σ for "look whenever you want" (0.52%) |
 | Novelty effect | A/A false positives **4.8% (rate) / 6.4% (ARPU)**; the first version of this detector measured 12.0% / 15.0%, and that is documented rather than deleted |
 | Multiplicity | All-null family: "at least one significant" = **99.79%** (1−0.95¹²⁰). On real data naive 68 → Holm **53**, and 5 of the 15 retracted ones had zero injected effect |
+| A/B/n multi-arm | Every treatment arm is compared against the shared control with **Dunnett** simultaneous inference (exact 1-D Gauss–Hermite quadrature after conditioning on the control mean). All-null false-positive rate over 20000 runs: naive **9.41% (3 arms) / 12.75% (4 arms)** vs Dunnett **5.34% / 5.04%**; critical z 2.212 / 2.349 / 2.442 matches the published tables. At 4 arms Bonferroni needs a 2.394 boundary vs Dunnett's 2.353 (40606 vs 41657 per arm, i.e. **2.6% more**) because it ignores the positive correlation induced by the shared control — a modest but real gain, so both numbers are shown side by side rather than claimed as a win |
 | Expected loss | Gates + net value **20.182** vs the frequentist rule 15.696 (+25.4% / +28.6%); the ungated rule scores higher (23.978) but would ship 15 experiments whose refund rate went **1.19% → 2.03% (1.71×)** |
 | Interval choice | Newcombe instead of Wald: at a 0.12% baseline with n=30 both cover 100%, but the widths are **0.906pp vs 22.869pp** |
 | Chart scaling bug | The forest plot's pp axis drew **341 grid lines** (step computed in percentage points, start in percent). Fixed, and locked by 6 tests |
 | Comparability | 120 experiments × all pairs = **7140 pairs**, asserting "shared axis ⟺ same unit" — not a sample |
-| Unit tests | **402** across 32 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
+| Unit tests | **468** across 36 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
 | Regression baseline | **86 metrics** + data fingerprint in `eval/baseline.json`; `npm run eval:check` exits 1 on any drift |
-| Bundle | **573KB** JS / 187KB gzip, zero chart libraries, zero backend |
+| Bundle | **660KB** JS / 216KB gzip, zero chart libraries, zero backend |
 
 ## Why these methods (every choice comes with its cost)
 
@@ -264,7 +266,7 @@ Every one of these was found by measurement or by looking at the rendered screen
 This is not a demo that renders three charts. The acceptance criteria are the ones a flagship tool would be held to:
 
 - **Every number is reversible**: expand to formula → sample size → data version → recompute and diff.
-- **Every claim is falsifiable**: 402 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
+- **Every claim is falsifiable**: 468 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
   and an automatic eval that fails the build when a metric drifts.
 - **Every method states its cost**, including the cases where our own choice is worse than the textbook one.
 - **No silent fallbacks**: missing columns, missing ground truth, an unavailable model, an exhausted storage quota —
@@ -274,7 +276,7 @@ This is not a demo that renders three charts. The acceptance criteria are the on
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3** (not v4: its range-syntax media queries break on Chrome < 104).
 **Zero chart libraries** — the forest plot and the daily trend are hand-written SVG (the trend used to be Recharts;
-removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB). Statistics are in-house with tests. No backend,
+removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm and the import layer have since brought it to 660KB / 216KB gzip). Statistics are in-house with tests. No backend,
 no database. The Agent talks to DeepSeek directly from the browser, and the site deploys as static files.
 
 ## Milestones

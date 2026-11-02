@@ -1,4 +1,5 @@
 import type { Archetype, DailyRow, Dataset, Decision, Device, Experiment, Tenure, Variant } from './types.ts';
+import { armsOf, controlArmOf } from './arms.ts';
 import {
   defaultSpec,
   ImportError,
@@ -77,7 +78,7 @@ function normExperiment(raw: Record<string, unknown>, i: number): Experiment {
   };
 }
 
-function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>): DailyRow {
+function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>, arms: Map<string, Variant[]>): DailyRow {
   const ctx = `daily[${i}]`;
   if (raw == null || typeof raw !== 'object') throw new ImportError(`${ctx}：必须是对象`);
   const expId = raw.expId != null ? String(raw.expId).trim() : '';
@@ -88,6 +89,15 @@ function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>)
   const date = raw.date != null ? String(raw.date).trim() : '';
   if (!date) throw new ImportError(`${ctx}：缺少 date`);
   const variant = normVariant(raw.variant, ctx);
+  // JSON 是**显式声明** variants 的格式：数据里冒出没声明的臂，说明导出脚本与元信息不一致。
+  // 这类不一致必须报出来，不能像 CSV 那样默默收下（CSV 没有声明可依，只能从数据推）。
+  const declared = arms.get(expId);
+  if (declared && declared.length && !declared.includes(variant)) {
+    throw new ImportError(
+      `${ctx}：variant「${variant}」不在实验 ${expId} 声明的 variants 里（${declared.join(' / ')}）——` +
+        `如果是多臂实验，请把所有臂都写进 experiments[].variants`,
+    );
+  }
   const device = normEnum<Device>(raw.device, DEVICES, 'device', ctx, 'iOS');
   const tenure = normEnum<Tenure>(raw.tenure, TENURES, 'tenure', ctx, 'new');
   const exposures = num(raw.exposures, 'exposures', ctx, 1);
@@ -144,7 +154,8 @@ export function parseDatasetJson(text: string): Dataset {
 
   const experiments = (raw.experiments as Record<string, unknown>[]).map((e, i) => normExperiment(e, i));
   const expIds = new Set(experiments.map((e) => e.id));
-  const daily = (raw.daily as Record<string, unknown>[]).map((r, i) => normDaily(r, i, expIds));
+  const armsByExp = new Map(experiments.map((e) => [e.id, e.variants]));
+  const daily = (raw.daily as Record<string, unknown>[]).map((r, i) => normDaily(r, i, expIds, armsByExp));
 
   const rawExps = raw.experiments as Record<string, unknown>[];
   const rawHasGT =
@@ -230,10 +241,11 @@ export function textToRows(text: string): string[][] {
 export function parseCsvText(
   text: string,
   mapping?: Partial<Record<import('./columnMap.ts').FieldKey, number>>,
+  controlArm?: string,
 ): TableParseResult {
   const rows = textToRows(text);
   if (rows.length < 2) throw new ImportError('至少要有一行表头 + 一行数据');
-  return parseTableRows(rows, { source: 'csv', mapping });
+  return parseTableRows(rows, { source: 'csv', mapping, controlArm });
 }
 
 /** 只要 Dataset 时的便捷入口（内部就是 parseCsvText().dataset） */
@@ -258,10 +270,13 @@ export function reportForJson(dataset: Dataset, source: 'json' = 'json'): Import
   const warnings: string[] = [];
   for (const e of dataset.experiments) {
     const rows = byExp.get(e.id) ?? [];
-    const variants = new Set(rows.map((r) => r.variant));
+    const arms = armsOf(e, rows);
+    const control = controlArmOf(e);
     const days = new Set(rows.map((r) => r.date));
-    if (!variants.has('control') || !variants.has('treatment')) {
-      warnings.push(`${e.id} ${variants.has('control') ? '只有对照组' : '只有实验组'}——缺少另一臂，无法比较`);
+    if (arms.length <= 1) {
+      warnings.push(`${e.id} ${arms[0] === 'treatment' ? '只有实验组' : '只有对照组'}——缺少另一臂，无法比较`);
+    } else if (!arms.includes(control)) {
+      warnings.push(`${e.id} 声明了 ${arms.length} 个臂，但数据里找不到对照组「${control}」——检查 variants 与数据是否对得上`);
     }
     if (days.size === 1) warnings.push(`${e.id} 只有 1 天数据：分日趋势与序变检验不可用`);
   }
@@ -280,6 +295,8 @@ export function reportForJson(dataset: Dataset, source: 'json' = 'json'): Import
     dropped: [],
     experiments: dataset.experiments.map((e) => {
       const rows = byExp.get(e.id) ?? [];
+      const arms = armsOf(e, rows);
+      const control = controlArmOf(e);
       const dates = [...new Set(rows.map((r) => r.date))].sort();
       return {
         id: e.id,
@@ -288,8 +305,12 @@ export function reportForJson(dataset: Dataset, source: 'json' = 'json'): Import
         days: dates.length,
         dateFrom: dates[0] ?? '',
         dateTo: dates[dates.length - 1] ?? '',
-        hasControl: rows.some((r) => r.variant === 'control'),
-        hasTreatment: rows.some((r) => r.variant === 'treatment'),
+        hasControl: arms.includes(control),
+        hasTreatment: arms.some((a) => a !== control),
+        arms,
+        controlArm: control,
+        // JSON 是显式声明 variants 的，对照臂由声明或「第一个臂」约定得出，不算猜
+        controlImplicit: false,
         metricType: e.metricType,
       };
     }),
@@ -333,3 +354,19 @@ exp_001,2026-01-05,control,iOS,new,5000,260,60,5,800,18200,ARPU,continuous,新�
 exp_001,2026-01-05,treatment,iOS,new,5000,320,62,6,810,22400,ARPU,continuous,新首页改版
 exp_001,2026-01-06,对照,Android,old,4800,250,58,4,790,17500,ARPU,continuous,新首页改版
 exp_001,2026-01-06,实验组,Android,old,4800,305,59,5,795,21350,ARPU,continuous,新首页改版`;
+
+/**
+ * 3 臂样例：分组值故意用三种不同的写法（`control` / `实验组` / `方案C`），
+ * 演示「臂名不用改表」——别名归一的、中文的、业务自定义的都能一起认进来。
+ * 分流不是等分（50/25/25），所以带了 trafficSplit，SRM 才不会误判。
+ */
+export const SAMPLE_CSV_MULTIARM = `expId,date,variant,trafficSplit,exposures,conversions,refunds,complaints,name
+exp_301,2026-02-02,control,50/25/25,8000,400,96,8,支付页三版对比
+exp_301,2026-02-02,实验组,50/25/25,4000,232,48,4,支付页三版对比
+exp_301,2026-02-02,方案C,50/25/25,4000,214,45,4,支付页三版对比
+exp_301,2026-02-03,control,50/25/25,8000,404,95,7,支付页三版对比
+exp_301,2026-02-03,实验组,50/25/25,4000,238,49,5,支付页三版对比
+exp_301,2026-02-03,方案C,50/25/25,4000,209,44,3,支付页三版对比
+exp_301,2026-02-04,control,50/25/25,8000,398,97,9,支付页三版对比
+exp_301,2026-02-04,实验组,50/25/25,4000,241,47,4,支付页三版对比
+exp_301,2026-02-04,方案C,50/25/25,4000,216,46,5,支付页三版对比`;

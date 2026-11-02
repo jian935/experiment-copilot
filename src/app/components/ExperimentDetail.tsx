@@ -46,6 +46,8 @@ import type { Analysis as AnalysisT } from '../../lib/decide.ts';
 import { C } from '../lib/palette';
 import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
 import { DecisionCard } from './DecisionCard';
+import { MultiArmPanel } from './MultiArmPanel';
+import { armLabel } from '../../lib/arms.ts';
 import type { DecisionRecord } from '../lib/decisions';
 
 type Tab = 'segments' | 'guardrails' | 'calc';
@@ -122,18 +124,30 @@ export function ExperimentDetail({
       ci: s.ci95,
       p: s.p,
     });
-    return [
-      {
-        label: '整体',
-        sublabel: `n=${fmtNum(analysis.overall.n1 + analysis.overall.n2)}`,
-        diff: analysis.primary.diff,
-        ci: analysis.primary.ci95,
-        p: analysis.primary.p,
-        emphasized: true,
-      },
-      ...analysis.segments.tenure.map(seg),
-      ...analysis.segments.device.map(seg),
-    ];
+    // 多臂时第一块是「各臂 vs 对照组」（同时区间），后面仍接分层——
+    // 否则森林图里只有焦点臂，另外两个臂的数字在表里、图上却没有，读者会以为漏了
+    const armRows: ForestRow[] = analysis.multiArm
+      ? analysis.arms
+          .filter((a) => !a.isControl)
+          .map((a) => ({
+            label: armLabel(a.id),
+            sublabel: `P(best) ${(a.pBest * 100).toFixed(0)}%`,
+            diff: a.diff,
+            ci: a.ci,
+            p: a.pAdj,
+            emphasized: a.id === analysis.multiArm!.focus,
+          }))
+      : [
+          {
+            label: '整体',
+            sublabel: `n=${fmtNum(analysis.overall.n1 + analysis.overall.n2)}`,
+            diff: analysis.primary.diff,
+            ci: analysis.primary.ci95,
+            p: analysis.primary.p,
+            emphasized: true,
+          },
+        ];
+    return [...armRows, ...analysis.segments.tenure.map(seg), ...analysis.segments.device.map(seg)];
   }, [analysis]);
 
   function runRecalc() {
@@ -319,6 +333,9 @@ export function ExperimentDetail({
         onRemove={onUndecide}
       />
 
+      {/* 多臂对比（k=2 时组件自己返回 null，老实验的界面一模一样） */}
+      <MultiArmPanel analysis={analysis} />
+
       {/* 贝叶斯视角 */}
       <Panel className="mt-4">
         <PanelHead
@@ -442,11 +459,13 @@ export function ExperimentDetail({
       <div className="mt-4 grid gap-4 lg:grid-cols-[1.35fr_1fr]">
         <Panel>
           <PanelHead
-            title="差值 95% 置信区间"
+            title={analysis.multiArm ? '各臂差值（同时 95% 区间）' : '差值 95% 置信区间'}
             hint={
-              P.kind === 'continuous'
-                ? '点 = ARPU 差值，横线 = delta method 的 t 区间；线跨过 0 即为不显著'
-                : '点 = 差值，横线 = Newcombe 95% CI；线跨过 0 即为不显著'
+              analysis.multiArm
+                ? '点 = 该臂与对照组的差值；横线 = Dunnett 同时区间，跨过 0 即「校正后不显著」'
+                : P.kind === 'continuous'
+                  ? '点 = ARPU 差值，横线 = delta method 的 t 区间；线跨过 0 即为不显著'
+                  : '点 = 差值，横线 = Newcombe 95% CI；线跨过 0 即为不显著'
             }
             right={<span className="text-[10px] text-dim">n = {fmtNum(analysis.overall.n1 + analysis.overall.n2)}</span>}
           />
@@ -458,10 +477,16 @@ export function ExperimentDetail({
         <Panel>
           <PanelHead
             title="分日趋势"
-            hint={P.kind === 'continuous' ? '按曝光加权的日 ARPU（control vs treatment）' : '按曝光加权的日转化率（control vs treatment）'}
+            hint={
+              analysis.multiArm
+                ? `按曝光加权的日${P.kind === 'continuous' ? ' ARPU' : '转化率'}（${analysis.arms.length} 条线）`
+                : P.kind === 'continuous'
+                  ? '按曝光加权的日 ARPU（control vs treatment）'
+                  : '按曝光加权的日转化率（control vs treatment）'
+            }
           />
           <div className="px-2 py-2">
-            <Trend rows={rows} kind={P.kind} />
+            <Trend rows={rows} kind={P.kind} arms={analysis.arms.map((a) => a.id)} />
           </div>
         </Panel>
       </div>

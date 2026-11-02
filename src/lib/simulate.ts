@@ -214,6 +214,115 @@ export function buildExperiment(
   return { exp, rows };
 }
 
+export interface MultiArmOptions {
+  /** 臂数（含对照），默认 3 */
+  arms?: number;
+  days?: number;
+  seed?: number;
+  /** 每个处理臂的真实提升（绝对 pp，长度 = arms−1）。缺省全 0（全零族） */
+  lifts?: number[];
+  /** 每个处理臂的退款率恶化（绝对，长度 = arms−1） */
+  refundDiffs?: number[];
+  /** 是否带实验前数据（带 → CUPED 可用） */
+  withPre?: boolean;
+  /** 对照组基线率 */
+  baseRate?: number;
+  /** 分流比例（长度 = arms） */
+  allocation?: number[];
+  id?: string;
+}
+
+/**
+ * 多臂（A/B/n）实验的生成器：给单测、基准脚本和「3 臂样例」共用。
+ *
+ * 为什么和两臂生成器分开写：两臂的 `buildExperiment` 里到处是
+ * 「variant === 'treatment' ? lift : 0」，硬塞第三臂会把真值标注搅乱
+ * （评测集 120 条必须逐位不动）。多臂另起一条路，顺带把「每臂各自的效应」
+ * 写成数组，真值对照才能逐臂核对。
+ */
+export function buildMultiArmExperiment(opts: MultiArmOptions = {}): { exp: Experiment; rows: DailyRow[] } {
+  const arms = Math.max(2, Math.round(opts.arms ?? 3));
+  const days = opts.days ?? 7;
+  const seed = opts.seed ?? 20261102;
+  const lifts = opts.lifts ?? new Array(arms - 1).fill(0);
+  const refundDiffs = opts.refundDiffs ?? new Array(arms - 1).fill(0);
+  const baseRate = opts.baseRate ?? 0.05;
+  const alloc = opts.allocation ?? new Array(arms).fill(1 / arms);
+  const start = new Date('2026-10-01T00:00:00Z');
+  const rng = mulberry32(seed);
+  const ids = ['control'];
+  for (let i = 1; i < arms; i++) ids.push(i === 1 ? 'treatment' : `variant_${String.fromCharCode(97 + i)}`);
+
+  const dayEffect = Array.from({ length: days }, () => BASELINE_DAY_SD * randn(rng));
+  const devEffect: Record<Device, number> = {
+    iOS: BASELINE_DEVICE_SD * randn(rng),
+    Android: BASELINE_DEVICE_SD * randn(rng),
+  };
+  const rows: DailyRow[] = [];
+  for (let d = 0; d < days; d++) {
+    for (const device of ['iOS', 'Android'] as Device[]) {
+      for (const tenure of ['new', 'old'] as Tenure[]) {
+        const base = Math.round(1400 * (0.85 + 0.3 * rng()));
+        for (let a = 0; a < arms; a++) {
+          const n = Math.max(1, Math.round(base * alloc[a]));
+          const cellBase = Math.min(0.95, Math.max(0.001, baseRate + dayEffect[d] + devEffect[device]));
+          const armShift = BASELINE_ARM_SD * randn(rng);
+          const lift = a === 0 ? 0 : lifts[a - 1] ?? 0;
+          const p = Math.min(0.95, Math.max(0.001, cellBase + armShift + lift));
+          const c = binomial(n, p, rng);
+          const nPre = Math.max(1, Math.round(n * (0.9 + 0.2 * rng())));
+          const cPre = binomial(nPre, Math.min(0.95, Math.max(0.001, cellBase + armShift)), rng);
+          const refundP = Math.min(0.2, 0.012 + (a === 0 ? 0 : refundDiffs[a - 1] ?? 0));
+          const refunds = binomial(n, refundP, rng);
+          const complaints = poisson(n * 0.0012, rng);
+          const revenue = Math.max(0, c * (75 + 10 * randn(rng)));
+          const row: DailyRow = {
+            expId: opts.id ?? 'MA001',
+            date: isoDate(start, d),
+            variant: ids[a],
+            device,
+            tenure,
+            exposures: n,
+            conversions: c,
+            refunds,
+            complaints,
+            latencyP95: Math.round(820 + 18 * randn(rng)),
+            revenue: Math.round(revenue * 100) / 100,
+          };
+          if (opts.withPre) {
+            row.preExposures = nPre;
+            row.preConversions = cPre;
+            row.preRevenue = Math.round(Math.max(0, cPre * 75) * 100) / 100;
+          }
+          rows.push(row);
+        }
+      }
+    }
+  }
+
+  const exp: Experiment = {
+    id: opts.id ?? 'MA001',
+    name: `${arms} 臂对比实验`,
+    hypothesis: '多个新方案里挑出最优的那一版',
+    startDate: isoDate(start, 0),
+    endDate: isoDate(start, days - 1),
+    variants: ids,
+    controlArm: 'control',
+    allocation: alloc,
+    trafficSplit: alloc.map((v) => `${Math.round(v * 100)}`).join('/'),
+    primaryMetric: '支付转化率',
+    metricType: 'binary',
+    guardrailMetrics: ['退款率', '投诉率'],
+    archetype: 'positive',
+    trueLift: Math.max(...(lifts.length ? lifts : [0])),
+    trueLiftOverall: Math.max(...(lifts.length ? lifts : [0])),
+    trueLiftScope: 'overall',
+    trueDecision: 'ship',
+    seed,
+  };
+  return { exp, rows };
+}
+
 /** A/A 自校准数据集：count 个「两臂同分布、零效应」的实验，不进主数据集 */
 export function generateAA(count = 1000, seedBase = 20261101, days = 7): Dataset {
   const experiments: Experiment[] = [];

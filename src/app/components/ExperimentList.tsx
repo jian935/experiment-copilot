@@ -19,6 +19,7 @@ import { familyReport, type FamilyReport } from '../../lib/multiplicity.ts';
 import { copyText, readFilters, writeFilters } from '../lib/share';
 import { C } from '../lib/palette';
 import { Button, Chip, DecisionBadge, Panel, Stat, cx } from './ui';
+import { ArmBadge } from './MultiArmPanel';
 
 type SortKey = 'id' | 'p' | 'diff';
 
@@ -301,6 +302,7 @@ export function ExperimentList({
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-[11px] text-dim">{e.id}</span>
                         <span className="truncate text-[13px] font-medium text-ink">{e.name}</span>
+                        <ArmBadge arms={a.arms.map((x) => x.id)} />
                         {decisions[e.id] && (
                           <span
                             className="shrink-0 rounded bg-brand/15 px-1 py-0.5 text-[9px] text-brand2"
@@ -338,7 +340,9 @@ export function ExperimentList({
                         </span>
                       </div>
                     </td>
-                    <td className="num px-3 py-2.5 text-right text-xs text-muted">
+                    <td className="num px-3 py-2.5 text-right text-xs text-muted" title={
+                      a.multiArm ? `焦点臂：${a.multiArm.focus}（校正 p = ${fmtP(a.primary.p)}，边际 p = ${fmtP(a.primary.pRaw ?? a.primary.p)}）` : undefined
+                    }>
                       {fmtP(a.primary.p)}
                       {fwer && (
                         <div className={cx('text-[10px]', familyRow(e.id)?.holmSig ? 'text-ship' : 'text-dim')}>
@@ -347,7 +351,8 @@ export function ExperimentList({
                       )}
                     </td>
                     <td className="num px-4 py-2.5 text-right text-xs text-muted">
-                      {fmtNum(a.overall.n1 + a.overall.n2)}
+                      {/* 多臂时样本是**全臂之和**，只算 control+焦点臂会少报另外两臂的量 */}
+                      {fmtNum(a.arms.reduce((s, x) => s + x.n, 0))}
                     </td>
                     <td className="pr-3">
                       <ArrowRight

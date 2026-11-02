@@ -20,7 +20,7 @@
 **证据**：
 - 运行时依赖只有 5 个前端包（`react` / `react-dom` / `lucide-react` / `clsx` / `tailwind-merge`），**统计零依赖**。
 - scipy 不是被我「感觉对了」，是被**离线生成 fixture、单测逐位比对**：`tests/fixtures/scipy.json` 里 6 组两比例 z 检验（z 相对误差 <1e-6、p <1e-4）+ 5 组 SRM 卡方；t 分位数走不完全 Beta 的闭式，不用查表近似。
-- 跑不起来的那条路更贵：Pyodide 光启动就是秒级、包体 3–5MB 起，而整个前端产物才 **573KB / gzip 187KB**；上后端则直接违背「零后端、可静态部署」。
+- 跑不起来的那条路更贵：Pyodide 光启动就是秒级、包体 3–5MB 起，而整个前端产物才 **660KB / gzip 216KB**；上后端则直接违背「零后端、可静态部署」。
 
 **追问预案**：
 - *「那你怎么证明自研的和 scipy 一致？」* → `npm test -- tests/stats.test.ts`，里面就是逐条比对；fixture 是 scipy 算的，不是我算的。

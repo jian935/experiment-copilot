@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DailyRow } from '../../lib/types.ts';
-import { nearestIndex, scaleY, xAt, yDomain, yTicks, type TrendDatum } from '../../lib/trendGeom.ts';
+import { nearestIndex, scaleY, xAt, yDomain, yTicks } from '../../lib/trendGeom.ts';
+import { armLabel } from '../../lib/arms.ts';
 import { fmtNum, fmtPct } from '../lib/format';
 import { C } from '../lib/palette';
 
@@ -14,6 +15,9 @@ import { C } from '../lib/palette';
  *
  * kind 决定纵轴是转化率还是 ARPU：ARPU 实验拿转化率画趋势会让人以为「没什么变化」，
  * 而实际收入可能已经明显上行——两个口径不能共用一张图。
+ *
+ * 多臂：`arms` 给了几条就画几条。两臂时颜色/线宽与历史版本逐像素一致
+ * （对照 = neutral 1.8px，处理臂 = brand 2px），所以老截图不会变。
  */
 const H = 176;
 const PAD_T = 10;
@@ -21,7 +25,19 @@ const PAD_B = 20;
 const PAD_L = 44;
 const PAD_R = 12;
 
-export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate' | 'continuous' }) {
+/** 第 3 条线起用的颜色：不新造色板变量，直接复用主题里已有的语义色 */
+const EXTRA = [C.iterate, C.incon, C.brand2, C.ship, C.noship];
+
+export function Trend({
+  rows,
+  kind = 'rate',
+  arms = ['control', 'treatment'],
+}: {
+  rows: DailyRow[];
+  kind?: 'rate' | 'continuous';
+  /** 要画的臂（对照在前）。缺省是两臂，保持老行为 */
+  arms?: string[];
+}) {
   const continuous = kind === 'continuous';
   const ref = useRef<HTMLDivElement | null>(null);
   const [w, setW] = useState(640);
@@ -38,34 +54,48 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
     return () => ro.disconnect();
   }, []);
 
-  const data = useMemo<TrendDatum[]>(() => {
-    const byDate = new Map<string, { c: number; nc: number; t: number; nt: number; revC: number; revT: number }>();
+  /**
+   * 序列定义：颜色 / 线宽按「顺序」而不是「臂名」定，
+   * 这样自定义臂名（"方案C"）也能拿到颜色，不必再维护一张臂名→颜色表。
+   */
+  const series = useMemo(
+    () =>
+      arms.map((id, i) => ({
+        id,
+        color: i === 0 ? C.neutral : i === 1 ? C.brand : EXTRA[(i - 2) % EXTRA.length],
+        width: i === 0 ? 1.8 : 2,
+      })),
+    [arms.join('|')], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const data = useMemo(() => {
+    const byDate = new Map<string, { c: number[]; n: number[]; rev: number[] }>();
+    const idx = new Map(arms.map((a, i) => [a, i]));
     for (const r of rows) {
-      const cur = byDate.get(r.date) ?? { c: 0, nc: 0, t: 0, nt: 0, revC: 0, revT: 0 };
-      if (r.variant === 'control') {
-        cur.c += r.conversions;
-        cur.nc += r.exposures;
-        cur.revC += r.revenue ?? 0;
-      } else {
-        cur.t += r.conversions;
-        cur.nt += r.exposures;
-        cur.revT += r.revenue ?? 0;
+      const k = idx.get(r.variant);
+      if (k === undefined) continue; // 不属于要画的臂（例如被过滤掉的空臂）
+      let cur = byDate.get(r.date);
+      if (!cur) {
+        cur = { c: arms.map(() => 0), n: arms.map(() => 0), rev: arms.map(() => 0) };
+        byDate.set(r.date, cur);
       }
-      byDate.set(r.date, cur);
+      cur.c[k] += r.conversions;
+      cur.n[k] += r.exposures;
+      cur.rev[k] += r.revenue ?? 0;
     }
     return [...byDate.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, v]) => ({
         date: date.slice(5),
-        control: continuous ? (v.nc ? v.revC / v.nc : null) : v.nc ? v.c / v.nc : null,
-        treatment: continuous ? (v.nt ? v.revT / v.nt : null) : v.nt ? v.t / v.nt : null,
-        nc: v.nc,
-        nt: v.nt,
+        vals: arms.map((_, i) =>
+          v.n[i] ? (continuous ? v.rev[i] / v.n[i] : v.c[i] / v.n[i]) : null,
+        ) as Array<number | null>,
+        ns: v.n,
       }));
-  }, [rows, continuous]);
+  }, [rows, continuous, arms.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fmt = (v: number) => (continuous ? `${v.toFixed(2)}元` : fmtPct(v));
-  const vals = data.flatMap((d) => [d.control ?? NaN, d.treatment ?? NaN]).filter(Number.isFinite);
+  const vals = data.flatMap((d) => d.vals).filter((v): v is number => v !== null && Number.isFinite(v));
   // 这几个数组最多几十个元素，不值得 useMemo（依赖是每次新建的数组，写了也是每次重算）
   const [lo, hi] = yDomain(vals, continuous);
   const ticks = yTicks(lo, hi, continuous);
@@ -74,10 +104,10 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
   const y = (v: number) => scaleY(v, lo, hi, PAD_T, H - PAD_B);
   const xs = data.map((_, i) => xAt(i, data.length, plotW));
 
-  const path = (key: 'control' | 'treatment') => {
+  const path = (k: number) => {
     const pts: string[] = [];
     data.forEach((d, i) => {
-      const v = d[key];
+      const v = d.vals[k];
       if (v === null || !Number.isFinite(v)) return;
       pts.push(`${pts.length ? 'L' : 'M'}${PAD_L + xs[i]} ${y(v)}`);
     });
@@ -93,10 +123,16 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
   );
 
   const active = hover !== null ? data[hover] : undefined;
+  const multi = arms.length > 2;
 
   return (
     <div ref={ref} className="relative w-full" style={{ height: H }}>
-      <svg width={w} height={H} role="img" aria-label="分日趋势：control 与 treatment 逐日对比">
+      <svg
+        width={w}
+        height={H}
+        role="img"
+        aria-label={`分日趋势：${arms.map(armLabel).join(' / ')} 逐日对比`}
+      >
         {/* 横向虚线网格 + 纵轴刻度 */}
         {ticks.map((t) => (
           <g key={t}>
@@ -124,24 +160,25 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
           ) : null,
         )}
 
-        <path d={path('control')} fill="none" stroke={C.neutral} strokeWidth={1.8} strokeLinejoin="round" />
-        <path d={path('treatment')} fill="none" stroke={C.brand} strokeWidth={2} strokeLinejoin="round" />
+        {series.map((s, k) => (
+          <path key={s.id} d={path(k)} fill="none" stroke={s.color} strokeWidth={s.width} strokeLinejoin="round" />
+        ))}
 
         {data.map((d, i) => {
           const x = PAD_L + xs[i];
           return (
             <g key={d.date}>
-              {d.control !== null && Number.isFinite(d.control) && (
-                <circle cx={x} cy={y(d.control)} r={2.2} fill={C.neutral} />
-              )}
-              {d.treatment !== null && Number.isFinite(d.treatment) && (
-                <circle cx={x} cy={y(d.treatment)} r={2.2} fill={C.brand} />
-              )}
+              {series.map((s, k) => {
+                const v = d.vals[k];
+                return v !== null && Number.isFinite(v) ? (
+                  <circle key={s.id} cx={x} cy={y(v)} r={2.2} fill={s.color} />
+                ) : null;
+              })}
             </g>
           );
         })}
 
-        {/* 悬停：竖线 + 两个点的放大 */}
+        {/* 悬停：竖线 + 各条线的点放大 */}
         {active && hover !== null && (
           <g>
             <line
@@ -153,12 +190,20 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
               strokeWidth={1}
               strokeDasharray="3 3"
             />
-            {active.control !== null && Number.isFinite(active.control) && (
-              <circle cx={PAD_L + xs[hover]} cy={y(active.control)} r={3.5} fill={C.neutral} stroke={C.card} strokeWidth={1.5} />
-            )}
-            {active.treatment !== null && Number.isFinite(active.treatment) && (
-              <circle cx={PAD_L + xs[hover]} cy={y(active.treatment)} r={3.5} fill={C.brand} stroke={C.card} strokeWidth={1.5} />
-            )}
+            {series.map((s, k) => {
+              const v = active.vals[k];
+              return v !== null && Number.isFinite(v) ? (
+                <circle
+                  key={s.id}
+                  cx={PAD_L + xs[hover]}
+                  cy={y(v)}
+                  r={3.5}
+                  fill={s.color}
+                  stroke={C.card}
+                  strokeWidth={1.5}
+                />
+              ) : null;
+            })}
           </g>
         )}
 
@@ -174,6 +219,18 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
         />
       </svg>
 
+      {/* 多臂时必须有图例：三条线靠颜色区分，没图例等于没画 */}
+      {multi && (
+        <div className="pointer-events-none absolute right-2 top-0 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[9.5px] text-dim">
+          {series.map((s) => (
+            <span key={s.id} className="inline-flex items-center gap-1">
+              <i className="h-1 w-3.5 rounded-full" style={{ background: s.color }} />
+              {armLabel(s.id)}
+            </span>
+          ))}
+        </div>
+      )}
+
       {active && hover !== null && (
         <div
           className="pointer-events-none absolute z-10 rounded-lg border border-line2 bg-panel px-3 py-2 text-[11px] shadow-lift"
@@ -181,22 +238,22 @@ export function Trend({ rows, kind = 'rate' }: { rows: DailyRow[]; kind?: 'rate'
             // 靠左半边就往右放、靠右半边就往左放，别让提示框被面板裁掉
             left: PAD_L + xs[hover] + (xs[hover] > plotW * 0.6 ? -150 : 14),
             top: PAD_T + 6,
-            width: 136,
+            width: multi ? 152 : 136,
           }}
         >
           <div className="mb-1 text-dim">{active.date}</div>
-          <div className="num flex items-center gap-2 text-ink">
-            <i className="h-1.5 w-1.5 rounded-full" style={{ background: C.neutral }} />
-            {'control '}
-            {fmt(active.control ?? 0)}
-          </div>
-          <div className="num mt-0.5 flex items-center gap-2 text-brand2">
-            <i className="h-1.5 w-1.5 rounded-full bg-brand2" />
-            {'treatment '}
-            {fmt(active.treatment ?? 0)}
-          </div>
+          {series.map((s, k) => {
+            const v = active.vals[k];
+            return (
+              <div key={s.id} className="num mt-0.5 flex items-center gap-2" style={{ color: s.color }}>
+                <i className="h-1.5 w-1.5 rounded-full" style={{ background: s.color }} />
+                {s.id === 'control' ? 'control' : s.id === 'treatment' ? 'treatment' : armLabel(s.id)}
+                {v === null ? '—' : fmt(v)}
+              </div>
+            );
+          })}
           <div className="num mt-1 text-[10px] text-dim">
-            n = {fmtNum(active.nc)} / {fmtNum(active.nt)}
+            n = {active.ns.map((n) => fmtNum(n)).join(' / ')}
           </div>
         </div>
       )}

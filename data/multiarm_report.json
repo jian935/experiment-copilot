@@ -1,0 +1,100 @@
+{
+  "generatedAt": "2026-11-02T12:51:22.920Z",
+  "trials": 20000,
+  "alpha": 0.05,
+  "rho": 0.5,
+  "fwer": [
+    {
+      "arms": 2,
+      "comparisons": 1,
+      "naive": 0.0499,
+      "naiveTheory": 0.050000000000000044,
+      "dunnett": 0.0499,
+      "bonferroni": 0.0499,
+      "crit": 1.9599639845400816,
+      "bonferroniCrit": 1.959963986120195
+    },
+    {
+      "arms": 3,
+      "comparisons": 2,
+      "naive": 0.09415,
+      "naiveTheory": 0.09750000000000003,
+      "dunnett": 0.0534,
+      "bonferroni": 0.0503,
+      "crit": 2.2121277465921594,
+      "bonferroniCrit": 2.2414027264652865
+    },
+    {
+      "arms": 4,
+      "comparisons": 3,
+      "naive": 0.12745,
+      "naiveTheory": 0.1426250000000001,
+      "dunnett": 0.05035,
+      "bonferroni": 0.0445,
+      "crit": 2.3489705903775757,
+      "bonferroniCrit": 2.3939798012415405
+    },
+    {
+      "arms": 5,
+      "comparisons": 4,
+      "naive": 0.1533,
+      "naiveTheory": 0.18549375000000012,
+      "dunnett": 0.0506,
+      "bonferroni": 0.04315,
+      "crit": 2.44177077319182,
+      "bonferroniCrit": 2.4977054769619746
+    }
+  ],
+  "selection": [
+    {
+      "lift": 0,
+      "lambda": 0,
+      "pickMaxPoint": 0.5026,
+      "pickMaxBest": 0.5026,
+      "pickMaxSignificant": 0.0125,
+      "cursePP": 0.13858951147567294
+    },
+    {
+      "lift": 0.05,
+      "lambda": 0.7170577814547829,
+      "pickMaxPoint": 0.7611,
+      "pickMaxBest": 0.7611,
+      "pickMaxSignificant": 0.0676,
+      "cursePP": null
+    },
+    {
+      "lift": 0.1,
+      "lambda": 1.4179405544428343,
+      "pickMaxPoint": 0.92185,
+      "pickMaxBest": 0.92185,
+      "pickMaxSignificant": 0.20975,
+      "cursePP": null
+    },
+    {
+      "lift": 0.2,
+      "lambda": 2.7748353574271256,
+      "pickMaxPoint": 0.9971,
+      "pickMaxBest": 0.9971,
+      "pickMaxSignificant": 0.7128,
+      "cursePP": null
+    }
+  ],
+  "calibration": [
+    {
+      "lift": 0.05,
+      "stated": 0.7335372228129914,
+      "actual": 0.7611
+    },
+    {
+      "lift": 0.1,
+      "stated": 0.8108735923459728,
+      "actual": 0.92185
+    },
+    {
+      "lift": 0.2,
+      "stated": 0.9459078800164737,
+      "actual": 0.9971
+    }
+  ],
+  "nullMaxProb": 0.697151618734144
+}

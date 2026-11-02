@@ -540,6 +540,77 @@ async function runTrendScenario() {
   return problems;
 }
 
+/* ─────────── 第九阶段：A/B/n 多臂 —— 导入 3 臂表到「多臂对比面板」 ───────────
+ * 为什么必须真在浏览器里跑一遍：多臂这条链路每一环都可能静默出错——
+ * 第三臂被当成 typo 丢掉 → 只剩两臂，页面看起来完全正常；
+ * P(best) 没归一 → 百分比加起来 137%；焦点臂和主指标不是同一个算法 → 两个数字打架。
+ * 这些都不会抛异常，只能靠断言具体文案与数值抓。
+ */
+async function runMultiArmScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('实验列表'), '列表页加载');
+
+    await clickText('button', '导入数据');
+    await waitText((t) => t.includes('载入并分析'), '导入对话框打开');
+
+    // 用对话框里自带的「3 臂样例」按钮：顺带验证这个入口没有失效
+    await clickText('button', '3 臂样例');
+    await sleep(200);
+    await clickText('button', '载入并分析');
+    const preflight = await waitText((t) => t.includes('进来的实验'), '预检面板');
+    if (!preflight.includes('3 臂')) problems.push('预检面板没有标出「3 臂」');
+    if (!preflight.includes('方案C')) problems.push('预检面板没有列出自定义臂名「方案C」');
+    if (!preflight.includes('含多臂实验')) problems.push('预检面板没有提示「含多臂实验」');
+
+    await clickText('button', '确认导入');
+    await waitText((t) => t.includes('导入 · 1 例'), '三臂数据导入完成');
+    await sleep(1300);
+
+    await send('Page.navigate', { url: `${BASE}/#/e/exp_301` });
+    const detail = await waitText((t) => t.includes('多臂对比'), '详情页多臂面板');
+
+    for (const kw of ['多臂对比（3 个臂', 'Dunnett', 'P(best)', '校正 p', '方案C', '全局检验']) {
+      if (!detail.includes(kw)) problems.push(`详情页缺少「${kw}」`);
+    }
+    if (detail.includes('undefined') || detail.includes('NaN')) problems.push('多臂面板出现 undefined / NaN');
+
+    // P(best) 必须归一：三个臂的百分比加起来 ≈ 100
+    const pbest = await evaluate(`(() => {
+      const rows = [...document.querySelectorAll('table tr')];
+      const out = [];
+      for (const tr of rows) {
+        const cells = [...tr.querySelectorAll('td')];
+        if (cells.length < 9) continue;
+        const m = /([\\d.]+)%/.exec(cells[7].innerText || '');
+        if (m) out.push(Number(m[1]));
+      }
+      return out;
+    })()`);
+    if (!Array.isArray(pbest) || pbest.length !== 3) problems.push(`P(best) 只取到 ${pbest && pbest.length} 个臂`);
+    else {
+      const sum = pbest.reduce((a, b) => a + b, 0);
+      if (Math.abs(sum - 100) > 1.5) problems.push(`P(best) 没有归一：合计 ${sum.toFixed(1)}%`);
+    }
+
+    // 趋势图必须画三条线（多臂不画第三条 = 静默丢数据）
+    const lines = await evaluate(`document.querySelectorAll('svg[aria-label*="逐日对比"] path[stroke-linejoin="round"]').length`);
+    if (lines < 3) problems.push(`趋势图只画了 ${lines} 条线（3 臂应该有 3 条）`);
+
+    // 收尾：切回内置，别把后面的人工看页面留在导入态
+    await send('Page.navigate', { url: `${BASE}/#/` });
+    await waitText((t) => t.includes('导入 · 1 例'), '回到列表页');
+    await clickText('button', '导入 ·');
+    await sleep(250);
+    await clickText('button', '内置合成数据');
+    await waitText((t) => t.includes('内置 · 120 例'), '切回内置');
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -617,6 +688,18 @@ if (trendProblems.length) {
   for (const p of trendProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（手写 SVG 有纵轴刻度、两条线，悬停能取到那一天的 control/treatment）');
+}
+console.log('');
+
+const multiArmProblems = await runMultiArmScenario();
+console.log(`\nA/B/n 多臂：3 臂样例 → 预检认出 3 臂 → 多臂面板（Dunnett / P(best) 归一 / 3 条趋势线）`);
+console.log('─'.repeat(70));
+if (multiArmProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of multiArmProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（校正 p 与同时区间都在，P(best) 合计 100%，趋势图画了 3 条线）');
 }
 console.log('');
 

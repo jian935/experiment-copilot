@@ -18,6 +18,7 @@ import {
   parseDatasetJson,
   reportForJson,
   SAMPLE_CSV,
+  SAMPLE_CSV_MULTIARM,
   SAMPLE_JSON,
   textToRows,
   type ImportReport,
@@ -26,6 +27,7 @@ import { parseTableRows } from '../../lib/tableImport.ts';
 import { detectColumns, FIELDS, type FieldKey } from '../../lib/columnMap.ts';
 import { parseWorkbookSheets } from '../../lib/workbookImport.ts';
 import { isExcelFile, isLegacyExcel, readWorkbook, type WorkbookSheet } from '../../lib/spreadsheet.ts';
+import { armLabel } from '../../lib/arms.ts';
 import { fmtNum } from '../lib/format';
 import { Button } from './ui';
 
@@ -63,6 +65,8 @@ export function ImportDialog({
   const [dragOver, setDragOver] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
   const [mapping, setMapping] = useState<Partial<Record<FieldKey, number>>>({});
+  /** 手动指定的对照臂（多臂表里「第一个臂是不是基线」经常反直觉，必须可改） */
+  const [controlArm, setControlArm] = useState<string | undefined>(undefined);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
@@ -72,22 +76,24 @@ export function ImportDialog({
   function reset() {
     setPreview(null);
     setMapping({});
+    setControlArm(undefined);
     setError(null);
     setOk(null);
     setShowMapping(false);
   }
 
-  /** 改列映射后重跑：纯逻辑、同步，不重新读文件 */
-  function reparse(next: Partial<Record<FieldKey, number>>) {
+  /** 改列映射 / 改对照臂后重跑：纯逻辑、同步，不重新读文件 */
+  function reparse(next: Partial<Record<FieldKey, number>>, nextControl = controlArm) {
     if (!preview) return;
     setMapping(next);
+    setControlArm(nextControl);
     setError(null);
     try {
       if (preview.source.kind === 'csv') {
-        const r = parseTableRows(preview.source.rows, { source: 'csv', mapping: next });
+        const r = parseTableRows(preview.source.rows, { source: 'csv', mapping: next, controlArm: nextControl });
         setPreview({ ...preview, ...r });
       } else if (preview.source.kind === 'xlsx') {
-        const r = parseWorkbookSheets(preview.source.book, next);
+        const r = parseWorkbookSheets(preview.source.book, next, nextControl);
         setPreview({ ...preview, ...r });
       }
     } catch (e) {
@@ -103,6 +109,7 @@ export function ImportDialog({
     const r = parseTableRows(rows, { source: 'csv' });
     setPreview({ ...r, name, source: { kind: 'csv', rows } });
     setMapping({});
+    setControlArm(undefined);
   }
 
   function loadJson(raw: string, name: string) {
@@ -228,6 +235,8 @@ export function ImportDialog({
                 else next[k] = i;
                 reparse(next);
               }}
+              controlArm={controlArm}
+              onControlArm={(arm) => reparse(mapping, arm)}
             />
           ) : (
             <>
@@ -325,6 +334,19 @@ export function ImportDialog({
                 >
                   填入示例
                 </Button>
+                {mode === 'table' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setText(SAMPLE_CSV_MULTIARM);
+                      setError(null);
+                    }}
+                    title="3 个臂（control / 实验组 / 方案C），分流 50/25/25"
+                  >
+                    3 臂样例（A/B/n）
+                  </Button>
+                )}
                 <span className="text-[10.5px] text-dim">示例是编造的，只用来演示格式</span>
               </div>
 
@@ -398,6 +420,8 @@ function PreviewPanel({
   toggleMapping,
   mapping,
   onMap,
+  controlArm,
+  onControlArm,
 }: {
   preview: Preview;
   onBack: () => void;
@@ -405,6 +429,8 @@ function PreviewPanel({
   toggleMapping: () => void;
   mapping: Partial<Record<FieldKey, number>>;
   onMap: (k: FieldKey, i: number) => void;
+  controlArm?: string;
+  onControlArm: (arm: string | undefined) => void;
 }) {
   const { dataset, report } = preview;
   const exposures = useMemo(() => dataset.daily.reduce((s, r) => s + r.exposures, 0), [dataset]);
@@ -502,28 +528,76 @@ function PreviewPanel({
           <span className="text-[10.5px] text-dim">
             {report.experiments.length > 6 ? `前 6 个，共 ${report.experiments.length} 个` : '全部'}
           </span>
+          {report.experiments.some((e) => e.arms.length > 2) && (
+            <span className="ml-auto rounded bg-brand/12 px-1.5 py-0.5 text-[10px] text-brand2">
+              含多臂实验 · 会按 A/B/n 分析
+            </span>
+          )}
         </div>
         <div className="border-t border-line">
           <table className="w-full text-[11px]">
             <tbody>
-              {report.experiments.slice(0, 6).map((e) => (
-                <tr key={e.id} className="border-b border-line/60 last:border-0">
-                  <td className="px-4 py-1.5 font-medium text-ink">{e.id}</td>
-                  <td className="max-w-[180px] truncate px-2 py-1.5 text-muted">{e.name}</td>
-                  <td className="px-2 py-1.5 text-right text-dim">{e.days} 天</td>
-                  <td className="px-2 py-1.5 text-dim">
-                    {e.dateFrom} ~ {e.dateTo}
-                  </td>
-                  <td className="px-2 py-1.5 text-dim">{e.metricType === 'continuous' ? 'ARPU' : '率'}</td>
-                  <td className="px-4 py-1.5 text-right">
-                    {e.hasControl && e.hasTreatment ? (
-                      <span className="text-[10.5px] text-ship">两臂齐</span>
-                    ) : (
-                      <span className="text-[10.5px] text-noship">缺一臂</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {report.experiments.slice(0, 6).map((e) => {
+                const multi = e.arms.length > 2;
+                // 只有多臂才让人改对照臂：两臂的对照是唯一的，给个下拉只会增加误操作
+                const canPickControl = multi && e.arms.length > 1;
+                return (
+                  <tr key={e.id} className="border-b border-line/60 last:border-0">
+                    <td className="px-4 py-1.5 font-medium text-ink">{e.id}</td>
+                    <td className="max-w-[160px] truncate px-2 py-1.5 text-muted">{e.name}</td>
+                    <td className="px-2 py-1.5 text-right text-dim">{e.days} 天</td>
+                    <td className="px-2 py-1.5 text-dim">{e.metricType === 'continuous' ? 'ARPU' : '率'}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] ${multi ? 'bg-brand/12 text-brand2' : 'bg-panel2 text-dim'}`}>
+                          {e.arms.length} 臂
+                        </span>
+                        {e.arms.slice(0, 4).map((a) => (
+                          <span
+                            key={a}
+                            className={`rounded px-1 py-0.5 text-[10px] ${
+                              a === e.controlArm ? 'bg-ship/15 text-ship' : 'bg-panel2/70 text-muted'
+                            }`}
+                            title={a === e.controlArm ? '对照组' : '与对照组比较'}
+                          >
+                            {armLabel(a)}
+                          </span>
+                        ))}
+                        {e.arms.length > 4 && <span className="text-[10px] text-dim">+{e.arms.length - 4}</span>}
+                      </div>
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      {e.arms.length >= 2 ? (
+                        <span className="text-[10.5px] text-ship">{multi ? '多臂可比' : '两臂齐'}</span>
+                      ) : (
+                        <span className="text-[10.5px] text-noship">缺一臂</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
+                      {canPickControl ? (
+                        <select
+                          value={controlArm && e.arms.includes(controlArm) ? controlArm : e.controlArm}
+                          onChange={(ev) => onControlArm(ev.target.value)}
+                          title="对照臂：错误的对照会让所有差值反号"
+                          className={`rounded border px-1 py-0.5 text-[10.5px] outline-none ${
+                            e.controlImplicit
+                              ? 'border-iterate/60 bg-iterate/10 text-iterate'
+                              : 'border-line bg-base text-muted'
+                          }`}
+                        >
+                          {e.arms.map((a) => (
+                            <option key={a} value={a}>
+                              对照：{armLabel(a)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-[10px] text-dim">对照：{armLabel(e.controlArm)}</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

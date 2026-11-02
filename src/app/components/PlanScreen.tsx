@@ -3,12 +3,12 @@ import { AlertTriangle, ArrowRight, CalendarClock, FlaskConical, Info, Users } f
 import type { Analysis } from '../../lib/decide.ts';
 import type { Dataset } from '../../lib/types.ts';
 import {
-  alphaForArms,
   daysNeeded,
   mdeForDays,
   sampleSizeContinuous,
   sampleSizeTwoProportion,
 } from '../../lib/plan.ts';
+import { mdeMultiArmRate, sampleSizeMultiArm, sampleSizeMultiArmContinuous } from '../../lib/multiarm.ts';
 import { fmtNum } from '../lib/format';
 import { Button, Panel, PanelHead, cx } from './ui';
 
@@ -47,12 +47,16 @@ export function PlanScreen({
   const [traffic, setTraffic] = useState(20_000);
   const [controlSharePct, setControlSharePct] = useState(50);
   const [daysBudget, setDaysBudget] = useState(14);
+  /** 臂数（含对照组）。2 = 传统 A/B；3/4 = A/B/n，走 Dunnett 口径 */
+  const [armCount, setArmCount] = useState(2);
 
   const alpha = alphaPct / 100;
   const power = powerPct / 100;
   const controlShare = controlSharePct / 100;
   const p1 = basePct / 100;
   const p2 = p1 * (1 + liftPct / 100);
+  /** 多臂按等分流：每组每天拿到 1/k 的流量，天数要用这个份额算 */
+  const effShare = armCount > 2 ? 1 / armCount : controlShare;
 
   /** 从已有实验带入基线：比让用户凭记忆填一个 5% 强得多 */
   const rateExperiments = useMemo(
@@ -66,6 +70,59 @@ export function PlanScreen({
 
   const result = useMemo(() => {
     try {
+      // 多臂：每臂都要与对照比，α 要控 FWER，且各臂共享对照 → 用 Dunnett（不是 Bonferroni）
+      if (armCount > 2) {
+        if (kind === 'continuous') {
+          const p = sampleSizeMultiArmContinuous({ sd, delta, arms: armCount, alpha, power });
+          const d = daysNeeded({ nPerArm: p.nPerArm, dailyTraffic: traffic, controlShare: effShare });
+          return {
+            ok: true as const,
+            shape: 'multi-size' as const,
+            arms: armCount,
+            kind: 'continuous' as const,
+            nPerArm: p.nPerArm,
+            total: p.total,
+            days: d.days,
+            perArmPerDay: d.perArmPerDay,
+            crit: p.crit,
+            nBonf: p.nPerArmBonferroni,
+            bonferroniCritZ: p.bonferroniCrit,
+          };
+        }
+        if (mode === 'days') {
+          const nPerArm = Math.max(2, Math.round((traffic * daysBudget) / armCount));
+          const m = mdeMultiArmRate({ p1, arms: armCount, nPerArm, alpha, power });
+          return {
+            ok: true as const,
+            shape: 'multi-mde' as const,
+            arms: armCount,
+            nPerArm,
+            /** 展示用的 MDE 文案（率用相对提升，连续用绝对差值） */
+            mdeText: `${(m.mdeRel * 100).toFixed(1)}%`,
+            mdeUnit: '相对提升',
+            crit: m.crit,
+          };
+        }
+        const p = sampleSizeMultiArm({ p1, p2, arms: armCount, alpha, power });
+        const d = daysNeeded({ nPerArm: p.nPerArm, dailyTraffic: traffic, controlShare: effShare });
+        return {
+          ok: true as const,
+          shape: 'multi-size' as const,
+          arms: armCount,
+          kind: 'rate' as const,
+          nPerArm: p.nPerArm,
+          total: p.total,
+          days: d.days,
+          perArmPerDay: d.perArmPerDay,
+          crit: p.crit,
+          nBonf: p.nPerArmBonferroni,
+          bonferroniCritZ: p.bonferroniCrit,
+          achievedPower: p.achievedPower,
+          trafficMultiplier: p.trafficMultiplier,
+          correlation: p.correlation,
+          powerAnyArm: p.powerAnyArm,
+        };
+      }
       if (kind === 'continuous') {
         const n = sampleSizeContinuous({ sd, delta, alpha, power });
         const d = daysNeeded({ nPerArm: n.nPerArm, dailyTraffic: traffic, controlShare });
@@ -96,20 +153,32 @@ export function PlanScreen({
     } catch (e) {
       return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
     }
-  }, [kind, mode, sd, delta, p1, p2, alpha, power, traffic, controlShare, daysBudget]);
+  }, [kind, mode, sd, delta, p1, p2, alpha, power, traffic, controlShare, daysBudget, armCount, effShare]);
 
-  /** 3 臂时的代价：α 要分摊，样本量不是「加一组」那么简单 */
+
+  /**
+   * 加臂的代价。
+   * - 当前是 2 臂：预告「加第三个臂要多少样本」（很多人以为加一臂只是多分一股流量）
+   * - 当前是 3/4 臂：直接读 `result` 里的 Dunnett vs Bonferroni 两组数
+   */
   const armsCost = useMemo(() => {
-    if (kind !== 'rate') return null;
+    if (kind !== 'rate' || mode !== 'size' || armCount !== 2) return null;
     try {
       const two = sampleSizeTwoProportion({ p1, p2, alpha, power }).nPerArm;
-      const three = sampleSizeTwoProportion({ p1, p2, alpha: alphaForArms(alpha, 3).alphaPerComparison, power })
-        .nPerArm;
-      return { two, three, ratio: three / two };
+      const p = sampleSizeMultiArm({ p1, p2, arms: 3, alpha, power });
+      return {
+        two,
+        dunnett: p.nPerArm,
+        bonferroni: p.nPerArmBonferroni,
+        ratio: p.nPerArm / two,
+        trafficMultiplier: p.trafficMultiplier,
+        crit: p.crit,
+        bonferroniCritZ: p.bonferroniCrit,
+      };
     } catch {
       return null;
     }
-  }, [kind, p1, p2, alpha, power]);
+  }, [kind, mode, p1, p2, alpha, power, armCount]);
 
   const curve = useMemo(() => {
     if (kind !== 'rate' || !(p1 > 0)) return [];
@@ -148,6 +217,23 @@ export function PlanScreen({
             <div className="flex gap-1 rounded-lg bg-panel2/60 p-1">
               <Seg active={kind === 'rate'} onClick={() => setKind('rate')} label="转化率" />
               <Seg active={kind === 'continuous'} onClick={() => setKind('continuous')} label="ARPU / 连续指标" />
+            </div>
+
+            <div>
+              <div className="mb-1 flex items-baseline justify-between text-[10.5px]">
+                <span className="text-muted">臂数（含对照组）</span>
+                <span className="text-dim">{armCount > 2 ? 'A/B/n' : 'A/B'}</span>
+              </div>
+              <div className="flex gap-1 rounded-lg bg-panel2/60 p-1">
+                <Seg active={armCount === 2} onClick={() => setArmCount(2)} label="2 臂" />
+                <Seg active={armCount === 3} onClick={() => setArmCount(3)} label="3 臂" />
+                <Seg active={armCount === 4} onClick={() => setArmCount(4)} label="4 臂" />
+              </div>
+              {armCount > 2 && (
+                <p className="mt-1 text-[10px] leading-4 text-dim">
+                  {armCount - 1} 次「每臂 vs 对照」，用 Dunnett 控 FWER（比 Bonferroni 省样本）；流量按{armCount} 等分。
+                </p>
+              )}
             </div>
 
             {kind === 'rate' ? (
@@ -224,6 +310,65 @@ export function PlanScreen({
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <span>{result.error}</span>
             </div>
+          ) : result.shape === 'multi-size' ? (
+            <>
+              <ResultGrid
+                items={[
+                  { label: '每组样本', value: fmtNum(result.nPerArm), unit: '人' },
+                  { label: '总样本', value: fmtNum(result.total), unit: '人' },
+                  { label: '需要天数', value: String(result.days), unit: '天', accent: result.days > 30 },
+                  {
+                    label: 'Dunnett 临界 z',
+                    value: result.crit.toFixed(3),
+                    unit: `比 Bonferroni 少 ${(result.nBonf - result.nPerArm).toLocaleString()} 人/组`,
+                  },
+                ]}
+              />
+              <p className="text-[11.5px] leading-5 text-muted">
+                {result.arms} 个臂、{result.arms - 1} 次比较。
+                {result.kind === 'rate' ? (
+                  <>
+                    要检出 <b className="text-ink">{(p1 * 100).toFixed(2)}% → {(p2 * 100).toFixed(2)}%</b>
+                    （+{liftPct}% 相对），
+                  </>
+                ) : (
+                  <>
+                    要检出 <b className="text-ink">{delta} 元</b> 的 ARPU 差值，
+                  </>
+                )}
+                每组需要 <b className="text-ink">{fmtNum(result.nPerArm)}</b> 人；按每天{' '}
+                {fmtNum(result.perArmPerDay)} 人/组，需要{' '}
+                <b className={cx('text-ink', result.days > 30 && 'text-iterate')}>{result.days} 天</b>。
+              </p>
+              <div className="flex items-start gap-2 rounded-xl border border-line bg-panel2/40 px-4 py-2.5 text-[10.5px] leading-4 text-muted">
+                <Info size={12} className="mt-0.5 shrink-0 text-brand2" />
+                <span>
+                  同一设计改用 Bonferroni（忽略「各臂共享对照 ⇒ 差值正相关」）需要{' '}
+                  <b className="text-ink">{fmtNum(result.nBonf)}</b> 人/组，即多付{' '}
+                  <b className="text-ink">{fmtNum(result.nBonf - result.nPerArm)}</b> 人/组的流量；
+                  临界值 {result.crit.toFixed(3)} vs {result.bonferroniCritZ.toFixed(3)} 的差就是「用不用相关性」的价格。
+                  注意：{result.arms} 臂的每组样本<b className="text-ink">一定多于</b>两臂——多一个臂不是「多分一股流量」，
+                  而是每次比较都要更保守。
+                </span>
+              </div>
+            </>
+          ) : result.shape === 'multi-mde' ? (
+            <>
+              <ResultGrid
+                items={[
+                  { label: '能检出的最小效应', value: result.mdeText, unit: result.mdeUnit },
+                  { label: '每组样本', value: fmtNum(result.nPerArm), unit: '人' },
+                  { label: '可用天数', value: String(daysBudget), unit: '天' },
+                  { label: 'Dunnett 临界 z', value: result.crit.toFixed(3), unit: '' },
+                ]}
+              />
+              <p className="text-[11.5px] leading-5 text-muted">
+                {daysBudget} 天、每天 {traffic.toLocaleString()} 流量按 {result.arms} 等分，
+                {result.arms} 个臂每个只有 <b className="text-ink">{fmtNum(result.nPerArm)}</b> 人，
+                只能检出 <b className="text-ink">{result.mdeText}</b> 以上的效应。
+                <b className="text-ink">臂越多，单臂样本越少，能检出的效应就越大</b>——这是多臂实验最容易被忽略的代价。
+              </p>
+            </>
           ) : result.shape === 'continuous' ? (
             <ResultGrid
               items={[
@@ -269,15 +414,17 @@ export function PlanScreen({
             </>
           )}
 
-          {armsCost && mode === 'size' && (
+          {armsCost && (
             <div className="flex items-start gap-2 rounded-xl border border-line bg-panel2/40 px-4 py-2.5 text-[10.5px] leading-4 text-muted">
-              <Info size={12} className="mt-0.5 shrink-0 text-brand2" />
+              <Users size={12} className="mt-0.5 shrink-0 text-brand2" />
               <span>
-                想加第三个臂（A/B/C）：α 要分摊到 {alphaForArms(alpha, 3).comparisons} 次比较
-                （每次 {(alphaForArms(alpha, 3).alphaPerComparison * 100).toFixed(2)}%），
-                每组样本要 <b className="text-ink">×{armsCost.ratio.toFixed(2)}</b>（
-                {fmtNum(armsCost.two)} → {fmtNum(armsCost.three)} 人），总流量是原来的{' '}
-                <b className="text-ink">×{(armsCost.ratio * 3 / 2).toFixed(2)}</b>。
+                想加第三个臂（A/B/C）：每组样本要{' '}
+                <b className="text-ink">×{armsCost.ratio.toFixed(2)}</b>（{fmtNum(armsCost.two)} →{' '}
+                {fmtNum(armsCost.dunnett)} 人），总流量是两臂的{' '}
+                <b className="text-ink">×{armsCost.trafficMultiplier.toFixed(2)}</b>。
+                如果改用 Bonferroni 而不是 Dunnett，还要再多到 {fmtNum(armsCost.bonferroni)} 人/组
+                （临界值 {armsCost.crit.toFixed(3)} vs {armsCost.bonferroniCritZ.toFixed(3)}）。
+                点上面的「3 臂」可以直接按多臂重算。
               </span>
             </div>
           )}

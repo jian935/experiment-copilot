@@ -62,6 +62,57 @@ export function chi2Sf1(x: number): number {
   return erfc(Math.sqrt(Math.max(0, x) / 2));
 }
 
+/**
+ * 上不完全 Gamma 函数 Q(a, x) = Γ(a,x)/Γ(a)（Numerical Recipes gser + gcf）。
+ *
+ * 为什么需要它：多臂全局检验的统计量是 χ²_{k−1}，df 不是 1，
+ * 不能用 `chi2Sf1` 那条闭式。分支点用 x < a+1 切换级数/连分式，两者都在收敛快的区间里。
+ */
+export function gammaq(a: number, x: number): number {
+  if (!(a > 0) || x < 0) return NaN;
+  if (x === 0) return 1;
+  const gln = lgamma(a);
+  if (x < a + 1) {
+    // 级数：P(a,x) = e^{−x} x^a / Γ(a) · Σ x^n / (a(a+1)…(a+n))
+    let ap = a;
+    let sum = 1 / a;
+    let del = sum;
+    for (let n = 0; n < 1000; n++) {
+      ap += 1;
+      del *= x / ap;
+      sum += del;
+      if (Math.abs(del) < Math.abs(sum) * 1e-15) break;
+    }
+    return Math.max(0, Math.min(1, 1 - sum * Math.exp(-x + a * Math.log(x) - gln)));
+  }
+  // 连分式：Q(a,x) = e^{−x} x^a / Γ(a) · 1/(x+1−a − 1·(1−a)/(x+3−a − 2·(2−a)/(…)))
+  const FPMIN = 1e-300;
+  let b = x + 1 - a;
+  let c = 1 / FPMIN;
+  let d = 1 / b;
+  let h = d;
+  for (let i = 1; i <= 1000; i++) {
+    const an = -i * (i - a);
+    b += 2;
+    d = an * d + b;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = b + an / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < 1e-15) break;
+  }
+  return Math.max(0, Math.min(1, Math.exp(-x + a * Math.log(x) - gln) * h));
+}
+
+/** 卡方上尾概率（任意 df）；df=1 时与 chi2Sf1 一致（有单测交叉验证） */
+export function chi2Sf(x: number, df: number): number {
+  if (!(df > 0)) return NaN;
+  if (x <= 0) return 1;
+  return gammaq(df / 2, x / 2);
+}
+
 export interface PropTest {
   controlRate: number;
   treatmentRate: number;

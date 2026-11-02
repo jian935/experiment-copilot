@@ -24,6 +24,7 @@
     "seq": "tsx scripts/sequential_report.ts",
     "novelty": "tsx scripts/novelty_report.ts",
     "fwer": "tsx scripts/fwer_report.ts",
+    "multiarm": "tsx scripts/multiarm_report.ts",
     "loss": "tsx scripts/loss_report.ts",
     "method": "tsx scripts/method_numbers.ts",
     "shot": "node scripts/screenshot.mjs",

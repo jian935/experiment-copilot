@@ -30,7 +30,8 @@ export type FieldKey =
   | 'preRevenue'
   | 'name'
   | 'primaryMetric'
-  | 'metricType';
+  | 'metricType'
+  | 'trafficSplit';
 
 export interface FieldSpec {
   key: FieldKey;
@@ -59,6 +60,12 @@ export const FIELDS: FieldSpec[] = [
   { key: 'name', label: '实验名称', required: false, hint: '缺了用编号当名称' },
   { key: 'primaryMetric', label: '主指标名', required: false, hint: '缺了按 metricType 推断' },
   { key: 'metricType', label: '指标类型', required: false, hint: 'binary（率）/ continuous（ARPU）' },
+  {
+    key: 'trafficSplit',
+    label: '分流比例',
+    required: false,
+    hint: '如 50/50 或 50/25/25；多臂实验缺了它，SRM 只能按等分检查',
+  },
 ];
 
 export const REQUIRED_FIELDS = FIELDS.filter((f) => f.required).map((f) => f.key);
@@ -85,6 +92,7 @@ const ALIASES: Record<FieldKey, string[]> = {
   name: ['name', '实验名称', '实验名', '名称', '标题', 'title', '实验标题', '实验描述'],
   primaryMetric: ['primarymetric', 'primary_metric', '主指标', '核心指标', '主指标名', '指标名'],
   metricType: ['metrictype', 'metric_type', '指标类型', '指标口径', '类型'],
+  trafficSplit: ['trafficsplit', 'traffic_split', '分流比例', '分流比', '流量比例', '流量分配', '分流', 'split', 'allocation'],
 };
 
 /** 全角转半角 + 小写 + 去掉分隔符与括号注释 */

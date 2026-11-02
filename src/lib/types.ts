@@ -1,4 +1,11 @@
-export type Variant = 'control' | 'treatment';
+/**
+ * 臂标识。两臂时代是 `'control' | 'treatment'`；A/B/n 之后是任意字符串
+ * （'control' / 'treatment' / 'b2' / '实验组2' …），由 `lib/arms.ts` 负责
+ * 「谁是对照、一共几臂、按什么顺序」的单一来源。
+ *
+ * 为什么不保留联合类型：臂名来自用户导入的表，枚举不完；写死会让第三臂在类型上就消失。
+ */
+export type Variant = string;
 export type Device = 'iOS' | 'Android';
 export type Tenure = 'new' | 'old';
 export type Decision = 'ship' | 'no-ship' | 'iterate' | 'inconclusive';
@@ -34,7 +41,15 @@ export interface Experiment {
   hypothesis: string;
   startDate: string;
   endDate: string;
+  /** 全部臂（含对照），对照在前。两臂实验照旧写 ['control','treatment'] */
   variants: Variant[];
+  /**
+   * 对照臂的 id。缺省时用 'control'；若 variants 里没有 'control'，则取第一个。
+   * 单独一个字段是为了支持「对照组叫 baseline / 版本A」的真实表。
+   */
+  controlArm?: string;
+  /** 分流比例（与 variants 同序，总和不必为 1）。缺省时由 trafficSplit 解析，再退等分 */
+  allocation?: number[];
   trafficSplit: string;
   primaryMetric: string;
   /**

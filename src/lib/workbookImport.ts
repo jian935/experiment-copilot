@@ -76,6 +76,7 @@ export interface WorkbookReport extends TableParseResult {
 export function parseWorkbookSheets(
   book: WorkbookSheet[],
   mapping?: Partial<Record<import('./columnMap.ts').FieldKey, number>>,
+  controlArm?: string,
 ): WorkbookReport {
   if (!book.length) throw new ImportError('这个工作簿里没有工作表');
 
@@ -84,7 +85,7 @@ export function parseWorkbookSheets(
     try {
       return {
         sheet: s,
-        result: parseTableRows(s.rows, { source: 'xlsx' as const, sheet: s.name, mapping }),
+        result: parseTableRows(s.rows, { source: 'xlsx' as const, sheet: s.name, mapping, controlArm }),
         error: null,
       };
     } catch (e) {
