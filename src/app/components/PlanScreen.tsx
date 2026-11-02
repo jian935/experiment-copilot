@@ -35,6 +35,8 @@ export function PlanScreen({
 
   // 率口径
   const [basePct, setBasePct] = useState(5);
+  /** 基线是从哪个实验带进来的：空字符串 = 手填。做成受控值，选完能看见自己选了什么 */
+  const [baselineFrom, setBaselineFrom] = useState('');
   const [liftPct, setLiftPct] = useState(10);
   // 连续口径
   const [sd, setSd] = useState(50);
@@ -154,7 +156,17 @@ export function PlanScreen({
                   <Seg active={mode === 'size'} onClick={() => setMode('size')} label="我要测多大效应" />
                   <Seg active={mode === 'days'} onClick={() => setMode('days')} label="我只能跑 N 天" />
                 </div>
-                <Field label="基线转化率" unit="%" value={basePct} onChange={setBasePct} step={0.1} />
+                <Field
+                  label="基线转化率"
+                  unit="%"
+                  value={basePct}
+                  onChange={(v) => {
+                    setBasePct(v);
+                    // 手改之后就不再是「从某个实验带入的」了，把来源清掉
+                    setBaselineFrom('');
+                  }}
+                  step={0.1}
+                />
                 {mode === 'size' ? (
                   <Field label="想检出的相对提升" unit="%" value={liftPct} onChange={setLiftPct} step={1} />
                 ) : (
@@ -164,13 +176,13 @@ export function PlanScreen({
                   <div>
                     <div className="mb-1 text-[10.5px] text-dim">或者从已有实验带入基线：</div>
                     <select
-                      value=""
+                      value={baselineFrom}
                       onChange={(e) => {
                         const an = rateExperiments.find((x) => x.e.id === e.target.value)?.an;
-                        if (an) {
-                          // 用对照组的实际转化率，而不是 50% 这种默认值
-                          setBasePct(Number((an.primary.controlValue * 100).toFixed(3)));
-                        }
+                        // 用对照组的实际转化率，而不是 50% 这种默认值
+                        if (an) setBasePct(Number((an.primary.controlValue * 100).toFixed(3)));
+                        // 记住选的是哪一个：只「填进去」而不显示选中项，用户会怀疑没生效
+                        setBaselineFrom(e.target.value);
                       }}
                       className="w-full rounded-lg border border-line bg-base px-2 py-1.5 text-[11.5px] text-ink outline-none focus:border-brand/60"
                     >

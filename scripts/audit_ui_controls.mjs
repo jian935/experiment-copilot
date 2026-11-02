@@ -31,6 +31,7 @@ const ROUTES = [
   { hash: '#/e/E002', name: '详情 · 分层异质', ready: '引擎结论' },
   { hash: '#/compare', name: '对比 · 选择器', ready: 'E001' },
   { hash: '#/compare?a=E001&b=E002', name: '对比 · 同单位', ready: '共用一条横轴' },
+  { hash: '#/plan', name: '实验设计', ready: '每组样本' },
   { hash: '#/eval', name: '评测看板', ready: '混淆矩阵' },
   { hash: '#/settings', name: '设置页', ready: '口径字典' },
 ];
@@ -309,7 +310,8 @@ for (const route of ROUTES) {
       // 判据：文案就是当前路由的名字，或它所在的分组里已有激活态（bg-brand 系）。
       const already = await evaluate(`(() => {
         const label = ${JSON.stringify(c.text)};
-        const nav = ['实验列表', '评测看板', '口径字典 / 设置', '分层明细', '护栏指标', '计算过程'];
+        // 顶栏导航项：停在当前页时点它本来就不该有变化（这条清单漏一个就会天天报假问题）
+        const nav = ['实验列表', '实验设计', '评测看板', '口径字典 / 设置', '分层明细', '护栏指标', '计算过程'];
         if (nav.some((n) => label.startsWith(n))) return 'nav-or-tab';
         // 品牌位（点它回首页）与「已选中的模型 provider」：已经在那个状态上，点它本就不该有变化
         if (label.startsWith('Experiment Copilot')) return 'brand';

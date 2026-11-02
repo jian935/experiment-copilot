@@ -142,12 +142,13 @@
   <div class="chips" data-parallax="0.03">
     <span class="chip">120 个实验</span>
     <span class="chip">16 个工具</span>
-    <span class="chip">349 个单测</span>
+    <span class="chip">402 个单测</span>
     <span class="chip">决策准确率 93.3%</span>
     <span class="chip">A/A 误报率 6.35%（名义 5%）</span>
     <span class="chip">转化率 + ARPU 双口径</span>
     <span class="chip">分层 F1 0.857</span>
     <span class="chip">幻觉数字率 0.00%</span>
+    <span class="chip">生命周期闭环：设计 → 分析 → 决定</span>
     <span class="chip">零后端 · 静态部署</span>
     <span class="chip">可导入自己的数据（存本机）</span>
     <span class="chip">实验对比：同单位共用一条横轴</span>
@@ -271,10 +272,12 @@
       <tr><td>Agent 引用覆盖率</td><td class="num good">100%</td><td>自动评测 2200 条（分母 1840，无证据可引的不计入）；智能模式 6 次运行 94.7–100%</td></tr>
       <tr><td>置信度校准 ECE</td><td class="num">20.0% / 5.0%</td><td>全量 20.0% 是「真值精确为 0 却被当负类」的产物；只看真值非零的 70 个实验是 5.0%。两个口径都展示</td></tr>
       <tr><td>口径为什么这么定</td><td class="num good">4 个否决记录</td><td>差值区间弃 Wald（两臂 0 次时宽度为 0；0.12% 基线 n=30 时宽度 0.906pp 对 22.869pp，覆盖率都是 100% 但前者没信息量）、清单用 Holm / 分层用 BH q=0.1（m=2 时门槛恰好 = α）、护栏只硬判退款率、P(B>A) 用正态近似（每臂 ≥1000 时误差 ≤0.08pp）。每个口径都写了「我们也会坏在哪」，例如 p≈0.5、n=30 时 Newcombe 覆盖率 90.8% 比 Wald 94.8% 更差</td></tr>
-      <tr><td>单测</td><td class="num">340 个</td><td>统计 / 决策 / 证据推导 / 结论卡导出 / Agent / 多轮上下文 / 评测口径 / 导入解析 / CUPED / 连续指标 / 分层 F1 / 实验对比 / 森林图定标 / 全局搜索 / 趋势图几何 / 主题对账 / 方法论对账 · 基线比对器自测</td></tr>
+      <tr><td>实验前：要跑多久</td><td class="num">4 天 / 31,231 人</td><td>5.00% → 5.50%（+10% 相对提升）、α=0.05、功效 80%、日流量 2 万 → 每组 31,231 人、4 天。反解用的是自己的功效函数而不是 Fleiss 近似（近似公式与真实功效差 1–3%，并存会出现「按公式算的 n 跑完只有 78% 功效」），单测断言 power(n)≥0.8 且 power(n−1)<0.8。加第三个臂的代价也算了：α 分摊到 2 次比较、每组样本 ×1.21、总流量 ×1.82</td></tr>
+      <tr><td>决策留痕</td><td class="num good">不一致必填理由</td><td>引擎说「不建议上线」而人决定上线时，必须写清为什么，并把当时的差值 / p / 样本量 / 引擎结论一起冻进快照——数据会变，只存结论就永远无法还原「当时屏幕上是什么」</td></tr>
+      <tr><td>单测</td><td class="num">402 个</td><td>统计 / 决策 / 证据推导 / 结论卡导出 / Agent / 多轮上下文 / 评测口径 / 导入解析 / CUPED / 连续指标 / 分层 F1 / 实验对比 / 森林图定标 / 全局搜索 / 趋势图几何 / 主题对账 / 方法论对账 / 列识别 / 工作簿合并 / 样本量规划 / 决策记录 · 基线比对器自测</td></tr>
     </tbody>
   </table>
-  <p class="cap">复现：<code>npm test</code> 跑 349 个单测；<code>npm run method</code> 跑方法论长文里的每个数字（小样本精确枚举、大样本蒙特卡洛）；<code>npm run eval</code> 出分层 F1 + 2200 条问答的幻觉数字率（<code>npm run eval:check</code> 与 86 个指标的基线比对，漂移即失败）；<code>npm run calibrate</code> 出混淆矩阵；<code>npm run ablation</code> 出规则 vs 大模型对比；<code>npm run aa</code> 出 A/A 自校准（2000 次零效应实测误报率 6.35%，并按转化率 / ARPU 分口径报）；<code>npm run cuped</code> 出 CUPED 收益（方差缩减 7.24%）；<code>npm run forecast</code> 出 120 个实验的「还要跑几天」预测。</p>
+  <p class="cap">复现：<code>npm test</code> 跑 402 个单测；<code>npm run method</code> 跑方法论长文里的每个数字（小样本精确枚举、大样本蒙特卡洛）；<code>npm run eval</code> 出分层 F1 + 2200 条问答的幻觉数字率（<code>npm run eval:check</code> 与 86 个指标的基线比对，漂移即失败）；<code>npm run calibrate</code> 出混淆矩阵；<code>npm run ablation</code> 出规则 vs 大模型对比；<code>npm run aa</code> 出 A/A 自校准（2000 次零效应实测误报率 6.35%，并按转化率 / ARPU 分口径报）；<code>npm run cuped</code> 出 CUPED 收益（方差缩减 7.24%）；<code>npm run forecast</code> 出 120 个实验的「还要跑几天」预测。</p>
 
   <h2 data-reveal>评测不是一次性的叙事，是每次提交都要跑的东西</h2>
   <p>
