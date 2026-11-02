@@ -14,6 +14,20 @@ import {
 import { buildPeekReport, type LookInput, type PeekReport } from './sequential.ts';
 import { noveltyReport, planExposureSplit, type NoveltyReport } from './novelty.ts';
 import { robustnessReport, type RobustCell, type RobustnessReport } from './robust.ts';
+import {
+  cochranQ, discoverDimensions, readDim,
+  type DimensionSpec, type HeterogeneityQ,
+} from './dimensions.ts';
+import { computeCustomMetric, type CustomMetric, type CustomMetricResult } from './metricDict.ts';
+
+/** analyze 的可选上下文：目前只有「可编辑口径字典带来的自定义指标」 */
+export interface AnalysisContext {
+  /**
+   * 自定义指标。缺省为空 → 不产生任何额外计算与证据条目，
+   * 于是「没改口径」的行为与旧版逐字节一致（86 项评测指标就是这么保住的）。
+   */
+  customMetrics?: CustomMetric[];
+}
 
 export interface VariantAgg {
   n: number;
@@ -46,6 +60,33 @@ export interface SegmentTest {
   rate?: PropTest;
   /** 连续口径的完整检验（continuous 时有） */
   ratio?: RatioTest;
+}
+
+/**
+ * 一个维度切完之后的完整结果。
+ *
+ * 为什么要在 `segments` 之外再加这一层：`segments` 是写死两维时代的产物（评测指标与
+ * 异质检测都依赖它的形状），而维度切片要能容纳任意多个维度。两者由**同一个扫描函数**产出，
+ * 所以 tenure/device 在两边是同一份数组（同一引用），不存在「两个地方各算一次然后打架」。
+ */
+export interface DimensionScan {
+  key: string;
+  label: string;
+  source: 'builtin' | 'data';
+  values: SegmentTest[];
+  /** 效应是否随该维度变化（Cochran Q，df = 取值数 − 1） */
+  heterogeneity: HeterogeneityQ | null;
+  /** 最强 vs 最弱两个取值——人看结论时最先想知道的对比 */
+  spread: {
+    bestKey: string;
+    bestLabel: string;
+    worstLabel: string;
+    gap: number;
+    /** 两者 95% 区间是否重叠（重叠 = 这个「最强 vs 最弱」还不足以说它们真的不同） */
+    ciOverlap: boolean;
+  } | null;
+  /** 这次扫了几个取值。显式给出，让「我切了 12 次才找到一个显著」没法藏起来 */
+  scanned: number;
 }
 
 export interface GuardrailResult {
@@ -163,6 +204,17 @@ export interface Analysis {
   arpuBreakdown?: ArpuBreakdown;
   srm: SrmResult;
   segments: { tenure: SegmentTest[]; device: SegmentTest[] };
+  /**
+   * 维度扫描用的 BH FDR 水平（来自 config）。
+   * 放在这里是因为 UI 要标「校正后是否显著」，而**阈值不能写在组件里**——
+   * 设置页一改，写死的那个数就会开始说谎。
+   */
+  segmentFdr: number;
+  /**
+   * 任意维度切片。内置三维（设备 / 新老 / 周内周末）+ 数据里带来的每一个 `dims.*` 列。
+   * 取值超过 12 个的维度不做扫描（见 `lib/dimensions.ts` 的 `MAX_DIM_VALUES`）。
+   */
+  dimensions: DimensionScan[];
   interaction: { tenure: { diffDiff: number; se: number; z: number; p: number } | null };
   /**
    * 效应异质的检测结果（E1 分层 F1 要评价的是**检测器**，不是决策）。
@@ -226,6 +278,12 @@ export interface Analysis {
   arms: ArmComparison[];
   /** 多臂专属信息（校正口径、全局检验、P(best)、焦点臂与理由） */
   multiArm?: MultiArmInfo;
+  /**
+   * 自定义指标（来自可编辑口径字典）。只在字典里真的有自定义指标时出现。
+   * 它们的检验口径是「比值 delta method」，与主指标（两比例 z / CUPED）不是同一套——
+   * UI 必须写明，否则读者会拿它跟主指标的 p 直接比。
+   */
+  customMetrics?: CustomMetricResult[];
 }
 
 /** 证据文本里的 p 值：erfc 大 |z| 下溢到 0 时写 <1e-16，避免出现 0.00e+0 */
@@ -575,19 +633,23 @@ function breakdownOf(c: VariantAgg, t: VariantAgg): ArpuBreakdown | undefined {
   };
 }
 
+/**
+ * 在**任意一个维度**上扫一遍：每个取值一次检验，再在维度内做 BH 校正。
+ *
+ * 维度不再写死成 'tenure' | 'device'，而是 `DimensionSpec`（key + 各取值的中文名）。
+ * 读值统一走 `readDim`，所以 `dims.渠道` 这种来自用户表的维度与内置维度走同一条路径——
+ * 一旦某天有人给内置维度加个特例，两者就会漂移，而漂移出来的差异没人看得出来。
+ */
 function scanDimension(
   rows: DailyRow[],
-  dim: 'tenure' | 'device',
-  labels: Record<string, string>,
+  spec: DimensionSpec,
   fdr: number,
   kind: 'rate' | 'continuous',
   control = 'control',
   treatment = 'treatment',
 ): SegmentTest[] {
-  const keys = Array.from(new Set(rows.map((r) => String(r[dim]))));
-  const raw = keys.map((key): Omit<SegmentTest, 'q'> => {
-    const sub = rows.filter((r) => String(r[dim]) === key);
-    const label = labels[key] || key;
+  const test = (key: string, label: string): Omit<SegmentTest, 'q'> => {
+    const sub = rows.filter((r) => readDim(r, spec.key) === key);
     if (kind === 'continuous') {
       const rt = ratioTest(ratioCellsOf(sub, treatment));
       if (rt) {
@@ -606,7 +668,8 @@ function scanDimension(
       controlValue: pt.controlRate, treatmentValue: pt.treatmentRate,
       diff: pt.diff, p: pt.p, ci95: pt.ci95, se: unpooledSe(pt), rate: pt,
     };
-  });
+  };
+  const raw = spec.values.map((v) => test(v.key, v.label));
   const { qvals } = bhAdjust(raw.map((x) => x.p), fdr);
   return raw.map((x, i) => ({ ...x, q: qvals[i] }));
 }
@@ -784,7 +847,12 @@ function pairOf(rows: DailyRow[], control: string, arm: string): DailyRow[] {
   return rows.filter((r) => r.variant === control || r.variant === arm);
 }
 
-export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Partial<DecisionConfig>): Analysis {
+export function analyze(
+  exp: Experiment,
+  allRows: DailyRow[],
+  cfgOverride?: Partial<DecisionConfig>,
+  ctx?: AnalysisContext,
+): Analysis {
   const cfg = mergeConfig(cfgOverride);
   const rowsAll = allRows.filter((r) => r.expId === exp.id);
   const control = controlArmOf(exp);
@@ -949,10 +1017,59 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   const srm = srmChi2(srmCounts, srmRatios, cfg.srmAlpha, cfg.srmMaxRelImb);
 
   // 分层也必须跟主指标同口径：ARPU 实验按转化率分层会答错问题
-  const segments = {
-    tenure: scanDimension(rows, 'tenure', { new: '新用户', old: '老用户' }, cfg.segmentFdr, metricKind, control, treatment),
-    device: scanDimension(rows, 'device', { iOS: 'iOS', Android: 'Android' }, cfg.segmentFdr, metricKind, control, treatment),
+  //
+  // 内置两维照旧先算（`segments` 与 86 项评测指标的契约不能动），
+  // 再让 `dimensions` 复用同一份数组——两条路径共用一次扫描，
+  // 所以不会出现「表里写 +0.42pp、森林图上画 +0.40pp」这种两套口径。
+  const specOf = (key: string, label: string, labelFn: (v: string) => string): DimensionSpec => {
+    const seen: string[] = [];
+    for (const r of rows) {
+      const v = readDim(r, key);
+      if (v != null && v !== '' && !seen.includes(v)) seen.push(v);
+    }
+    return { key, label, source: 'builtin', values: seen.map((v) => ({ key: v, label: labelFn(v) })) };
   };
+  const tenureScan = scanDimension(
+    rows,
+    specOf('tenure', '新老用户', (v) => (v === 'new' ? '新用户' : v === 'old' ? '老用户' : v)),
+    cfg.segmentFdr, metricKind, control, treatment,
+  );
+  const deviceScan = scanDimension(
+    rows, specOf('device', '设备', (v) => v), cfg.segmentFdr, metricKind, control, treatment,
+  );
+  const segments = { tenure: tenureScan, device: deviceScan };
+
+  /** 最强 vs 最弱：人读维度表时最先要的那一句对比 */
+  const spreadOf = (values: SegmentTest[]): DimensionScan['spread'] => {
+    const use = values.filter((v) => Number.isFinite(v.diff) && v.se > 0);
+    if (use.length < 2) return null;
+    const sorted = [...use].sort((a, b) => b.diff - a.diff);
+    const best = sorted[0];
+    const worst = sorted[sorted.length - 1];
+    return {
+      bestKey: best.key,
+      bestLabel: best.label,
+      worstLabel: worst.label,
+      gap: best.diff - worst.diff,
+      // 两个区间有交集 ⇒ 光看「最强 vs 最弱」还不足以下「它们真的不同」的结论
+      ciOverlap: best.ci95[0] <= worst.ci95[1],
+    };
+  };
+
+  const discovery = discoverDimensions(rows);
+  const dimensions: DimensionScan[] = discovery.dims.map((spec) => {
+    const reuse = spec.key === 'tenure' ? tenureScan : spec.key === 'device' ? deviceScan : null;
+    const values = reuse ?? scanDimension(rows, spec, cfg.segmentFdr, metricKind, control, treatment);
+    return {
+      key: spec.key,
+      label: spec.label,
+      source: spec.source,
+      values,
+      heterogeneity: cochranQ(values.map((v) => ({ diff: v.diff, se: v.se }))),
+      spread: spreadOf(values),
+      scanned: values.length,
+    };
+  });
 
   // 分层交互：新老效应差是否显著
   const tenureTests = segments.tenure;
@@ -1197,6 +1314,13 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     );
   }
 
+  // ---- 自定义指标（来自可编辑口径字典）----
+  // 缺省（字典里没有自定义指标）时这里一次计算都不做，所以「没改过口径」的实验
+  // 与改造前逐字节一致——86 项评测指标就是这么保住的。
+  const customResults: CustomMetricResult[] = (ctx?.customMetrics ?? []).map((m) =>
+    computeCustomMetric(rows, control, treatment, m),
+  );
+
   // ---- 稳健性（只有 ARPU 口径才有）----
   // 位置在主指标之后：读者刚看到「ARPU 差 −1.04 元、p<0.001」，紧接着最该被回答的
   // 就是「这 1 块钱是不是几十个大客户贡献的」。等看完四层分析再问，性质就变了。
@@ -1277,6 +1401,54 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     );
   }
 
+
+  // ---- 自定义指标 ----
+  // 位置在主指标之后：它们是「口径字典里另外登记的那几个数」，读者看完主指标正好接着看。
+  // 算不出来的那一个也要出现——把它藏起来，读者会以为字典里没这个指标。
+  for (const cm of customResults) {
+    if (cm.error) {
+      add(
+        'metric',
+        `自定义指标：${cm.label}（未计算）`,
+        `${cm.error}。**「算不出来」不等于 0**：这条指标没有值，也不会进入任何判定。`,
+      );
+      continue;
+    }
+    const unit = cm.unit === 'pp' ? 'pp' : cm.unit;
+    const f = (v: number) => (cm.unit === 'pp' ? `${(v * 100).toFixed(2)}pp` : `${v.toFixed(3)}${unit}`);
+    add(
+      'metric',
+      `自定义指标：${cm.label}`,
+      `control ${f(cm.controlValue)} vs treatment ${f(cm.treatmentValue)}；差值 ${cm.diff >= 0 ? '+' : ''}${f(cm.diff)}，` +
+        `95% CI [${f(cm.ci95[0])}, ${f(cm.ci95[1])}]，p=${ep(cm.p)}（比值 delta method 口径）` +
+        (cm.skippedRows ? `；跳过 ${cm.skippedRows} 行（分母为 0 或缺字段）` : ''),
+      cm.p,
+      [
+        {
+          title: '① 这个指标怎么算',
+          formula: `${cm.label} = Σ(分子) / Σ(分母)`,
+          value: `分子 ${cm.numerator}，分母 ${cm.denominator}；对照 ${Math.round(cm.n1)} 单位、处理 ${Math.round(cm.n2)} 单位`,
+        },
+        {
+          title: '② 比值估计量 + 聚类方差',
+          formula: 'R̂ = Σsumᵢ / Σnᵢ；Var(R̂) = Σ nᵢ²(vᵢ − R̂)² / (Σnᵢ)²，vᵢ = sumᵢ/nᵢ',
+          value: `R̂_c = ${f(cm.controlValue)}，R̂_t = ${f(cm.treatmentValue)}，SE(差值) = ${f(cm.se)}`,
+        },
+        {
+          title: '③ 与主指标的口径不同（读数时必须知道）',
+          formula: '主指标：两比例 z / CUPED；自定义指标：delta method',
+          value:
+            `自定义指标只承诺「Σ分子 / Σ分母 这个比值」，所以用比值估计量的方差；` +
+            `它与主指标的 p **不能直接比大小**，区间也偏保守（格子数少时更明显）。` +
+            `${
+              cm.skippedRows
+                ? `本指标跳过了 ${cm.skippedRows} 行（分母为 0 或字段缺失）：这些行不是 0，是「算不出」。`
+                : '本指标没有跳过任何行。'
+            }`,
+        },
+      ],
+    );
+  }
 
   // ---- 多臂比较（A/B/n）----
   // 放在主指标之后、副指标之前：读者先看到「这一臂 vs 对照」的结论，
@@ -1728,6 +1900,8 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     ...(robustness ? { robustness } : {}),
     srm,
     segments,
+    segmentFdr: cfg.segmentFdr,
+    dimensions,
     interaction: { tenure: interaction },
     heterogeneity: {
       detected: heterogeneous,
@@ -1748,6 +1922,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     evidence,
     rules,
     arms: cmp.list,
+    ...(customResults.length ? { customMetrics: customResults } : {}),
     ...(isMulti && dunnett && best && global
       ? {
           multiArm: {

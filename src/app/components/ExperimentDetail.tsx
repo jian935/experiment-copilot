@@ -13,7 +13,7 @@ import {
   ShieldAlert,
   Sparkles,
 } from 'lucide-react';
-import type { Analysis } from '../../lib/decide.ts';
+import type { Analysis, DimensionScan, SegmentTest } from '../../lib/decide.ts';
 import { analyze } from '../../lib/decide.ts';
 import type { DailyRow, Dataset, Experiment } from '../../lib/types.ts';
 import {
@@ -48,6 +48,7 @@ import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
 import { DecisionCard } from './DecisionCard';
 import { MultiArmPanel } from './MultiArmPanel';
 import { RobustnessPanel } from './RobustnessPanel';
+import { DimensionChips, DimensionTable } from './DimensionPanel';
 import { armLabel } from '../../lib/arms.ts';
 import type { DecisionRecord } from '../lib/decisions';
 
@@ -86,6 +87,12 @@ export function ExperimentDetail({
   const [recalc, setRecalc] = useState<{ ok: boolean; ms: number; n: number } | null>(null);
   const [exportState, setExportState] = useState<'idle' | 'ok' | 'err'>('idle');
   const [agentOpen, setAgentOpen] = useState(false);
+  /**
+   * 当前切片的维度（`dimensions` 的 key）。
+   * 空字符串表示「还没选」，由渲染时回落到第一个维度——这样切换实验时
+   * 不会因为上一份数据的维度名不存在而切出空表。
+   */
+  const [dimKey, setDimKey] = useState('');
 
   function closeDrawer() {
     setDrawer(false);
@@ -111,6 +118,9 @@ export function ExperimentDetail({
   const meta = DECISION_META[analysis.decision];
   const tone = meta.tone as Tone;
   const P = analysis.primary;
+  /** 当前切片维度：未选就落到第一个（列表/实验切换时不会切出空表） */
+  const activeDim: DimensionScan | undefined =
+    analysis.dimensions.find((d) => d.key === dimKey) ?? analysis.dimensions[0];
   // 三检查里的「护栏」有三种结局：通过 / 未通过 / **不适用**。
   // 注意 unavailable 项的 gating 被置成了 false，所以「硬门槛集合」不能用来判断是否评估过——
   // 要看「已经评估过的硬门槛」还有没有剩，否则会写出「不适用」+「硬护栏未触发」这种自相矛盾的组合。
@@ -118,8 +128,8 @@ export function ExperimentDetail({
   const naGuardrails = analysis.guardrails.filter((g) => g.unavailable);
 
   const forestRows = useMemo<ForestRow[]>(() => {
-    const seg = (s: Analysis['segments']['tenure'][number]) => ({
-      label: `分层 · ${s.label}`,
+    const seg = (s: SegmentTest, prefix: string) => ({
+      label: `${prefix} · ${s.label}`,
       sublabel: `q=${s.q.toFixed(2)}`,
       diff: s.diff,
       ci: s.ci95,
@@ -148,8 +158,12 @@ export function ExperimentDetail({
             emphasized: true,
           },
         ];
-    return [...armRows, ...analysis.segments.tenure.map(seg), ...analysis.segments.device.map(seg)];
-  }, [analysis]);
+    // 切片维度由上方 chip 决定：森林图与「分层明细」表必须是同一个维度，
+    // 否则一张表说「老用户 +2.5pp」、图上画的是「Android +1.9pp」，读者会以为是两个结论。
+    const active = analysis.dimensions.find((d) => d.key === dimKey) ?? analysis.dimensions[0];
+    const segRows = active ? active.values.map((v) => seg(v, active.label)) : [];
+    return [...armRows, ...segRows];
+  }, [analysis, dimKey]);
 
   function runRecalc() {
     const t0 = performance.now();
@@ -576,12 +590,17 @@ export function ExperimentDetail({
         <ArpuPanel analysis={analysis} />
       )}
 
+      {/* 自定义指标：来自可编辑口径字典，只有登记过才出现 */}
+      {analysis.customMetrics && analysis.customMetrics.length > 0 && (
+        <CustomMetricsPanel analysis={analysis} />
+      )}
+
       {/* Tabs：分层 / 护栏 / 计算过程 */}
       <Panel className="mt-4 overflow-hidden">
         <div className="flex items-center gap-1 border-b border-line px-3 py-2">
           {(
             [
-              ['segments', '分层明细', ListTree],
+              ['segments', '维度切片', ListTree],
               ['guardrails', '护栏指标', ShieldAlert],
               ['calc', '计算过程', CircleHelp],
             ] as [Tab, string, typeof ListTree][]
@@ -602,9 +621,11 @@ export function ExperimentDetail({
         </div>
 
         {tab === 'segments' && (
-          <div className="grid gap-px bg-line md:grid-cols-2">
-            <SegmentBlock title="按新老用户" rows={analysis.segments.tenure} unit={P.unit} />
-            <SegmentBlock title="按设备" rows={analysis.segments.device} unit={P.unit} />
+          <div>
+            <div className="border-b border-line">
+              <DimensionChips dims={analysis.dimensions} value={activeDim?.key ?? ''} onChange={setDimKey} />
+            </div>
+            <DimensionTable analysis={analysis} dim={activeDim} />
           </div>
         )}
 
@@ -809,51 +830,6 @@ function Check({
   );
 }
 
-function SegmentBlock({
-  title,
-  rows,
-  unit,
-}: {
-  title: string;
-  rows: Analysis['segments']['tenure'];
-  unit: 'pp' | '元';
-}) {
-  return (
-    <div className="min-w-0 bg-panel">
-      <div className="border-b border-line px-4 py-2 text-[11px] font-medium text-muted">{title}</div>
-      {/* 两表并排时宽度不够就让表自己横向滚，不要把最后一列切掉 */}
-      <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-xs">
-        <thead>
-          <tr className="text-[10.5px] text-dim">
-            <th className="px-4 py-1.5 text-left font-medium">分层</th>
-            <th className="px-2 py-1.5 text-right font-medium">control</th>
-            <th className="px-2 py-1.5 text-right font-medium">treatment</th>
-            <th className="px-2 py-1.5 text-right font-medium">差值</th>
-            <th className="px-2 py-1.5 text-right font-medium">p</th>
-            <th className="px-4 py-1.5 text-right font-medium">BH q</th>
-          </tr>
-        </thead>
-        <tbody className="num">
-          {rows.map((s) => (
-            <tr key={s.key} className="border-t border-line/50">
-              <td className="px-4 py-1.5 text-muted">{s.label}</td>
-              <td className="px-2 py-1.5 text-right text-muted">{fmtLevel(s.controlValue, unit)}</td>
-              <td className="px-2 py-1.5 text-right text-muted">{fmtLevel(s.treatmentValue, unit)}</td>
-              <td className={cx('px-2 py-1.5 text-right font-medium', liftClass(s.diff))}>{fmtDiff(s.diff, unit)}</td>
-              <td className="px-2 py-1.5 text-right text-dim">{fmtP(s.p)}</td>
-              <td className={cx('px-4 py-1.5 text-right', s.q <= 0.1 ? 'text-brand2' : 'text-dim')}>
-                {s.q.toFixed(3)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      </div>
-    </div>
-  );
-}
-
 /** 指标明细里的一个指标组（主指标 / 副指标共用同一套列） */
 function MetricRows({
   title,
@@ -914,6 +890,78 @@ function MetricRows({
  * 打折拉量会让转化率↑、客单价↓，两者相抵后 ARPU 可能纹丝不动。
  * 三条贡献是恒等式（严格相加等于总差值），不是事后解释。
  */
+/**
+ * 自定义指标（来自可编辑口径字典）。
+ *
+ * 为什么单独一块而不是塞进「指标明细」：它们的**检验口径不同**（比值 delta method，
+ * 与 ARPU 同源；不是主指标的两比例 z / CUPED）。混在同一张表里，读者会直接拿两者的 p 比大小，
+ * 而那种比较没有依据。所以这里单独成块，并在底部写明这件事。
+ */
+function CustomMetricsPanel({ analysis }: { analysis: Analysis }) {
+  const list = analysis.customMetrics ?? [];
+  return (
+    <Panel className="mt-4">
+      <PanelHead
+        title={`自定义指标（${list.length}）`}
+        hint="来自「设置 · 口径字典」里新增的指标：每个都是 Σ分子 / Σ分母 的比值，用 delta method 检验"
+      />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[680px] text-[11.5px]">
+          <thead>
+            <tr className="border-b border-line text-[10.5px] text-dim">
+              <th className="px-4 py-2 text-left font-medium">指标</th>
+              <th className="px-2 py-2 text-right font-medium">对照</th>
+              <th className="px-2 py-2 text-right font-medium">实验组</th>
+              <th className="px-2 py-2 text-right font-medium">差值（95% CI）</th>
+              <th className="px-2 py-2 text-right font-medium">相对提升</th>
+              <th className="px-4 py-2 text-right font-medium">p</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((m) => (
+              <tr key={m.key} className="border-b border-line/60 last:border-0">
+                <td className="px-4 py-2">
+                  <div className="text-ink">{m.label}</div>
+                  <div className="font-mono text-[9.5px] text-dim">
+                    {m.numerator} / ({m.denominator})
+                  </div>
+                </td>
+                {m.error ? (
+                  <td colSpan={5} className="px-2 py-2 text-[10.5px] text-dim">
+                    {m.error}
+                  </td>
+                ) : (
+                  <>
+                    <td className="num px-2 py-2 text-right text-muted">{fmtLevel(m.controlValue, m.unit === 'pp' ? 'pp' : '元')}</td>
+                    <td className="num px-2 py-2 text-right text-muted">{fmtLevel(m.treatmentValue, m.unit === 'pp' ? 'pp' : '元')}</td>
+                    <td className="px-2 py-2 text-right">
+                      <div className="flex flex-col items-end">
+                        <span className={cx('num', liftClass(m.diff))}>
+                          {fmtDiff(m.diff, m.unit === 'pp' ? 'pp' : '元')}
+                        </span>
+                        <span className="num text-[10px] text-dim">
+                          [{fmtDiff(m.ci95[0], m.unit === 'pp' ? 'pp' : '元')}, {fmtDiff(m.ci95[1], m.unit === 'pp' ? 'pp' : '元')}]
+                        </span>
+                      </div>
+                    </td>
+                    <td className={cx('num px-2 py-2 text-right', liftClass(m.diff))}>{fmtPct(m.relativeLift)}</td>
+                    <td className="num px-4 py-2 text-right text-muted">{fmtP(m.p)}</td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="border-t border-line px-4 py-2.5 text-[10.5px] leading-4 text-dim">
+        这三列用的是<b className="text-ink">比值 delta method</b>（Σ分子/Σ分母 的比值估计量 + 格子级聚类方差），
+        与主指标的两比例 z / CUPED <b className="text-ink">不是同一套</b>——两者的 p 不能直接比大小，区间也偏保守。
+        分母为 0 或缺字段的行会被跳过并计数，不会当成 0 参与计算。
+      </p>
+    </Panel>
+  );
+}
+
 function ArpuPanel({ analysis }: { analysis: Analysis }) {
   const b = analysis.arpuBreakdown!;
   const total = b.total;

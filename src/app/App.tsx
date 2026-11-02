@@ -12,6 +12,8 @@ import { CompareScreen, compareHref } from './components/CompareScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { PlanScreen } from './components/PlanScreen';
 import { useDecisions } from './lib/useDecisions';
+import { useMetricDict } from './lib/useMetricDict';
+import { CloudScreen } from './components/CloudScreen';
 import { CommandPalette } from './components/CommandPalette';
 import { buildDocs, type SearchDoc } from '../lib/search.ts';
 import { Button } from './components/ui';
@@ -31,10 +33,12 @@ export default function App() {
   const { settings, patchConfig, patchLlm, reset } = useSettings();
   const { choice: themeChoice, set: setTheme, dark, systemDark } = useTheme();
   const dec = useDecisions();
+  // 可编辑口径字典：自定义指标会一起进引擎（改口径 → 结论立刻重算）
+  const dict = useMetricDict();
   // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
   const { data, error, source, meta, storedMeta, importData, useBuiltin, useImported, forgetImport } =
-    useDataset(settings.config);
-  const { expId, ev, isEval, isSettings, isCompare, isPlan, compareA, compareB, go } = useHashRoute();
+    useDataset(settings.config, dict.snapshot.custom);
+  const { expId, ev, isEval, isSettings, isCompare, isPlan, isCloud, compareA, compareB, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -201,6 +205,17 @@ export default function App() {
               评测看板
             </button>
             <button
+              onClick={() => go('#/cloud')}
+              className={
+                isCloud
+                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
+                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
+              }
+              title="云端协作：权限 / 审批 / 审计 / API / 定时告警（需要另起后端；不起也不影响本地分析）"
+            >
+              云端
+            </button>
+            <button
               onClick={() => go('#/settings')}
               className={
                 isSettings
@@ -245,6 +260,17 @@ export default function App() {
               className="rounded-lg border border-line p-1.5 text-muted transition-colors hover:border-line2 hover:text-ink"
             >
               {dark ? <Moon size={14} /> : <Sun size={14} />}
+            </button>
+            <button
+              onClick={() => go('#/cloud')}
+              className={
+                isCloud
+                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
+                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
+              }
+              title="云端协作：权限 / 审批 / 审计 / API / 定时告警（需要另起后端；不起也不影响本地分析）"
+            >
+              云端
             </button>
             <button
               onClick={() => go('#/settings')}
@@ -304,6 +330,7 @@ export default function App() {
             reset={reset}
             dataset={data.dataset}
             analyses={data.analyses}
+            dict={dict}
             onBack={() => go('#/')}
           />
         )}
@@ -317,6 +344,8 @@ export default function App() {
             onBack={() => go('#/')}
           />
         )}
+
+        {isCloud && <CloudScreen dataset={data?.dataset ?? null} onBack={() => go('#/')} />}
 
         {data && isPlan && (
           <PlanScreen
@@ -338,7 +367,7 @@ export default function App() {
           />
         )}
 
-        {data && !expId && !isEval && !isSettings && !isCompare && !isPlan && (
+        {data && !expId && !isEval && !isSettings && !isCompare && !isPlan && !isCloud && (
           <ExperimentList
             dataset={data.dataset}
             analyses={data.analyses}
@@ -351,7 +380,7 @@ export default function App() {
           />
         )}
 
-        {data && expId && !isEval && !isSettings && !isCompare && !isPlan && (() => {
+        {data && expId && !isEval && !isSettings && !isCompare && !isPlan && !isCloud && (() => {
           const exp = data.dataset.experiments.find((e) => e.id === expId);
           const analysis = data.analyses.get(expId);
           if (!exp || !analysis) {

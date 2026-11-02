@@ -9,8 +9,21 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "isolatedModules": true,
-    "types": ["node", "vite/client"],
-    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ]
   },
-  "include": ["src", "scripts", "tests", "vite.config.ts"]
+  "include": [
+    "src",
+    "scripts",
+    "tests",
+    "server",
+    "vite.config.ts"
+  ]
 }

@@ -78,6 +78,40 @@ function normExperiment(raw: Record<string, unknown>, i: number): Experiment {
   };
 }
 
+/**
+ * 维度字段（`daily[].dims`）的归一化。
+ *
+ * 纪律：**只收字符串，不做类型推断**。`{ 城市: 310000 }` 里的数字如果被当成维度值，
+ * 会和 `{ 城市: "310000" }` 变成两个不同的取值，切片时一半数据凭空消失。
+ * 所以统一 `String()` 再 trim；空值直接不收（不是空维度，而是这一行没有该维度）。
+ */
+const MAX_DIM_KEYS = 8;
+
+function normDims(raw: unknown, ctx: string): Record<string, string> | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ImportError(`${ctx}：dims 必须是对象（形如 {"渠道":"应用商店"}）——维度名 → 维度值`);
+  }
+  const out: Record<string, string> = {};
+  const keys = Object.keys(raw as Record<string, unknown>);
+  if (keys.length > MAX_DIM_KEYS) {
+    throw new ImportError(
+      `${ctx}：dims 有 ${keys.length} 个维度，超过上限 ${MAX_DIM_KEYS}——` +
+        `维度太多会让切片变成「每组几个格子」，请只保留真正要分析的维度`,
+    );
+  }
+  for (const k of keys) {
+    const name = String(k).trim();
+    if (!name) throw new ImportError(`${ctx}：dims 里有空维度名`);
+    const v = (raw as Record<string, unknown>)[k];
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (!s) continue;
+    out[name] = s;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>, arms: Map<string, Variant[]>): DailyRow {
   const ctx = `daily[${i}]`;
   if (raw == null || typeof raw !== 'object') throw new ImportError(`${ctx}：必须是对象`);
@@ -113,12 +147,14 @@ function normDaily(raw: Record<string, unknown>, i: number, expIds: Set<string>,
   const preExposures = optionalNum(raw.preExposures, 'preExposures', ctx, 0);
   const preConversions = optionalNum(raw.preConversions, 'preConversions', ctx, 0);
   const preRevenue = optionalNum(raw.preRevenue, 'preRevenue', ctx, 0);
+  const dims = normDims(raw.dims, ctx);
   return {
     expId, date, variant, device, tenure, exposures, conversions, refunds, complaints, latencyP95,
     ...(revenue !== undefined ? { revenue } : {}),
     ...(preExposures !== undefined ? { preExposures } : {}),
     ...(preConversions !== undefined ? { preConversions } : {}),
     ...(preRevenue !== undefined ? { preRevenue } : {}),
+    ...(dims ? { dims } : {}),
   };
 }
 
@@ -290,6 +326,8 @@ export function reportForJson(dataset: Dataset, source: 'json' = 'json'): Import
     mapping: {},
     guessed: [],
     unmatchedColumns: [],
+    // JSON 里的维度来自每行的 dims 对象，没有「列」的概念，所以这里只报维度名
+    dimensions: [...new Set(dataset.daily.flatMap((r) => Object.keys(r.dims ?? {})))],
     rowsTotal: dataset.daily.length,
     rowsUsed: dataset.daily.length,
     dropped: [],
@@ -370,3 +408,32 @@ exp_301,2026-02-03,方案C,50/25/25,4000,209,44,3,支付页三版对比
 exp_301,2026-02-04,control,50/25/25,8000,398,97,9,支付页三版对比
 exp_301,2026-02-04,实验组,50/25/25,4000,241,47,4,支付页三版对比
 exp_301,2026-02-04,方案C,50/25/25,4000,216,46,5,支付页三版对比`;
+
+/**
+ * 多维度样例：表里多了「渠道」「城市」两列，导入器会自动把它们认成**可切维度**。
+ *
+ * 数据故意造成「渠道决定一切」：应用商店 +1.2pp、信息流基本没动。
+ * 所以详情页切到「渠道」时 Cochran Q 会报「各取值确有差异」——这正是
+ * 「整体 +0.8pp，但只对一个渠道有效」的真实样子，也是 `iterate`（定向上线）的来源。
+ *
+ * 注意它**没有** device / tenure 两列：导入器会按默认值（iOS / new）填，
+ * 于是那两个维度只剩一个取值、不出现在 chip 里——这本身也是一次演示：
+ * 维度列表是按数据实际有的东西算出来的，不是写死的。
+ */
+export const SAMPLE_CSV_DIMS = `expId,date,variant,渠道,城市,exposures,conversions,refunds,name
+exp_401,2026-03-02,control,应用商店,上海,1200,55,6,新支付流程
+exp_401,2026-03-02,treatment,应用商店,上海,1200,77,7,新支付流程
+exp_401,2026-03-02,control,应用商店,成都,900,41,4,新支付流程
+exp_401,2026-03-02,treatment,应用商店,成都,900,58,5,新支付流程
+exp_401,2026-03-02,control,信息流,上海,800,32,3,新支付流程
+exp_401,2026-03-02,treatment,信息流,上海,800,31,3,新支付流程
+exp_401,2026-03-02,control,信息流,成都,700,28,2,新支付流程
+exp_401,2026-03-02,treatment,信息流,成都,700,28,2,新支付流程
+exp_401,2026-03-03,control,应用商店,上海,1180,54,6,新支付流程
+exp_401,2026-03-03,treatment,应用商店,上海,1220,76,7,新支付流程
+exp_401,2026-03-03,control,应用商店,成都,880,40,4,新支付流程
+exp_401,2026-03-03,treatment,应用商店,成都,920,57,5,新支付流程
+exp_401,2026-03-03,control,信息流,上海,790,31,3,新支付流程
+exp_401,2026-03-03,treatment,信息流,上海,810,33,3,新支付流程
+exp_401,2026-03-03,control,信息流,成都,690,27,2,新支付流程
+exp_401,2026-03-03,treatment,信息流,成都,710,29,2,新支付流程`;

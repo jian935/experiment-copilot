@@ -56,6 +56,9 @@ The value is not the model. The value is that the number can be recomputed and t
 | Family-wise correction | A list-page switch: naive 68 → Holm 53 (15 retracted), each row labelled "not significant after Holm" with adjusted p | [`11-列表页-全局校正.png`](docs/screenshots/11-列表页-全局校正.png) |
 | Expected loss | Four tiles + a net-value curve (break-even and point estimate both marked) + two sliders for k / MMP; gate vetoes in red, heterogeneity as an amber advisory | [`12-详情页-期望损失.png`](docs/screenshots/12-详情页-期望损失.png) |
 | Import persistence | "Data source" chip: imported datasets live in IndexedDB, survive a reload, can switch back and forth, and can be deleted | [`13-导入持久化.png`](docs/screenshots/13-导入持久化.png) |
+| Dimension slicing | Any string column in your table becomes a sliceable dimension (channel / city / version…), plus three built-ins including weekday-vs-weekend derived from the date. Effect heterogeneity across values uses **Cochran's Q** (one statistic, df = k−1) instead of pairwise comparisons — for k=2 it is exactly the squared diff-in-diff, so it is not a second methodology. Columns with more than 12 values are skipped **with the reason shown** |
+| Editable metric dictionary | Direction / unit / formula / note are editable; labels are not (experiments store the Chinese label as `primaryMetric`). You can add **custom ratio metrics** (`Σnumerator / Σdenominator`, expression language restricted to arithmetic plus a field whitelist). Every save creates a new version with an auto-generated human-readable summary; history is read-only and rolling back creates yet another version |
+| Optional backend (zero dependencies) | `npm run server`: scrypt passwords + httpOnly session cookie, RBAC (viewer/analyst/admin), an approval flow for decisions (you cannot approve your own, rejecting requires a reason), an append-only audit log, API tokens (plaintext shown once, only sha256 stored) and scheduled re-scans that alert when a verdict changes. Storage is atomic single-file JSON + JSONL audit — a backend that cannot install or compile is not a backend. Without it the frontend silently falls back to local mode and **never renders a fake permission page** |
 | Robustness (winsorization) | A five-tier trim sweep with a sensitivity curve, revenue concentration, and single-row leverage (delete which row changes the verdict?). The panel states that **the trimmed p is not a significance conclusion**, with the simulation behind that statement | [`29-稳健性-去极值.png`](docs/screenshots/29-稳健性-去极值.png) |
 | Experiment comparison | Tick two rows → same unit shares **one** x-axis (line length = uncertainty); different units (pp vs currency) are refused and stacked instead; 15 side-by-side rows | [`14-实验对比.png`](docs/screenshots/14-实验对比.png) · [`15-对比-不能同轴.png`](docs/screenshots/15-对比-不能同轴.png) · [`16-列表勾选对比.png`](docs/screenshots/16-列表勾选对比.png) |
 | Command palette ⌘K | One panel over everything: experiments (id / name / hypothesis / **rule names**), metric names, and app actions; multi-word is AND, an exact id always ranks first, ↑↓ + ↵ works end to end | [`17-全局搜索.png`](docs/screenshots/17-全局搜索.png) · [`18-全局搜索-功能分组.png`](docs/screenshots/18-全局搜索-功能分组.png) |
@@ -81,7 +84,7 @@ npm run dev        # local dev (regenerates data first)
 npm run build      # dist/ (tsc --noEmit + vite build)
 npm run preview    # preview the build
 
-npm test           # 496 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
+npm test           # 547 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
                    #   import parsing / A-A calibration / metric dictionary / configurable thresholds / CUPED /
                    #   sequential / novelty / multiplicity / A-B-n multi-arm / winsorized robustness / expected loss / comparison /
                    #   forest scaling / ⌘K /
@@ -100,6 +103,7 @@ npm run novelty    # novelty effect: A/A calibration + detection rate on injecte
 npm run fwer       # multiplicity: FWER simulation + Holm/BH on the 120 experiments
 npm run multiarm   # A/B/n: all-null naive vs Dunnett false-positive rate, winner-pick rate, P(best) calibration
 npm run robust     # winsorization: raw vs trimmed bias/MSE/CI coverage under heavy tails, and what granularity does to it
+npm run server     # optional zero-dependency backend: auth/RBAC/approvals/audit/API/alerts, also serves dist/
 npm run loss       # expected loss: gates + net value vs the frequentist rule, on realised truth
 npm run forecast   # "how many more days" across the 120 experiments
 npm run method     # every number quoted in the methodology doc
@@ -181,7 +185,7 @@ src/app/                UI: Vite + React 19 + TS + Tailwind v3
   components/CompareScreen.tsx  Two experiments on one shared axis, or a refusal
   components/CommandPalette.tsx ⌘K palette (keyboard-only path works end to end)
 scripts/                Generation / calibration / data export / screen recording / video / portfolio build
-tests/                  496 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
+tests/                  547 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
                         simulations + metric dictionary/configurability/multi-turn + heterogeneity F1/baseline self-test)
 eval/baseline.json      Regression baseline: 86 metrics + a data fingerprint
 data/                   120 experiments / 6,720 rows
@@ -214,9 +218,9 @@ right-hand column of `docs/EVAL.md`.
 | Interval choice | Newcombe instead of Wald: at a 0.12% baseline with n=30 both cover 100%, but the widths are **0.906pp vs 22.869pp** |
 | Chart scaling bug | The forest plot's pp axis drew **341 grid lines** (step computed in percentage points, start in percent). Fixed, and locked by 6 tests |
 | Comparability | 120 experiments × all pairs = **7140 pairs**, asserting "shared axis ⟺ same unit" — not a sample |
-| Unit tests | **496** across 38 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
+| Unit tests | **547** across 42 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
 | Regression baseline | **86 metrics** + data fingerprint in `eval/baseline.json`; `npm run eval:check` exits 1 on any drift |
-| Bundle | **680KB** JS / 223KB gzip, zero chart libraries, zero backend |
+| Bundle | **742KB** JS / 241KB gzip, zero chart libraries, zero backend |
 
 ## Why these methods (every choice comes with its cost)
 
@@ -272,7 +276,7 @@ Every one of these was found by measurement or by looking at the rendered screen
 This is not a demo that renders three charts. The acceptance criteria are the ones a flagship tool would be held to:
 
 - **Every number is reversible**: expand to formula → sample size → data version → recompute and diff.
-- **Every claim is falsifiable**: 496 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
+- **Every claim is falsifiable**: 547 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
   and an automatic eval that fails the build when a metric drifts.
 - **Every method states its cost**, including the cases where our own choice is worse than the textbook one.
 - **No silent fallbacks**: missing columns, missing ground truth, an unavailable model, an exhausted storage quota —
@@ -282,8 +286,8 @@ This is not a demo that renders three charts. The acceptance criteria are the on
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3** (not v4: its range-syntax media queries break on Chrome < 104).
 **Zero chart libraries** — the forest plot and the daily trend are hand-written SVG (the trend used to be Recharts;
-removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 680KB / 223KB gzip). Statistics are in-house with tests. No backend,
-no database. The Agent talks to DeepSeek directly from the browser, and the site deploys as static files.
+removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 742KB / 241KB gzip). Statistics are in-house with tests. **No backend by default** (Pages serves the static build);
+there is an optional zero-dependency backend for roles/approvals/audit/API/alerts. The Agent talks to DeepSeek directly from the browser, and the site deploys as static files.
 
 ## Milestones
 
@@ -294,6 +298,7 @@ M12 sequential & advanced (sequential / novelty / multiplicity / expected loss) 
 **M13 polish & delivery (import persistence ✅, comparison ✅, ⌘K ✅, themes ✅, no chart libs ✅, methodology ✅, FAQ ✅)** →
 **M14 A/B/n multi-arm (Dunnett / P(best) / multi-arm planning / multi-arm import) ✅** →
 **M15 winsorized robustness (trim sweep / revenue concentration / single-row leverage) ✅** →
+**M16 dimension slicing, editable metric dictionary, optional backend (RBAC / approvals / audit / API / alerts) ✅** →
 G2 Pages deploy (deliberately last).
 
 Acceptance criteria live in the blueprint (§13); the extension list and measurements live in

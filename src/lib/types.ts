@@ -33,6 +33,15 @@ export interface DailyRow {
   preConversions?: number;
   /** 实验前同口径的收入合计（ARPU 的 CUPED 协变量） */
   preRevenue?: number;
+  /**
+   * 任意维度切片（来自用户表里的其他字符串列）：`{ 渠道: '应用商店', 城市: '上海' }`。
+   *
+   * 为什么不把它们提成正式字段：维度的名字与个数完全由用户的表决定，
+   * 枚举不完（渠道/城市/App版本/会员等级/活动ID…），写死任何一个都会让别的维度消失。
+   * 内置数据不带这个字段——设备与新老用户已经是正式字段，另加「周内/周末」由日期推导，
+   * 所以不导入数据也有三个维度可切（见 `lib/dimensions.ts`）。
+   */
+  dims?: Record<string, string>;
 }
 
 export interface Experiment {

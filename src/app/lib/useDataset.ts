@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { analyze, type Analysis } from '../../lib/decide.ts';
+import type { CustomMetric } from '../../lib/metricDict.ts';
 import type { DecisionConfig } from '../../lib/config.ts';
 import type { Dataset, DailyRow, Experiment } from '../../lib/types.ts';
 import { importer, type DataSource, type DatasetMeta } from './persist';
@@ -12,13 +13,28 @@ export interface Loaded {
 
 /** 当前生效的数据（可能是内置的，也可能是用户导入的） */
 let active: Loaded | null = null;
+/**
+ * 当前生效的自定义指标（来自可编辑口径字典）。
+ *
+ * 为什么放在模块级而不是逐个调用点传参：这个文件里有 7 处 `buildLoaded(...)`，
+ * 少传一处就会少算一个指标，而且**不会报错**（界面上只是少一块）。与 `active` 同级管理，
+ * 由 `useDataset()` 在每次渲染时刷新，语义上就是「当前这份数据 + 当前这套口径」。
+ */
+let metricsInUse: CustomMetric[] | undefined;
+export function setMetricsInUse(m: CustomMetric[] | undefined) {
+  metricsInUse = m && m.length ? m : undefined;
+}
 /** 内置数据只在第一次需要时拉网络，切来切去不重复拉 */
 let builtinP: Promise<Loaded> | null = null;
 
 /** 由 Dataset 构造运行时视图：按 expId 归桶 + 对每个实验跑确定性分析。
  *  初始加载与「用户导入」共用，保证两条路径产出的结构完全一致。
  *  cfg 来自设置页：改 α / 护栏 margin 后结论必须立刻跟着变，否则"可配置"就是假的。 */
-export function buildLoaded(dataset: Dataset, cfg?: Partial<DecisionConfig>): Loaded {
+export function buildLoaded(
+  dataset: Dataset,
+  cfg?: Partial<DecisionConfig>,
+  customMetrics?: CustomMetric[],
+): Loaded {
   const rowsByExp = new Map<string, DailyRow[]>();
   for (const r of dataset.daily) {
     const list = rowsByExp.get(r.expId);
@@ -32,7 +48,13 @@ export function buildLoaded(dataset: Dataset, cfg?: Partial<DecisionConfig>): Lo
   );
   const cfgWithMissing = { ...cfg, missingGuardrails };
   const analyses = new Map<string, Analysis>();
-  for (const e of dataset.experiments) analyses.set(e.id, analyze(e, rowsByExp.get(e.id) ?? [], cfgWithMissing));
+  // 自定义指标来自可编辑口径字典：改了口径就得重算，所以它和 cfg 一样是 buildLoaded 的输入。
+  // 传空数组时引擎一次额外计算都不做（86 项评测指标就是这么保住的）。
+  const useMetrics = customMetrics && customMetrics.length ? customMetrics : metricsInUse;
+  const ctx = useMetrics && useMetrics.length ? { customMetrics: useMetrics } : undefined;
+  for (const e of dataset.experiments) {
+    analyses.set(e.id, analyze(e, rowsByExp.get(e.id) ?? [], cfgWithMissing, ctx));
+  }
 
   return { dataset, analyses, rowsByExp };
 }
@@ -67,7 +89,13 @@ export interface DatasetState {
   restoring: boolean;
 }
 
-export function useDataset(cfg?: Partial<DecisionConfig>) {
+export function useDataset(cfg?: Partial<DecisionConfig>, customMetrics?: CustomMetric[]) {
+  setMetricsInUse(customMetrics);
+  // 口径变了要重算：自定义指标和 cfg 一样属于「会改变结论的输入」
+  const customKey = useMemo(
+    () => (customMetrics && customMetrics.length ? JSON.stringify(customMetrics) : ''),
+    [customMetrics],
+  );
   const [state, setState] = useState<DatasetState>({
     data: null,
     error: null,
@@ -135,7 +163,7 @@ export function useDataset(cfg?: Partial<DecisionConfig>) {
     return () => {
       alive = false;
     };
-  }, [cfgKey]);
+  }, [cfgKey, customKey]);
 
   /**
    * 用用户导入的数据替换当前数据，并**写进本机存储**（刷新不丢）。
@@ -160,7 +188,7 @@ export function useDataset(cfg?: Partial<DecisionConfig>) {
     const loaded = await loadBuiltin();
     active = cfg ? buildLoaded(loaded.dataset, cfg) : loaded;
     setState((st) => ({ ...st, data: active, error: null, source: 'builtin', meta: null, restoring: false }));
-  }, [cfgKey]);
+  }, [cfgKey, customKey]);
 
   /** 切回上次导入的数据（不重新导入） */
   const useImported = useCallback(async () => {
@@ -172,7 +200,7 @@ export function useDataset(cfg?: Partial<DecisionConfig>) {
     active = loaded;
     setState({ data: loaded, error: null, source: 'user', meta: stored.meta, storedMeta: stored.meta, restoring: false });
     return true;
-  }, [cfgKey]);
+  }, [cfgKey, customKey]);
 
   /** 彻底删掉本机存档（不是切换，是删除） */
   const forgetImport = useCallback(async () => {
@@ -196,6 +224,8 @@ export function useHashRoute(): {
   isSettings: boolean;
   isCompare: boolean;
   isPlan: boolean;
+  /** 云端（后端）页面：没有后端时这一页只说明「本地模式」 */
+  isCloud: boolean;
   /** 对比视图的两个实验 id（可为 null：还没选） */
   compareA: string | null;
   compareB: string | null;
@@ -223,6 +253,7 @@ export function useHashRoute(): {
     isSettings: /^#\/settings/.test(hash),
     isCompare: /^#\/compare/.test(hash),
     isPlan: /^#\/plan/.test(hash),
+    isCloud: /^#\/cloud/.test(hash),
     compareA: /^#\/compare/.test(hash) ? route.a : null,
     compareB: /^#\/compare/.test(hash) ? route.b : null,
     go: (h) => {

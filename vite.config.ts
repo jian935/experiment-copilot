@@ -15,5 +15,11 @@ export default defineConfig({
     cssMinify: 'esbuild',
     target: 'es2019',
   },
-  server: { port: 5173, host: '127.0.0.1' },
+  // `npm run dev` + `npm run server` 同时跑时，前端把 /v1 代理到后端。
+  // 同源部署（后端直接服务 dist/）时不需要这条，fetch('/v1/...') 本来就同源。
+  server: {
+    port: 5173,
+    host: '127.0.0.1',
+    proxy: { '/v1': { target: 'http://127.0.0.1:8787', changeOrigin: false } },
+  },
 });

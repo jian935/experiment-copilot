@@ -8,6 +8,8 @@ import {
   PROVIDER_PRESETS, type LlmSettings, type Settings,
 } from '../lib/settings.ts';
 import { Button, cx, Panel, PanelHead } from './ui.tsx';
+import { MetricDictPanel } from './MetricDictPanel';
+import type { MetricDictApi } from '../lib/useMetricDict';
 
 /**
  * 设置页（蓝图第 6 屏）。
@@ -23,6 +25,7 @@ export function SettingsScreen({
   reset,
   dataset,
   analyses,
+  dict,
   onBack,
 }: {
   settings: Settings;
@@ -31,6 +34,7 @@ export function SettingsScreen({
   reset: () => void;
   dataset: Dataset | null;
   analyses: Map<string, Analysis> | null;
+  dict: MetricDictApi;
   onBack: () => void;
 }) {
   const cfg = settings.config;
@@ -111,71 +115,7 @@ export function SettingsScreen({
         </Panel>
       )}
 
-      <Panel className="mt-4">
-        <PanelHead
-          title="口径字典"
-          hint="所有指标的定义集中在这里；引擎与 Agent 只能引用字典里登记过的口径"
-          right={<span className="font-mono text-[10px] text-dim">{METRIC_DEFS.length} 个已登记</span>}
-        />
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-left text-[11px]">
-            <thead>
-              <tr className="border-b border-line text-[10.5px] text-dim">
-                <th className="px-4 py-2 font-normal">指标</th>
-                <th className="px-3 py-2 font-normal">方向</th>
-                <th className="px-3 py-2 font-normal">类型</th>
-                <th className="px-3 py-2 font-normal">计算式</th>
-                <th className="px-3 py-2 font-normal">统计方法</th>
-                <th className="px-3 py-2 font-normal">护栏容忍度</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line/50">
-              {METRIC_DEFS.map((m) => (
-                <tr key={m.key} className="align-top">
-                  <td className="px-4 py-2.5">
-                    <div className="text-ink">{m.label}</div>
-                    <div className="font-mono text-[9.5px] text-dim">{m.key}</div>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span
-                      className={cx(
-                        'rounded px-1.5 py-0.5 text-[10px]',
-                        m.direction === 'higher_better' ? 'bg-ship/12 text-ship' : 'bg-noship/12 text-noship',
-                      )}
-                    >
-                      {directionLabel(m)}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-muted">
-                    {{ rate: '率', continuous: '连续值', quantile: '分位数' }[m.kind]}
-                  </td>
-                  <td className="px-3 py-2.5 font-mono text-[10px] text-muted">{m.formula}</td>
-                  <td className="px-3 py-2.5 text-muted">{m.method}</td>
-                  <td className="px-3 py-2.5">
-                    {m.guardrailMargin === null ? (
-                      <span className="text-dim">不作为护栏</span>
-                    ) : (
-                      <span className="num text-muted">
-                        {m.unit === 'ms'
-                          ? `+${(m.guardrailMargin * 100).toFixed(0)}%`
-                          : `${(m.guardrailMargin * 100).toFixed(2)}pp`}
-                      </span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="border-t border-line px-4 py-3">
-          <p className="text-[10.5px] leading-4 text-dim">
-            字典之外就没有口径：Agent 被问到 ARPU、留存这类未登记指标时，只能回答「不在口径字典里，引擎没算过」，
-            不允许自行定义或换算——这是「Agent 不能自创口径」这条铁律的落点。
-            要新增指标，得先在 <code className="rounded bg-white/10 px-1">DailyRow</code> 加字段、在
-            <code className="rounded bg-white/10 px-1">metrics.ts</code> 登记、再接入决策。
-          </p>
-        </div>
-      </Panel>
+      <MetricDictPanel dict={dict} />
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Panel>

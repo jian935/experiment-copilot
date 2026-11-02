@@ -19,6 +19,7 @@ import {
   reportForJson,
   SAMPLE_CSV,
   SAMPLE_CSV_MULTIARM,
+  SAMPLE_CSV_DIMS,
   SAMPLE_JSON,
   textToRows,
   type ImportReport,
@@ -347,6 +348,19 @@ export function ImportDialog({
                     3 臂样例（A/B/n）
                   </Button>
                 )}
+                {mode === 'table' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setText(SAMPLE_CSV_DIMS);
+                      setError(null);
+                    }}
+                    title="表里多了「渠道」「城市」两列：导入后详情页可以按它们切片"
+                  >
+                    多维样例（渠道 × 城市）
+                  </Button>
+                )}
                 <span className="text-[10.5px] text-dim">示例是编造的，只用来演示格式</span>
               </div>
 
@@ -639,6 +653,14 @@ function PreviewPanel({
             ))}
           </ul>
         </details>
+      )}
+
+      {report.dimensions.length > 0 && (
+        <p className="text-[10.5px] leading-4 text-muted">
+          已识别为可切维度：{report.dimensions.slice(0, 6).join('、')}
+          {report.dimensions.length > 6 ? ` 等 ${report.dimensions.length} 列` : ''}
+          （详情页「维度切片」可以逐个切；这些列不会参与指标计算）
+        </p>
       )}
 
       {report.unmatchedColumns.length > 0 && (

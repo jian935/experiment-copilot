@@ -276,8 +276,16 @@ export interface ImportReport {
   mapping: Partial<Record<FieldKey, string>>;
   /** 得分 <100 的识别：这些是「猜」的，UI 要请用户确认 */
   guessed: FieldKey[];
-  /** 表头里没被任何字段认领的列 */
+  /** 表头里没被任何字段认领、也**没被当成维度**的列 */
   unmatchedColumns: string[];
+  /**
+   * 被当成「可切维度」的列名（渠道 / 城市 / App 版本…）。
+   *
+   * 为什么自动识别而不是让用户手选：用户表里多出来的字符串列，几乎总是他想要的切片维度；
+   * 而「多选一步」会让大多数人不选，于是维度切片功能实际上不存在。
+   * 判据写在 `pickDimColumns`：取值 2~12 个、非数值为主、非空占比够高。
+   */
+  dimensions: string[];
   rowsTotal: number;
   rowsUsed: number;
   dropped: DroppedRow[];
@@ -321,6 +329,57 @@ export interface TableParseOptions {
 }
 
 const FIELD_LABEL = Object.fromEntries(FIELDS.map((f) => [f.key, f.label])) as Record<FieldKey, string>;
+
+/**
+ * 把「多出来的字符串列」认成可切维度。
+ *
+ * 判据（宁可少认，也不要把指标列当成维度）：
+ *   1. 取值个数 2 ~ `DIM_COLUMN_MAX_VALUES`——只有 1 个值没信息，太多会让每组只剩几个格子；
+ *   2. **不能以数值为主**：一个没被映射上的数值列（比如 `gmv` 写成了别的名字）如果被当成维度，
+ *      会切出几十个「什么都不是」的组，而真正的指标反而没进计算——这是最坏的一种错；
+ *   3. 非空占比 ≥ 60%：稀疏列当维度会把 40% 的行扔进「空值组」。
+ *
+ * 为什么不问用户：「要不要把这几列当维度」这一步几乎所有人都会跳过，
+ * 结果就是这个功能事实上不存在。自动认 + 在预检里**明说认了哪几列**，比多一次点击更有效。
+ */
+const DIM_COLUMN_MAX_VALUES = 12;
+
+function pickDimColumns(
+  header: string[],
+  mapping: Record<FieldKey, number>,
+  dataRows: unknown[][],
+): Array<{ name: string; index: number }> {
+  const used = new Set<number>();
+  for (const f of FIELDS) {
+    const i = mapping[f.key];
+    if (i >= 0) used.add(i);
+  }
+  const sample = dataRows.slice(0, 400);
+  const out: Array<{ name: string; index: number }> = [];
+  header.forEach((h, i) => {
+    const name = String(h ?? '').trim();
+    if (!name || used.has(i)) return;
+    if (out.some((c) => c.name === name)) return; // 重名列只认第一个，否则 dims 键会互相覆盖
+    let filled = 0;
+    const seen = new Set<string>();
+    let numeric = 0;
+    for (const row of sample) {
+      const v = String(row?.[i] ?? '').trim();
+      if (!v) continue;
+      filled++;
+      seen.add(v);
+      // 「像数字」的判据：能转成有限数，且不是以 0 开头的编码（编码类如 310000 其实是分类）
+      const n = Number(v);
+      if (Number.isFinite(n) && v !== '' && !/^0\d/.test(v)) numeric++;
+    }
+    if (!filled) return;
+    if (filled / Math.max(1, sample.length) < 0.6) return;
+    if (numeric / filled > 0.3) return;
+    if (seen.size < 2 || seen.size > DIM_COLUMN_MAX_VALUES) return;
+    out.push({ name, index: i });
+  });
+  return out;
+}
 
 /** 问题行占比超过这个比例，就不再逐行丢弃，而是整体报错 */
 const MAX_DROP_RATIO = 0.1;
@@ -401,6 +460,8 @@ export function parseTableRows(rows: unknown[][], opts: TableParseOptions): Tabl
   const daily: DailyRow[] = [];
   const dropped: DroppedRow[] = [];
   const badVariantValues = new Set<string>();
+  const dimCols = pickDimColumns(header, mapping, dataRows);
+  const dimIndex = new Map(dimCols.map((c) => [c.name, c.index]));
   const meta = new Map<
     string,
     {
@@ -467,6 +528,12 @@ export function parseTableRows(rows: unknown[][], opts: TableParseOptions): Tabl
       const preConversions = optNum('preConversions');
       const preRevenue = optNum('preRevenue');
 
+      const rowDims: Record<string, string> = {};
+      for (const [dn, di] of dimIndex) {
+        const v = String(row[di] ?? '').trim();
+        if (v) rowDims[dn] = v;
+      }
+
       daily.push({
         expId,
         date,
@@ -482,6 +549,7 @@ export function parseTableRows(rows: unknown[][], opts: TableParseOptions): Tabl
         ...(preExposures !== undefined ? { preExposures } : {}),
         ...(preConversions !== undefined ? { preConversions } : {}),
         ...(preRevenue !== undefined ? { preRevenue } : {}),
+        ...(Object.keys(rowDims).length ? { dims: rowDims } : {}),
       });
 
       let m = meta.get(expId);
@@ -602,6 +670,13 @@ export function parseTableRows(rows: unknown[][], opts: TableParseOptions): Tabl
       inferred.push(`分流比例已从 trafficSplit 读取：SRM 用声明比例检查，不用等分假设`);
     }
   }
+  if (dimCols.length) {
+    const names = dimCols.slice(0, 5).map((c) => c.name).join('、');
+    inferred.push(
+      `识别到 ${dimCols.length} 个可切维度：${names}${dimCols.length > 5 ? ` 等 ${dimCols.length} 列` : ''}` +
+        '（详情页「维度切片」可以按它们逐个切；这里只认字符串列，不会把没映射上的数值列当维度）',
+    );
+  }
 
   const armInfo = new Map<string, { arms: string[]; control: string; implicit: boolean }>();
   const dayCount = new Map<string, Set<string>>();
@@ -659,7 +734,10 @@ export function parseTableRows(rows: unknown[][], opts: TableParseOptions): Tabl
     guessed: opts.mapping
       ? []
       : FIELDS.filter((f) => mapping[f.key] >= 0 && (auto.scores?.[f.key] ?? 0) < 100).map((f) => f.key),
-    unmatchedColumns: header.filter((_, i) => !FIELDS.some((f) => mapping[f.key] === i) && header[i]),
+    dimensions: dimCols.map((c) => c.name),
+    unmatchedColumns: header.filter(
+      (_, i) => !FIELDS.some((f) => mapping[f.key] === i) && !dimIndex.has(String(header[i] ?? '').trim()) && header[i],
+    ),
     rowsTotal: dataRows.filter((r) => (r ?? []).some((c) => String(c ?? '').trim() !== '')).length,
     rowsUsed: daily.length,
     dropped: dropped.slice(0, 20),
