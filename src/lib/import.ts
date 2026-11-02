@@ -1,49 +1,24 @@
 import type { Archetype, DailyRow, Dataset, Decision, Device, Experiment, Tenure, Variant } from './types.ts';
+import {
+  defaultSpec,
+  ImportError,
+  normalizeDate,
+  normVariant,
+  num,
+  parseTableRows,
+  type ImportReport,
+  type TableParseResult,
+} from './tableImport.ts';
 
-/** 导入失败的统一错误类型，UI 直接拿 message 展示 */
-export class ImportError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ImportError';
-  }
-}
+// 这几个符号原来定义在本文件，UI 一直从 './import.ts' 引；挪到 tableImport 后在这里再导出，
+// 调用方一行都不用改（也避免两个地方各有一份别名表而漂移）。
+export { ImportError, normalizeDate, normVariant };
+export type { DroppedRow, ImportReport } from './tableImport.ts';
 
 const DECISIONS: Decision[] = ['ship', 'no-ship', 'iterate', 'inconclusive'];
 const ARCHETYPES: Archetype[] = ['null', 'positive', 'negative', 'heterogeneous', 'srm', 'guardrail'];
 const DEVICES: Device[] = ['iOS', 'Android'];
 const TENURES: Tenure[] = ['new', 'old'];
-
-/** variant 常见别名归一化（中英文、A/B、0/1 都认） */
-const VARIANT_ALIASES: Record<string, Variant> = {
-  control: 'control',
-  treatment: 'treatment',
-  c: 'control',
-  t: 'treatment',
-  a: 'control',
-  b: 'treatment',
-  '0': 'control',
-  '1': 'treatment',
-  对照: 'control',
-  控制: 'control',
-  对照组: 'control',
-  控制组: 'control',
-  实验: 'treatment',
-  实验组: 'treatment',
-  处理: 'treatment',
-  新: 'treatment',
-};
-
-function normVariant(raw: unknown, ctx: string): Variant {
-  if (raw == null || String(raw).trim() === '') throw new ImportError(`${ctx}：缺少 variant 字段`);
-  const v = String(raw).trim().toLowerCase();
-  const m = VARIANT_ALIASES[v];
-  if (!m) {
-    throw new ImportError(
-      `${ctx}：variant 非法「${raw}」（需为 control / treatment，或别名 对照/实验组/A/B/0/1）`,
-    );
-  }
-  return m;
-}
 
 function normEnum<T extends string>(raw: unknown, allowed: T[], field: string, ctx: string, dflt?: T): T {
   if (raw == null || String(raw).trim() === '') {
@@ -55,26 +30,6 @@ function normEnum<T extends string>(raw: unknown, allowed: T[], field: string, c
     throw new ImportError(`${ctx}：${field} 非法「${raw}」（允许 ${allowed.join(' / ')}）`);
   }
   return v as T;
-}
-
-function num(raw: unknown, field: string, ctx: string, min = -Infinity): number {
-  if (raw == null || String(raw).trim() === '') throw new ImportError(`${ctx}：缺少 ${field}`);
-  const n = Number(String(raw).trim());
-  if (!Number.isFinite(n)) throw new ImportError(`${ctx}：${field} 不是数字「${raw}」`);
-  if (n < min) throw new ImportError(`${ctx}：${field} 不能小于 ${min}`);
-  return n;
-}
-
-function defaultSpec() {
-  return {
-    days: 0,
-    segments: ['device', 'tenure'] as string[],
-    baselineRate: [0, 0] as [number, number],
-    refundRate: 0,
-    complaintRate: 0,
-    latencyMean: 0,
-    latencySd: 0,
-  };
 }
 
 function optionalNum(raw: unknown, field: string, ctx: string, min = -Infinity): number | undefined {
@@ -212,8 +167,20 @@ export function parseDatasetJson(text: string): Dataset {
 
 /* ============================ CSV 导入 ============================ */
 
-/** 极简但正确的 CSV 解析：支持引号转义、字段内逗号、CRLF */
-function parseCsv(text: string): string[][] {
+/**
+ * 从 Excel 里复制出来的那片区域是 **Tab 分隔**，粘贴进来自动识别：
+ * 首行 Tab 比逗号多就走 Tab。判错的代价是「整行被当成一列」，用户会看到
+ * 「没有识别出曝光数列」——所以这个判断必须做，不能只支持逗号。
+ */
+export function detectDelimiter(text: string): string {
+  const first = (text.split('\n')[0] ?? '').replace(/\r$/, '');
+  const tabs = (first.match(/\t/g) ?? []).length;
+  const commas = (first.match(/,/g) ?? []).length;
+  return tabs > commas ? '\t' : ',';
+}
+
+/** 极简但正确的 CSV/TSV 解析：支持引号转义、字段内分隔符、CRLF */
+function parseCsv(text: string, delimiter = ','): string[][] {
   const rows: string[][] = [];
   let field = '';
   let row: string[] = [];
@@ -229,7 +196,7 @@ function parseCsv(text: string): string[][] {
         } else inQuotes = false;
       } else field += ch;
     } else if (ch === '"') inQuotes = true;
-    else if (ch === ',') {
+    else if (ch === delimiter) {
       row.push(field);
       field = '';
     } else if (ch === '\n') {
@@ -248,147 +215,91 @@ function parseCsv(text: string): string[][] {
 
 /**
  * 从「日级明细 CSV」构造 Dataset。
- * 必需列：expId, date, variant, exposures, conversions
- * 可选列：device, tenure, refunds, complaints, latencyP95, name,
- *         revenue（该格子收入合计，元）、preExposures / preConversions / preRevenue（CUPED 协变量）、
- *         primaryMetric / metricType（把某个实验声明成 ARPU 主指标）
- * - variant 支持别名（对照/实验组/A/B/0/1）。
- * - 缺失 device/tenure 时整行归入默认单层（'iOS'/'new'），仍可分析（只是无分层）。
- * - 自动从明细推导 experiments（唯一 expId、日期范围、存在哪些护栏列）。
- * - 有 revenue 列时 ARPU 会自动被计算（作为主指标或副指标）；没有则该能力静默关闭，不报错。
- * - 真实数据通常没有已知真值 → groundTruth = false，评测看板会自动隐藏。
+ *
+ * 列名不再要求写死：`实验ID / 日期 / 分组 / 曝光数 / 转化数` 这类中文表头也能识别
+ * （别名表在 `columnMap.ts`）。识别不出必需列时会报错，并在消息里列出「你的表头长什么样」，
+ * 让用户知道该改哪一列，而不是只收到一句「缺少 expId」。
+ *
+ * 想拿到「识别到了什么 / 丢了哪些行 / 缺哪些列」，用 `parseCsvText` —— 返回 dataset + report。
  */
+/** 文本 → 二维表（自动识别逗号 / Tab）。UI 改列映射时要重跑，必须与首次解析走同一条路。 */
+export function textToRows(text: string): string[][] {
+  return parseCsv(text, detectDelimiter(text));
+}
+
+export function parseCsvText(
+  text: string,
+  mapping?: Partial<Record<import('./columnMap.ts').FieldKey, number>>,
+): TableParseResult {
+  const rows = textToRows(text);
+  if (rows.length < 2) throw new ImportError('至少要有一行表头 + 一行数据');
+  return parseTableRows(rows, { source: 'csv', mapping });
+}
+
+/** 只要 Dataset 时的便捷入口（内部就是 parseCsvText().dataset） */
 export function parseDatasetCsv(text: string): Dataset {
-  const rows = parseCsv(text);
-  if (rows.length < 2) throw new ImportError('CSV 至少需要一行表头 + 一行数据');
+  return parseCsvText(text).dataset;
+}
 
-  const header = rows[0].map((h) => String(h).trim());
-  const required = ['expId', 'date', 'variant', 'exposures', 'conversions'];
-  const missing = required.filter((c) => !header.includes(c));
-  if (missing.length) {
-    throw new ImportError(`CSV 缺少必需列：${missing.join('、')}（必需列：${required.join('、')}）`);
+/**
+ * JSON 路径的「预检报告」。
+ *
+ * JSON 已经是结构化格式，不存在列映射问题，但 UI 需要和 CSV/Excel 一样的一份摘要
+ * （几个实验、多少行、有没有真值、有没有只有一臂的实验）。让两条导入路径共用同一个
+ * 预检面板，而不是「JSON 走一套界面、Excel 走另一套」——后者是导入体验割裂的常见来源。
+ */
+export function reportForJson(dataset: Dataset, source: 'json' = 'json'): ImportReport {
+  const byExp = new Map<string, typeof dataset.daily>();
+  for (const r of dataset.daily) {
+    const list = byExp.get(r.expId) ?? [];
+    list.push(r);
+    byExp.set(r.expId, list);
   }
-  const col = (name: string) => header.indexOf(name);
-  const iExp = col('expId');
-  const iDate = col('date');
-  const iVar = col('variant');
-  const iDev = col('device');
-  const iTnt = col('tenure');
-  const iExpN = col('exposures');
-  const iConv = col('conversions');
-  const iName = col('name');
-  const iRef = col('refunds');
-  const iComp = col('complaints');
-  const iLat = col('latencyP95');
-  const iRev = col('revenue');
-  const iPreN = col('preExposures');
-  const iPreC = col('preConversions');
-  const iPreR = col('preRevenue');
-  const iPrim = col('primaryMetric');
-  const iType = col('metricType');
-  const has = (i: number) => i >= 0;
-
-  const daily: DailyRow[] = [];
-  const meta = new Map<
-    string,
-    { name?: string; devices: Set<Device>; tenures: Set<Tenure>; dates: string[]; primaryMetric?: string; metricType?: 'binary' | 'continuous' }
-  >();
-
-  for (let r = 1; r < rows.length; r++) {
-    const cells = rows[r];
-    const get = (i: number) => (i >= 0 && i < cells.length ? cells[i] : '');
-    const expId = get(iExp).trim();
-    if (!expId) continue; // 跳过空 expId 行
-    const ctx = `CSV 第 ${r + 1} 行`;
-    const variant = normVariant(get(iVar), ctx);
-    const device = normEnum<Device>(get(iDev), DEVICES, 'device', ctx, 'iOS');
-    const tenure = normEnum<Tenure>(get(iTnt), TENURES, 'tenure', ctx, 'new');
-    const exposures = num(get(iExpN), 'exposures', ctx, 1);
-    const conversions = num(get(iConv), 'conversions', ctx, 0);
-    if (conversions > exposures) throw new ImportError(`${ctx}：conversions 不能超过 exposures`);
-    const refunds = has(iRef) && get(iRef).trim() !== '' ? num(get(iRef), 'refunds', ctx, 0) : 0;
-    const complaints = has(iComp) && get(iComp).trim() !== '' ? num(get(iComp), 'complaints', ctx, 0) : 0;
-    const latencyP95 = has(iLat) && get(iLat).trim() !== '' ? num(get(iLat), 'latencyP95', ctx, 0) : 0;
-    const revenue = has(iRev) && get(iRev).trim() !== '' ? num(get(iRev), 'revenue', ctx, 0) : undefined;
-    const preExposures = has(iPreN) && get(iPreN).trim() !== '' ? num(get(iPreN), 'preExposures', ctx, 0) : undefined;
-    const preConversions = has(iPreC) && get(iPreC).trim() !== '' ? num(get(iPreC), 'preConversions', ctx, 0) : undefined;
-    const preRevenue = has(iPreR) && get(iPreR).trim() !== '' ? num(get(iPreR), 'preRevenue', ctx, 0) : undefined;
-
-    const date = get(iDate).trim();
-    if (!date) throw new ImportError(`${ctx}：缺少 date`);
-
-    daily.push({
-      expId, date, variant, device, tenure, exposures, conversions, refunds, complaints, latencyP95,
-      ...(revenue !== undefined ? { revenue } : {}),
-      ...(preExposures !== undefined ? { preExposures } : {}),
-      ...(preConversions !== undefined ? { preConversions } : {}),
-      ...(preRevenue !== undefined ? { preRevenue } : {}),
-    });
-
-    let m = meta.get(expId);
-    if (!m) {
-      m = { devices: new Set(), tenures: new Set(), dates: [] };
-      meta.set(expId, m);
+  const warnings: string[] = [];
+  for (const e of dataset.experiments) {
+    const rows = byExp.get(e.id) ?? [];
+    const variants = new Set(rows.map((r) => r.variant));
+    const days = new Set(rows.map((r) => r.date));
+    if (!variants.has('control') || !variants.has('treatment')) {
+      warnings.push(`${e.id} ${variants.has('control') ? '只有对照组' : '只有实验组'}——缺少另一臂，无法比较`);
     }
-    m.devices.add(device);
-    m.tenures.add(tenure);
-    m.dates.push(date);
-    if (has(iName)) {
-      const nm = get(iName).trim();
-      if (nm && !m.name) m.name = nm;
-    }
-    if (has(iPrim)) {
-      const pm = get(iPrim).trim();
-      if (pm && !m.primaryMetric) m.primaryMetric = pm;
-    }
-    if (has(iType)) {
-      const mt = get(iType).trim().toLowerCase();
-      if ((mt === 'continuous' || mt === 'binary') && !m.metricType) m.metricType = mt;
-    }
+    if (days.size === 1) warnings.push(`${e.id} 只有 1 天数据：分日趋势与序变检验不可用`);
   }
-
-  if (daily.length === 0) throw new ImportError('CSV 没有有效数据行（请检查 expId / variant 列）');
-
-  const guardrailMetrics: string[] = [];
-  if (has(iRef)) guardrailMetrics.push('refunds');
-  if (has(iComp)) guardrailMetrics.push('complaints');
-  if (has(iLat)) guardrailMetrics.push('latencyP95');
-
-  const experiments: Experiment[] = [];
-  for (const [expId, m] of meta) {
-    const dates = m.dates.slice().sort();
-    // 有 revenue 且声明了 continuous 才走 ARPU 主指标；只声明 continuous 但没收入会在 analyze 里被显式退回
-    const metricType = m.metricType ?? 'binary';
-    experiments.push({
-      id: expId,
-      name: m.name ?? expId,
-      hypothesis: '',
-      startDate: dates[0] ?? '',
-      endDate: dates[dates.length - 1] ?? '',
-      variants: ['control', 'treatment'],
-      trafficSplit: '',
-      primaryMetric: m.primaryMetric ?? (metricType === 'continuous' ? 'ARPU' : 'conversions'),
-      metricType,
-      guardrailMetrics,
-      archetype: 'null',
-      trueLift: 0,
-      trueLiftOverall: 0,
-      trueLiftScope: 'overall',
-      trueDecision: 'inconclusive',
-      seed: 0,
-    });
-  }
-
-  // CSV 的「缺失」看表头：没有这一列 = 整列缺失（空格子算有列，走填 0）
-  const missingCsv = OPTIONAL_COLUMNS.filter((c) => !header.includes(c));
+  const hasGuardrail = dataset.experiments.some((e) => e.guardrailMetrics.length > 0);
+  const missingOptional: ImportReport['missingOptional'] = hasGuardrail
+    ? []
+    : ['refunds', 'complaints', 'latencyP95'];
   return {
-    generatedAt: new Date().toISOString(),
-    seedBase: 0,
-    groundTruth: false,
-    spec: defaultSpec(),
-    experiments,
-    daily,
-    missingColumns: missingCsv,
+    source,
+    header: [],
+    mapping: {},
+    guessed: [],
+    unmatchedColumns: [],
+    rowsTotal: dataset.daily.length,
+    rowsUsed: dataset.daily.length,
+    dropped: [],
+    experiments: dataset.experiments.map((e) => {
+      const rows = byExp.get(e.id) ?? [];
+      const dates = [...new Set(rows.map((r) => r.date))].sort();
+      return {
+        id: e.id,
+        name: e.name,
+        rows: rows.length,
+        days: dates.length,
+        dateFrom: dates[0] ?? '',
+        dateTo: dates[dates.length - 1] ?? '',
+        hasControl: rows.some((r) => r.variant === 'control'),
+        hasTreatment: rows.some((r) => r.variant === 'treatment'),
+        metricType: e.metricType,
+      };
+    }),
+    missingOptional,
+    inferred: [
+      dataset.groundTruth
+        ? 'JSON 自带 trueDecision / trueLiftOverall：评测看板可用'
+        : 'JSON 没有真值：评测看板会自动隐藏依赖真值的指标',
+    ],
+    warnings,
   };
 }
 

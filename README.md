@@ -75,12 +75,13 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 349 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 方法论对账 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
+npm test           # 391 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / 列识别 / 工作簿合并 / 样本量规划 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 方法论对账 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
 npm run eval       # 评测报告：分层 F1 + 2200 条 Agent 问答的幻觉数字率（写 data/agent_eval.json 给看板）
 npm run eval:check # 与 eval/baseline.json 逐指标比对，任何漂移 exit 1（CI 用的就是它）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 npm run audit:ui   # 全量交互审查：逐个点 8 个屏上的 162 个控件，找「点了没反应 / 被遮挡 / 禁用没说」
+npm run e2e:import # 导入端到端：把 data/ 里那份真实 .xlsx 拖进浏览器，验 6 个实验/336 行/名称与真值合并
 npm run smoke      # UI 冒烟（需先 npm run build && npx vite preview --port 4321）
                    # 真浏览器逐屏点：白屏 / undefined / NaN / 未捕获异常都会被抓出来
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
@@ -101,8 +102,35 @@ npm run method     # 方法论长文里的每个数字：覆盖率 / 多重比�
 
 ## 导入自己的数据（不用重新构建）
 
-页面右上角 **「导入数据」** → 选 JSON 或 CSV → 粘贴或上传文件 → **「载入并分析」**。
+页面右上角 **「导入数据」** → **把文件拖进去**（或粘贴）→ 看预检 → **「确认导入」**。
 全程在浏览器端完成：数据不上传服务器，也不过模型，导入后立即用同一套确定性引擎重算。
+
+### 三种格式都能进，列名不用改
+
+| 格式 | 说明 |
+|---|---|
+| **`.xlsx`** | **直接拖进来就行**。多 sheet 会自动识别：哪张是明细（按内容判断，不看 sheet 名）、哪张是实验元信息（`experiments`），并按实验编号把名称/假设/真值合并进来。老式 `.xls` 会明确提示另存为 xlsx |
+| `.csv` | 逗号分隔；**从 Excel 复制一片区域直接粘贴**也认（Tab 分隔自动识别） |
+| `.json` | `experiments` + `daily` 两个数组 |
+
+**列名是中文也认**：`实验ID / 统计日期 / 分组 / 曝光数（人）/ 转化数 / 退款数` 这一套，以及
+`exp_id / segment_device / latency_p95_ms` 这种带前缀下划线的写法，都在识别范围里。
+识别不出来时不会只说「导入失败」，而是把**你的表头原样列出来**，并让你在下拉框里手动指。
+
+### 导入是两步：先预检，再确认
+
+第一版点一下就导完，问题在于「列指错了」比「导入失败」难发现得多。所以现在中间插一屏预检：
+
+- **摘要**：几个实验、多少行、多少次曝光、有没有真值（决定评测看板能不能用）
+- **列识别**：每个字段 ← 哪一列，精确命中的打勾，靠模糊匹配的标「猜」并可手动改
+- **进来的实验**：编号 / 名称 / 天数 / 日期范围 / 口径 / 两臂是否齐全
+- **推断与跳过**：ARPU 是不是真的生效了、哪些行被跳过（含行号与原因）
+
+### 坏行容错：少量跳过、大量报错
+
+一行脏数据（分组写成「实验版」、转化数大于曝光数）不会让整份表白导——**跳过它并列出是哪一行**。
+但如果坏行超过 5 行**且**占比超过 10%，说明多半是列指错了，这时直接报错并列出前 5 条，
+而不是把一半数据悄悄吞掉。
 
 ### JSON
 
@@ -185,7 +213,7 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  349 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
+tests/                  391 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
                         + 口径字典/阈值可配/多轮上下文 + 分层 F1/基线比对器自测）
 eval/baseline.json      回归基线：86 个指标 + 数据指纹（npm run eval -- --write 更新）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
@@ -352,7 +380,7 @@ CUPED 的功劳是在区间已经诚实的前提下再收窄 7.24%。这两件�
 | 接进统一口径 | `evaluate(ds, analyses, { agent })` 一个出口；看板 fetch `data/agent_eval.json`，设置页改过阈值时显式提示「这份评测已过期，重跑 npm run eval」 | `src/lib/agentEval.ts` |
 | 回归基线 | `eval/baseline.json` 86 个指标 + 数据指纹；`npm run eval:check` 漂移即 `exit 1`，并打印 `✗ accuracy 93.33% → 91.67%（-1.67pp）` 这种可直接定位的一行 | `npm run eval:check` |
 | CI | typecheck → test → 基线比对 → **重建数据后再比对**（证明同代码出同数据）→ A/A 200 次冒烟（`--dry`，不覆盖 2000 次的正式报告） | `.github/workflows/ci.yml` |
-| 单测 | 196 → **349**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条 + 趋势图几何 7 条 + **方法论对账 10 条** + 缺列护栏 4 条 + **中英对账 5 条**） | `npm test` |
+| 单测 | 196 → **391**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条 + 趋势图几何 7 条 + **方法论对账 10 条** + 缺列护栏 4 条 + 中英对账 5 条 + **列识别 8 条** + **表格导入 14 条** + 工作簿合并 7 条 + **样本量规划 13 条**） | `npm test` |
 
 **顺手抓到的真 bug（在判定器里，不在回答里）**：接进自动评测后，规则模式的「还要跑几天」立刻冒出
 48 个「无法溯源的数字」（0.63 / 0.68 / 20）。查下来是 `audit.ts` 的**白名单只收 number、不收字符串**：
@@ -429,7 +457,7 @@ CUPED 的功劳是在区间已经诚实的前提下再收窄 7.24%。这两件�
 
 ## 技术栈
 
-Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）。**零图表库**：趋势图与森林图都是手写 SVG（趋势图原本用 Recharts，去掉后产物 JS 915KB → 573KB、gzip 286KB → 187KB）；统计自研带单测；无后端、无数据库。后续 Agent 走 DeepSeek 浏览器直连，部署 GitHub Pages。
+Vite 8 + React 19 + TypeScript + Tailwind CSS **v3**（不用 v4：其区间语法媒体查询在 Chrome<104 失效）。**唯一按需加载的依赖**：`read-excel-file`（读 .xlsx，67KB，只在拖入 Excel 时才下载，首屏 0 影响）；**零图表库**：趋势图与森林图都是手写 SVG（趋势图原本用 Recharts，去掉后产物 JS 915KB → 573KB、gzip 286KB → 187KB）；统计自研带单测；无后端、无数据库。后续 Agent 走 DeepSeek 浏览器直连，部署 GitHub Pages。
 
 ## 里程碑
 

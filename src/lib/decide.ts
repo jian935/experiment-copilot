@@ -535,13 +535,18 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   // 退回转化率口径，并把原因写进 metricFallback 让 UI 显式提示。
   const revenueOk = hasRevenue(rows);
   const wantContinuous = exp.metricType === 'continuous';
-  const metricKind: 'rate' | 'continuous' = wantContinuous && revenueOk ? 'continuous' : 'rate';
-  const metricFallback =
-    wantContinuous && !revenueOk
-      ? '该实验声明以 ARPU 为主指标，但数据中没有 revenue 字段，已退回转化率口径（结论仍然有效，只是主指标换了）'
-      : undefined;
-
+  // ARPU 是「总量/人数」的比值指标，方差要靠**多个独立格子**估（多天或多分层）。
+  // 只有一个格子（比如只有 1 天 × 2 臂）时 ratioTest 返回 null，此时绝不能拿转化率硬凑成 ARPU——
+  // 但也不能静默退回，否则读者会看到「主指标 ARPU」却读到一个 pp 的差值。
   const arpu = revenueOk ? ratioTest(ratioCellsOf(rows)) ?? undefined : undefined;
+  const metricKind: 'rate' | 'continuous' = wantContinuous && arpu ? 'continuous' : 'rate';
+  const metricFallback = !wantContinuous
+    ? undefined
+    : !revenueOk
+      ? '该实验声明以 ARPU 为主指标，但数据中没有 revenue 字段，已退回转化率口径（结论仍然有效，只是主指标换了）'
+      : !arpu
+        ? '该实验声明以 ARPU 为主指标，但每个臂的独立格子不足 2 个（只有 1 天且没有分层）——ARPU 的方差估不出来，已退回转化率口径。多导几天数据即可恢复'
+        : undefined;
   const arpuBreakdown = arpu ? breakdownOf(c, t) : undefined;
 
   // CUPED：只有明细行带前周期数据时才算（导入的真实数据常常没有，那就自动退回普通检验）。

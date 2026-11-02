@@ -221,6 +221,10 @@ async function runPersistScenario() {
     if (!filled || filled === 'no-textarea') throw new Error('找不到 textarea');
 
     await clickText('button', '载入并分析');
+    // 导入改成了两步：先给预检（列识别/丢弃行/推断），用户确认后才落库。
+    // 冒烟必须走完这两步，否则测的是「预检面板能不能显示」，而不是「数据进没进来」。
+    await waitText((t) => t.includes('进来的实验'), '预检面板');
+    await clickText('button', '确认导入');
     await waitText((t) => t.includes('导入 · 1 例'), '导入后芯片切换');
     await sleep(1300); // 等 dialog 自动关闭（存成功时 900ms 后关）
 
@@ -281,6 +285,8 @@ async function runMissingColumnScenario() {
     if (!expId || expId === 'no-textarea') throw new Error('找不到 textarea');
 
     await clickText('button', '载入并分析');
+    await waitText((t) => t.includes('进来的实验'), '预检面板');
+    await clickText('button', '确认导入');
     await waitText((t) => t.includes('导入 · 1 例'), '缺列数据导入完成');
     await sleep(1300);
 

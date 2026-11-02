@@ -27,7 +27,8 @@
     "loss": "tsx scripts/loss_report.ts",
     "method": "tsx scripts/method_numbers.ts",
     "shot": "node scripts/screenshot.mjs",
-    "audit:ui": "node scripts/audit_ui_controls.mjs"
+    "audit:ui": "node scripts/audit_ui_controls.mjs",
+    "e2e:import": "node scripts/e2e_import.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
@@ -47,6 +48,7 @@
     "lucide-react": "^1.66.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "read-excel-file": "^9.3.14",
     "tailwind-merge": "^3.7.0"
   }
 }
