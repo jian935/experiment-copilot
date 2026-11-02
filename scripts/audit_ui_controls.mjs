@@ -34,6 +34,8 @@ const ROUTES = [
   { hash: '#/plan', name: '实验设计', ready: '每组样本' },
   { hash: '#/eval', name: '评测看板', ready: '混淆矩阵' },
   { hash: '#/settings', name: '设置页', ready: '口径字典' },
+  // 巡检是这一版新加的整屏，导出 / 折叠 / 分组这些控件也得过一遍
+  { hash: '#/inspect', name: '巡检页', ready: '今天只看这几件' },
 ];
 
 /** 会改变全局状态、审一次就够的元素（避免把存档删掉、把设置重置掉影响后续判定） */

@@ -49,7 +49,22 @@ const ROUTES = [
   { hash: '#/settings', name: '设置 · 口径字典（可编辑 + 版本）', must: ['口径', '编辑口径', '回到出厂口径'] },
   // 云端页在没有后端时必须说清「本地模式」，而不是白屏或一个假的权限页
   { hash: '#/cloud', name: '云端（无后端 → 本地模式说明）', must: ['云端协作', '本地模式', 'npm run server'] },
+  // 巡检是跨实验的任务视图：必须自己给出「今天该看哪几个」，
+  // 而不是把 120 个实验按 ID 排一遍
+  { hash: '#/inspect', name: '巡检（跨实验任务视图）', must: ['实验巡检', '今天只看这几件', '疑似系统性问题', '这份报告怎么来的'] },
 ];
+
+// 先看页面拿不拿得到 HTTP 200，再去读 JS 报错。
+//
+// 为什么必须有这一步：preview 没起时每条路由都会干等到超时，输出是「N 条路由全白屏」——
+// 看着像刚写的代码崩了，其实是服务没起。这个坑踩过两次（第二次浪费了十几分钟去读
+// 根本没问题的代码），所以把它从「记得先看一眼」变成一句明确的报错。
+const preflight = await fetch(`${BASE}/`).then((r) => r.status).catch(() => 0);
+if (preflight !== 200) {
+  console.error(`\n✗ 拿不到 ${BASE}/ （HTTP ${preflight}）——不是页面坏了，是服务没起。`);
+  console.error('  先起服务再跑：npm run build && npx vite preview --port 4321\n');
+  process.exit(1);
+}
 
 const edge = spawn(
   EDGE,

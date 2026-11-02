@@ -19,7 +19,7 @@
     "forecast": "tsx scripts/forecast_report.ts",
     "eval": "tsx scripts/eval_report.ts",
     "eval:baseline": "tsx scripts/eval_report.ts --write",
-    "eval:check": "tsx scripts/eval_report.ts --check",
+    "eval:check": "tsx scripts/eval_report.ts --check && tsx scripts/task_eval.ts --check",
     "smoke": "node scripts/smoke_ui.mjs",
     "seq": "tsx scripts/sequential_report.ts",
     "novelty": "tsx scripts/novelty_report.ts",
@@ -31,7 +31,9 @@
     "audit:ui": "node scripts/audit_ui_controls.mjs",
     "e2e:import": "node scripts/e2e_import.mjs",
     "robust": "tsx scripts/robust_report.ts",
-    "server": "tsx server/index.ts"
+    "server": "tsx server/index.ts",
+    "inspect": "tsx scripts/inspect_report.ts",
+    "eval:tasks": "tsx scripts/task_eval.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

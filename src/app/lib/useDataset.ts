@@ -226,6 +226,8 @@ export function useHashRoute(): {
   isPlan: boolean;
   /** 云端（后端）页面：没有后端时这一页只说明「本地模式」 */
   isCloud: boolean;
+  /** 巡检页（跨实验的任务视图） */
+  isInspect: boolean;
   /** 对比视图的两个实验 id（可为 null：还没选） */
   compareA: string | null;
   compareB: string | null;
@@ -254,6 +256,7 @@ export function useHashRoute(): {
     isCompare: /^#\/compare/.test(hash),
     isPlan: /^#\/plan/.test(hash),
     isCloud: /^#\/cloud/.test(hash),
+    isInspect: /^#\/inspect/.test(hash),
     compareA: /^#\/compare/.test(hash) ? route.a : null,
     compareB: /^#\/compare/.test(hash) ? route.b : null,
     go: (h) => {

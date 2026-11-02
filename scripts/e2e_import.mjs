@@ -33,6 +33,15 @@ if (!existsSync(XLSX)) {
 }
 if (!existsSync(SHOTS)) mkdirSync(SHOTS, { recursive: true });
 
+// 与 smoke_ui 同一个坑：preview 没起时这里不会报错，只会「等不到内置 · 120 例」，
+// 看上去像是导入逻辑坏了。先花 0.1 秒确认页面拿得到，省掉十几分钟的误判。
+const preflight = await fetch(`${BASE}/`).then((r) => r.status).catch(() => 0);
+if (preflight !== 200) {
+  console.error(`\n✗ 拿不到 ${BASE}/ （HTTP ${preflight}）——不是导入坏了，是服务没起。`);
+  console.error('  先起服务再跑：npm run build && npx vite preview --port 4321\n');
+  process.exit(2);
+}
+
 const edge = spawn(
   EDGE,
   [

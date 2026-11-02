@@ -60,6 +60,7 @@ The value is not the model. The value is that the number can be recomputed and t
 | Editable metric dictionary | Direction / unit / formula / note are editable; labels are not (experiments store the Chinese label as `primaryMetric`). You can add **custom ratio metrics** (`Σnumerator / Σdenominator`, expression language restricted to arithmetic plus a field whitelist). Every save creates a new version with an auto-generated human-readable summary; history is read-only and rolling back creates yet another version |
 | Optional backend (zero dependencies) | `npm run server`: scrypt passwords + httpOnly session cookie, RBAC (viewer/analyst/admin), an approval flow for decisions (you cannot approve your own, rejecting requires a reason), an append-only audit log, API tokens (plaintext shown once, only sha256 stored) and scheduled re-scans that alert when a verdict changes. Storage is atomic single-file JSON + JSONL audit — a backend that cannot install or compile is not a backend. Without it the frontend silently falls back to local mode and **never renders a fake permission page** |
 | Robustness (winsorization) | A five-tier trim sweep with a sensitivity curve, revenue concentration, and single-row leverage (delete which row changes the verdict?). The panel states that **the trimmed p is not a significance conclusion**, with the simulation behind that statement | [`29-稳健性-去极值.png`](docs/screenshots/29-稳健性-去极值.png) |
+| **Inspection** (cross-experiment task) | Scans every experiment and answers **"which need me today, and what to do with each"**: four counts (must handle / this week / awaiting your call / no action), a first screen keeping **one representative per root cause**, and an explicit next action per item (fix traffic / do not ship / ship to a segment / collect more / design too weak / not worth it) with evidence ids. Same data always produces the same report — no model, no wall clock | [`30-巡检-第一屏.png`](docs/screenshots/30-巡检-第一屏.png) |
 | Experiment comparison | Tick two rows → same unit shares **one** x-axis (line length = uncertainty); different units (pp vs currency) are refused and stacked instead; 15 side-by-side rows | [`14-实验对比.png`](docs/screenshots/14-实验对比.png) · [`15-对比-不能同轴.png`](docs/screenshots/15-对比-不能同轴.png) · [`16-列表勾选对比.png`](docs/screenshots/16-列表勾选对比.png) |
 | Command palette ⌘K | One panel over everything: experiments (id / name / hypothesis / **rule names**), metric names, and app actions; multi-word is AND, an exact id always ranks first, ↑↓ + ↵ works end to end | [`17-全局搜索.png`](docs/screenshots/17-全局搜索.png) · [`18-全局搜索-功能分组.png`](docs/screenshots/18-全局搜索-功能分组.png) |
 | Theme | Light / dark / follow-system, one button to cycle; **every colour is a CSS variable**, so SVG charts switch together with the cards — never "dark cards, light charts" | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
@@ -84,7 +85,7 @@ npm run dev        # local dev (regenerates data first)
 npm run build      # dist/ (tsc --noEmit + vite build)
 npm run preview    # preview the build
 
-npm test           # 547 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
+npm test           # 575 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
                    #   import parsing / A-A calibration / metric dictionary / configurable thresholds / CUPED /
                    #   sequential / novelty / multiplicity / A-B-n multi-arm / winsorized robustness / expected loss / comparison /
                    #   forest scaling / ⌘K /
@@ -104,6 +105,8 @@ npm run fwer       # multiplicity: FWER simulation + Holm/BH on the 120 experime
 npm run multiarm   # A/B/n: all-null naive vs Dunnett false-positive rate, winner-pick rate, P(best) calibration
 npm run robust     # winsorization: raw vs trimmed bias/MSE/CI coverage under heavy tails, and what granularity does to it
 npm run server     # optional zero-dependency backend: auth/RBAC/approvals/audit/API/alerts, also serves dist/
+npm run inspect    # inspection: scans every experiment and answers "which need me today, and what to do"
+npm run eval:tasks # task-level evaluation: 15 tasks + alignment / invented directions / coverage / fidelity
 npm run loss       # expected loss: gates + net value vs the frequentist rule, on realised truth
 npm run forecast   # "how many more days" across the 120 experiments
 npm run method     # every number quoted in the methodology doc
@@ -185,7 +188,7 @@ src/app/                UI: Vite + React 19 + TS + Tailwind v3
   components/CompareScreen.tsx  Two experiments on one shared axis, or a refusal
   components/CommandPalette.tsx ⌘K palette (keyboard-only path works end to end)
 scripts/                Generation / calibration / data export / screen recording / video / portfolio build
-tests/                  547 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
+tests/                  575 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
                         simulations + metric dictionary/configurability/multi-turn + heterogeneity F1/baseline self-test)
 eval/baseline.json      Regression baseline: 86 metrics + a data fingerprint
 data/                   120 experiments / 6,720 rows
@@ -218,9 +221,9 @@ right-hand column of `docs/EVAL.md`.
 | Interval choice | Newcombe instead of Wald: at a 0.12% baseline with n=30 both cover 100%, but the widths are **0.906pp vs 22.869pp** |
 | Chart scaling bug | The forest plot's pp axis drew **341 grid lines** (step computed in percentage points, start in percent). Fixed, and locked by 6 tests |
 | Comparability | 120 experiments × all pairs = **7140 pairs**, asserting "shared axis ⟺ same unit" — not a sample |
-| Unit tests | **547** across 42 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
+| Unit tests | **575** across 43 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
 | Regression baseline | **86 metrics** + data fingerprint in `eval/baseline.json`; `npm run eval:check` exits 1 on any drift |
-| Bundle | **742KB** JS / 241KB gzip, zero chart libraries, zero backend |
+| Bundle | **775KB** JS / 252KB gzip, zero chart libraries, zero backend |
 
 ## Why these methods (every choice comes with its cost)
 
@@ -257,7 +260,33 @@ float (`0.02099419631592228`) straight out of a tool result. Fixed on both sides
 Two of the six runs did **not** come out clean, and they are documented in `docs/ABLATION-NOTES.md` rather than
 re-run until they looked good: one wrote `4.2e-13` as `1e-13`, one computed `0.26` that the engine never produced.
 
-## What broke along the way (seven that mattered)
+### M17 — Inspection: from "Q&A" to "a task"
+
+The question this round was not "add another statistic", it was: **is this an analyzer or an agent?**
+
+There is exactly one test: **did the human move from operator to the person giving instructions.**
+Before, you had to ask step by step — "is the primary significant? what about guardrails? and segments?" —
+which is a search box that answers more precisely. Inspection is "go through this week's experiments for me",
+and it decides what to look at, how to rank it, and what page to write.
+
+| Layer | What it does | The decision that mattered |
+|---|---|---|
+| Orchestration | `src/lib/tasks/inspection.ts`: seven deterministic steps — anchor date → read cached verdicts → data usability → bad news → "can't detect" vs "no effect" → rank & limit → next action + citations | **Not letting the model loop**: the existing tool loop caps at 3 rounds, which cannot cover 120 experiments; worse, the same data would produce two different reports |
+| Scoring | 11 signals, and the weight table *is* the rule (broken split 100 / guardrail 70 / negative 65 / no data 55 / heterogeneous 35 / fragile 30 / stale 25 / peeking 20 / underpowered 14 / positive 10 / no effect 0) | Ranking is by **cost of not handling it**, not effect size: a broken-split experiment is first because its numbers are unusable, not because the effect is large |
+| Three power verdicts | "design too weak" (MDE > 2.5× the business threshold) / "underpowered but fixable" / "confidently no effect" | All 49 inconclusive experiments here are **design too weak**: the median detectable relative effect is **14.2%** against a 3% threshold — detecting it needs **22×** the sample. **"Collect more data" would not be advice, it would be giving up** |
+| First screen | One representative per root cause; the rest is summarised as a systemic problem | The first version took the top 5 critical items and produced five identical "broken split" rows — that is not five things, it is one thing listed five times |
+| Task evaluation | `src/lib/tasks/eval.ts` + `eval/task_baseline.json` (38 baseline values): 15 tasks across 5 groups (orchestration / explanation / abstention / ground truth / fidelity) | Metrics must **separate whose fault it is** (below) |
+
+**"Completion rate" is a fake metric, so it is not reported.** A deterministic orchestrator that runs once is at 100% forever. What is reported instead:
+
+| Metric | Value | Denominator | Note |
+|---|---|---|---|
+| Next-action vs verdict alignment | 100% | **120 experiments** | Compares "what the engine concluded" with "what inspection recommends". A **regression lock, not a capability proof** |
+| Directions invented on inconclusive verdicts | **0** | all inconclusive experiments | Inspection may not invent a direction |
+| Evidence coverage | 100% | all weighted signals | Every conclusion traces back to the engine |
+| Engine false positives on null experiments | **10%** | 40 injected-null experiments | **This is the engine's metric, not inspection's**: inspection faithfully relayed the engine's error |
+
+## What broke along the way (nine that mattered)
 
 Every one of these was found by measurement or by looking at the rendered screen — not by reading the code again.
 
@@ -270,13 +299,15 @@ Every one of these was found by measurement or by looking at the rendered screen
 | A dataset missing `refunds` printed "0.00% → 0.00%, not worse" | Writing the FAQ — the claim "missing columns are never fabricated" was false | Filling 0 turns "no data" into "checked, fine". Now it reads "unavailable (column missing)" / "not applicable" / "not evaluated" and is excluded from the decision |
 | Trimming 1% clipped **exactly zero rows** yet reported "conclusion stable" | The first run on real ARPU data: `clippedHigh` was 0 in every tier | The quantile was weighted by exposures while a single row already held 1.8% of traffic, so the boundary always landed *inside* that row. The "robustness check" had checked nothing and declared a pass — **worse than not running it**. Switching to one vote per row also matches `ratioTest`'s own sampling model |
 | Simulation showed detection jumping **3.67% → 68.67%** after trimming; it almost went into the README as a win | Looking at the same tier's interval coverage: **20.67%** | What jumped was detection of a *different hypothesis*. Trimming changes the estimand, not the precision. Quoting only the flattering number is self-confirmation — so all four numbers are now reported side by side |
+| The first screen showed five identical "broken split" rows | One 1440px screenshot | The first version took the top 5 critical items. That is not five things to do, it is one thing listed five times — and the first screen is the only part that is guaranteed to be read. **Deduplicate by cause, not by count** |
+| The report printed "significantly negative: 0.00pp (p=0.042)" | A 0.62pp negative experiment was rendered as 0.00pp | `fmtMagnitude` divided by 100 twice. What is worth remembering is that it survived to the screenshot: **0.00pp next to "significant" is a logical contradiction, and I saw the layout before I saw the contradiction** |
 
 ## The bar
 
 This is not a demo that renders three charts. The acceptance criteria are the ones a flagship tool would be held to:
 
 - **Every number is reversible**: expand to formula → sample size → data version → recompute and diff.
-- **Every claim is falsifiable**: 547 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
+- **Every claim is falsifiable**: 575 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
   and an automatic eval that fails the build when a metric drifts.
 - **Every method states its cost**, including the cases where our own choice is worse than the textbook one.
 - **No silent fallbacks**: missing columns, missing ground truth, an unavailable model, an exhausted storage quota —
@@ -286,7 +317,7 @@ This is not a demo that renders three charts. The acceptance criteria are the on
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3** (not v4: its range-syntax media queries break on Chrome < 104).
 **Zero chart libraries** — the forest plot and the daily trend are hand-written SVG (the trend used to be Recharts;
-removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 742KB / 241KB gzip). Statistics are in-house with tests. **No backend by default** (Pages serves the static build);
+removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 775KB / 252KB gzip). Statistics are in-house with tests. **No backend by default** (Pages serves the static build);
 there is an optional zero-dependency backend for roles/approvals/audit/API/alerts. The Agent talks to DeepSeek directly from the browser, and the site deploys as static files.
 
 ## Milestones
@@ -299,6 +330,7 @@ M12 sequential & advanced (sequential / novelty / multiplicity / expected loss) 
 **M14 A/B/n multi-arm (Dunnett / P(best) / multi-arm planning / multi-arm import) ✅** →
 **M15 winsorized robustness (trim sweep / revenue concentration / single-row leverage) ✅** →
 **M16 dimension slicing, editable metric dictionary, optional backend (RBAC / approvals / audit / API / alerts) ✅** →
+**M17 inspection task + task-level evaluation (deterministic orchestration / risk scoring / first-screen dedup / 15-task baseline) ✅** →
 G2 Pages deploy (deliberately last).
 
 Acceptance criteria live in the blueprint (§13); the extension list and measurements live in

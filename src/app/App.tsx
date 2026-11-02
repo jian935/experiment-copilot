@@ -1,5 +1,5 @@
 import { Activity, Code2, Loader2, Moon, Search, Settings2, Sun, TriangleAlert, Upload } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useDataset, useHashRoute } from './lib/useDataset';
 import { useSettings } from './lib/settings';
 import { useTheme, THEME_LABEL, type ThemeChoice } from './lib/theme';
@@ -14,6 +14,7 @@ import { PlanScreen } from './components/PlanScreen';
 import { useDecisions } from './lib/useDecisions';
 import { useMetricDict } from './lib/useMetricDict';
 import { CloudScreen } from './components/CloudScreen';
+import { InspectionScreen } from './components/InspectionScreen';
 import { CommandPalette } from './components/CommandPalette';
 import { buildDocs, type SearchDoc } from '../lib/search.ts';
 import { Button } from './components/ui';
@@ -29,6 +30,42 @@ function themeCycle(choice: ThemeChoice, isDark: boolean): ThemeChoice {
   return choice === 'dark' ? 'light' : 'dark';
 }
 
+/**
+ * 顶栏导航项。抽出来是为了两件事都不再漂移：
+ *
+ * ① 激活态用 `aria-current` 声明，而不是让外部去猜「文案是不是当前页」。
+ *    控件审计原来靠一份文案白名单判断「点自己不该有变化」，加「巡检」这一屏时
+ *    白名单没跟着加，于是天天报一个假问题。现在语义写在元素上，加屏不会漏。
+ *    顺带这也是真的可访问性改进：读屏软件现在能读出当前在哪一屏。
+ * ② 激活/非激活的两套 className 只写一处，六个入口不会各自跑偏。
+ */
+function NavButton({
+  active,
+  onClick,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      title={title}
+      className={
+        active
+          ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
+          : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function App() {
   const { settings, patchConfig, patchLlm, reset } = useSettings();
   const { choice: themeChoice, set: setTheme, dark, systemDark } = useTheme();
@@ -38,7 +75,7 @@ export default function App() {
   // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
   const { data, error, source, meta, storedMeta, importData, useBuiltin, useImported, forgetImport } =
     useDataset(settings.config, dict.snapshot.custom);
-  const { expId, ev, isEval, isSettings, isCompare, isPlan, isCloud, compareA, compareB, go } = useHashRoute();
+  const { expId, ev, isEval, isSettings, isCompare, isPlan, isCloud, isInspect, compareA, compareB, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -174,57 +211,35 @@ export default function App() {
           </button>
 
           <div className="ml-1 flex items-center gap-0.5 sm:ml-3 sm:gap-1">
-            <button
+            <NavButton
+              active={!(expId || isEval || isPlan || isInspect || isCloud || isSettings || isCompare)}
               onClick={() => go('#/')}
-              className={
-                expId || isEval || isPlan
-                  ? 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
-                  : 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
-              }
             >
               实验列表
-            </button>
-            <button
-              onClick={() => go('#/plan')}
-              className={
-                isPlan
-                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
-                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
-              }
-            >
+            </NavButton>
+            <NavButton active={isPlan} onClick={() => go('#/plan')}>
               实验设计
-            </button>
-            <button
-              onClick={() => go('#/eval')}
-              className={
-                isEval
-                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
-                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
-              }
+            </NavButton>
+            <NavButton
+              active={isInspect}
+              onClick={() => go('#/inspect')}
+              title="巡检：一次扫完全部实验，告诉你今天该看哪几个、每个该做什么"
             >
+              巡检
+            </NavButton>
+            <NavButton active={isEval} onClick={() => go('#/eval')}>
               评测看板
-            </button>
-            <button
+            </NavButton>
+            <NavButton
+              active={isCloud}
               onClick={() => go('#/cloud')}
-              className={
-                isCloud
-                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
-                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
-              }
               title="云端协作：权限 / 审批 / 审计 / API / 定时告警（需要另起后端；不起也不影响本地分析）"
             >
               云端
-            </button>
-            <button
-              onClick={() => go('#/settings')}
-              className={
-                isSettings
-                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
-                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
-              }
-            >
-              口径字典 / 设置
-            </button>
+            </NavButton>
+            <NavButton active={isSettings} onClick={() => go('#/settings')}>
+              设置
+            </NavButton>
           </div>
 
           <div className="ml-auto flex items-center gap-2">
@@ -260,17 +275,6 @@ export default function App() {
               className="rounded-lg border border-line p-1.5 text-muted transition-colors hover:border-line2 hover:text-ink"
             >
               {dark ? <Moon size={14} /> : <Sun size={14} />}
-            </button>
-            <button
-              onClick={() => go('#/cloud')}
-              className={
-                isCloud
-                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
-                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
-              }
-              title="云端协作：权限 / 审批 / 审计 / API / 定时告警（需要另起后端；不起也不影响本地分析）"
-            >
-              云端
             </button>
             <button
               onClick={() => go('#/settings')}
@@ -347,6 +351,14 @@ export default function App() {
 
         {isCloud && <CloudScreen dataset={data?.dataset ?? null} onBack={() => go('#/')} />}
 
+        {data && isInspect && (
+          <InspectionScreen
+            dataset={data.dataset}
+            analyses={data.analyses}
+            onOpen={(id) => go(`#/e/${id}`)}
+          />
+        )}
+
         {data && isPlan && (
           <PlanScreen
             dataset={data.dataset}
@@ -367,7 +379,7 @@ export default function App() {
           />
         )}
 
-        {data && !expId && !isEval && !isSettings && !isCompare && !isPlan && !isCloud && (
+        {data && !expId && !isEval && !isSettings && !isCompare && !isPlan && !isCloud && !isInspect && (
           <ExperimentList
             dataset={data.dataset}
             analyses={data.analyses}
@@ -380,7 +392,7 @@ export default function App() {
           />
         )}
 
-        {data && expId && !isEval && !isSettings && !isCompare && !isPlan && !isCloud && (() => {
+        {data && expId && !isEval && !isSettings && !isCompare && !isPlan && !isCloud && !isInspect && (() => {
           const exp = data.dataset.experiments.find((e) => e.id === expId);
           const analysis = data.analyses.get(expId);
           if (!exp || !analysis) {
