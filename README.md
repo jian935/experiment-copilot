@@ -1,6 +1,6 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M17 巡检任务 + 任务级评测** ｜ 2026-11-02 ｜ 剩余：GitHub Pages 部署（用户要求最后做）
+> 状态：**M17 巡检任务 + 任务级评测** ｜ 2026-11-03 ｜ 剩余：推送 + GitHub Pages 部署（部署工作流已就绪，等网络）
 > 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ 实测记录：[`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md) ｜ **为什么是这个口径：[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)** ｜ 会被问到的问题：[`docs/FAQ.md`](docs/FAQ.md) ｜ English：[`README.en.md`](README.en.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。
@@ -602,5 +602,6 @@ M8 统计深度 ✅ → M9 产品完整度 ✅ → M10 旗舰差异化（A1 CUPE
 **M14 A/B/n 多臂（Dunnett / P(best) / 多臂规划 / 多臂导入）✅** →
 **M15 去极值（截尾扫描 / 收入集中度 / 单点杠杆）✅** →
 **M16 维度切片 + 可编辑口径字典 + 可选后端（权限/审批/审计/API/告警）✅** →
-**M17 巡检任务 + 任务级评测（确定性编排 / 风险打分 / 第一屏去重 / 15 任务基线）✅** → G2 Pages（用户推迟到最后，等网络）。
+**M17 巡检任务 + 任务级评测（确定性编排 / 风险打分 / 第一屏去重 / 15 任务基线）✅** →
+G2 Pages（部署工作流已挂在 CI 之后——**CI 红了就不部署**；待推送后开启）。
 验收标准见蓝图 §13；扩展清单与实测记录见 [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md)。

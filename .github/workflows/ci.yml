@@ -17,6 +17,12 @@ on:
   pull_request:
   workflow_dispatch:
 
+# 部署 Pages 需要这两个权限；显式写 permissions 会覆盖默认值，所以 contents 也要写回来。
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -67,3 +73,35 @@ jobs:
             data/aa_report.json
             eval/baseline.json
           if-no-files-found: ignore
+
+  # Pages 部署放在 CI 之后而不是单独一个 workflow，理由就一条：
+  # CI 红了就不许上线。单独跑的话，一个把准确率改坏、或者基线对不上的提交
+  # 照样会被部署出去——而这套东西对外说的就是「可证伪」。
+  # 只在 main 上部署（PR 只验证不发布）。
+  deploy:
+    name: deploy to Pages
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 构建（base './' + hash 路由，子路径 /experiment-copilot/ 直接可开）
+        run: npm ci && npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
