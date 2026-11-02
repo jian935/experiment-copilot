@@ -53,6 +53,8 @@
 | 全局校正 | 列表页「全局校正」开关：naive 68 → Holm 53（收回 15 条），每行标「Holm 后不显著」与校正后 p | [`11-列表页-全局校正.png`](docs/screenshots/11-列表页-全局校正.png) |
 | 期望损失 | 四个格子 + 净价值曲线（等价点与点估计同图标出）+ k / MMP 两个滑杆；门禁否决变红、异质只给琥珀建议 | [`12-详情页-期望损失.png`](docs/screenshots/12-详情页-期望损失.png) |
 | 导入持久化 | 顶栏「数据源」芯片：导入的那份存在本机（IndexedDB），刷新不丢；可在内置 / 导入之间来回切，也能删存档 | [`13-导入持久化.png`](docs/screenshots/13-导入持久化.png) |
+| 实验设计（事前） | 开实验前回答两件事：**要多少样本、按你的流量跑几天**；反过来「只能跑 14 天」能测出多大提升。按双侧计算、二分反解自己的功效函数（不套近似公式），并给出「加第三个臂」的代价 | [`26-实验设计.png`](docs/screenshots/26-实验设计.png) |
+| 决策记录（事后） | 引擎给建议、人做决定。**与引擎不一致时理由必填**，并冻结当时的差值/p/样本量与引擎结论——三个月后有人问「凭什么上」，能翻出当时的依据而不是记忆 | [`27-决策记录.png`](docs/screenshots/27-决策记录.png) |
 | 实验对比 | 列表页勾两个 → 同单位的共用**一条**横轴（线长 = 不确定性），单位不同（pp vs 元）就拒绝同轴、竖排各给一条；逐项对照 15 项 | [`14-实验对比.png`](docs/screenshots/14-实验对比.png) · [`15-对比-不能同轴.png`](docs/screenshots/15-对比-不能同轴.png) · [`16-列表勾选对比.png`](docs/screenshots/16-列表勾选对比.png) |
 | 全局搜索 ⌘K | 一张面板搜全部：实验（编号 / 名称 / 假设 / **规则名**）、功能动作；多词是 AND，编号精确匹配必排第一，↑↓ + ↵ 全程键盘可达 | [`17-全局搜索.png`](docs/screenshots/17-全局搜索.png) · [`18-全局搜索-功能分组.png`](docs/screenshots/18-全局搜索-功能分组.png) |
 | 主题切换 | 浅 / 深 / 跟随系统，顶栏一键循环；**全部颜色走 CSS 变量**，所以 SVG 图表与卡片一起换，不会出现「卡片黑了图表还是浅的」 | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
@@ -75,13 +77,14 @@ npm run dev        # 本地开发（自动先跑 npm run data）
 npm run build      # 生成 dist/（含 tsc --noEmit + vite build）
 npm run preview    # 预览构建产物
 
-npm test           # 391 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / 列识别 / 工作簿合并 / 样本量规划 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 方法论对账 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
+npm test           # 402 个单测（统计 / 决策 / 证据推导 / 导出卡片 / Agent / 工具循环 / 评测口径 / 导入解析 / 列识别 / 工作簿合并 / 样本量规划 / 决策记录 / A-A 自校准 / 口径字典 / 阈值可配 / CUPED / 序贯检验 / 新颖效应 / 多重比较 / 期望损失 / 实验对比 / 森林图定标 / 全局搜索 / 方法论对账 / 还要跑几天 / 多轮上下文 / 连续指标 ARPU / 分层 F1 / 基线比对）
 npm run eval       # 评测报告：分层 F1 + 2200 条 Agent 问答的幻觉数字率（写 data/agent_eval.json 给看板）
 npm run eval:check # 与 eval/baseline.json 逐指标比对，任何漂移 exit 1（CI 用的就是它）
 npm run ablation   # 规则 vs 大模型对比，输出 docs/ABLATION.md
                    # Key 读 DEEPSEEK_API_KEY，或放在 .local/deepseek.key（已 gitignore）
 npm run audit:ui   # 全量交互审查：逐个点 8 个屏上的 162 个控件，找「点了没反应 / 被遮挡 / 禁用没说」
 npm run e2e:import # 导入端到端：把 data/ 里那份真实 .xlsx 拖进浏览器，验 6 个实验/336 行/名称与真值合并
+npm run method     # 方法论长文里的每个数字：覆盖率 / 多重比较 / 正态近似误差 / 护栏口径
 npm run smoke      # UI 冒烟（需先 npm run build && npx vite preview --port 4321）
                    # 真浏览器逐屏点：白屏 / undefined / NaN / 未捕获异常都会被抓出来
 node scripts/record_demo.mjs && python scripts/build_demo_video.py   # 重录演示视频
@@ -213,7 +216,7 @@ scripts/                生成 / 校准 / 导出前端数据 / 录屏 / 视频 /
   record_demo.mjs         真实操作录屏（CDP screencast + 帧时间戳）
   build_demo_video.py     旁白视频合成（edge-tts + 按时间戳重采样 + ASS 字幕）
   build_portfolio.py      单文件作品集页（视频/截图内联）
-tests/                  391 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
+tests/                  402 个单测（含 6 组 scipy 对齐 + 覆盖率/Bootstrap/非劣/A-A/CUPED/天数预测 模拟
                         + 口径字典/阈值可配/多轮上下文 + 分层 F1/基线比对器自测）
 eval/baseline.json      回归基线：86 个指标 + 数据指纹（npm run eval -- --write 更新）
 data/                   120 个实验 / 6,720 行；另有 6 个手工核对过的 seed（xlsx）
@@ -380,7 +383,7 @@ CUPED 的功劳是在区间已经诚实的前提下再收窄 7.24%。这两件�
 | 接进统一口径 | `evaluate(ds, analyses, { agent })` 一个出口；看板 fetch `data/agent_eval.json`，设置页改过阈值时显式提示「这份评测已过期，重跑 npm run eval」 | `src/lib/agentEval.ts` |
 | 回归基线 | `eval/baseline.json` 86 个指标 + 数据指纹；`npm run eval:check` 漂移即 `exit 1`，并打印 `✗ accuracy 93.33% → 91.67%（-1.67pp）` 这种可直接定位的一行 | `npm run eval:check` |
 | CI | typecheck → test → 基线比对 → **重建数据后再比对**（证明同代码出同数据）→ A/A 200 次冒烟（`--dry`，不覆盖 2000 次的正式报告） | `.github/workflows/ci.yml` |
-| 单测 | 196 → **391**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条 + 趋势图几何 7 条 + **方法论对账 10 条** + 缺列护栏 4 条 + 中英对账 5 条 + **列识别 8 条** + **表格导入 14 条** + 工作簿合并 7 条 + **样本量规划 13 条**） | `npm test` |
+| 单测 | 196 → **402**（`agentEval` 9 条 + `evalBaseline` 10 条 + F1/校准 9 条 + 序贯 17 条 + 新颖效应 14 条 + 多重比较 8 条 + 期望损失 14 条 + 导入持久化 9 条 + 实验对比 8 条 + 森林图定标 6 条 + 全局搜索 15 条 + 主题对账 8 条 + 趋势图几何 7 条 + **方法论对账 10 条** + 缺列护栏 4 条 + 中英对账 5 条 + **列识别 8 条** + **表格导入 14 条** + 工作簿合并 7 条 + 样本量规划 13 条 + **决策记录 11 条**） | `npm test` |
 
 **顺手抓到的真 bug（在判定器里，不在回答里）**：接进自动评测后，规则模式的「还要跑几天」立刻冒出
 48 个「无法溯源的数字」（0.63 / 0.68 / 20）。查下来是 `audit.ts` 的**白名单只收 number、不收字符串**：

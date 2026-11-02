@@ -10,6 +10,8 @@ import { ImportDialog } from './components/ImportDialog';
 import { DataSourceChip } from './components/DataSourceChip';
 import { CompareScreen, compareHref } from './components/CompareScreen';
 import { SettingsScreen } from './components/SettingsScreen';
+import { PlanScreen } from './components/PlanScreen';
+import { useDecisions } from './lib/useDecisions';
 import { CommandPalette } from './components/CommandPalette';
 import { buildDocs, type SearchDoc } from '../lib/search.ts';
 import { Button } from './components/ui';
@@ -28,10 +30,11 @@ function themeCycle(choice: ThemeChoice, isDark: boolean): ThemeChoice {
 export default function App() {
   const { settings, patchConfig, patchLlm, reset } = useSettings();
   const { choice: themeChoice, set: setTheme, dark, systemDark } = useTheme();
+  const dec = useDecisions();
   // 口径变了要立刻重算：analyze 接受 Partial<DecisionConfig>，改 α / margin 后结论随之变化
   const { data, error, source, meta, storedMeta, importData, useBuiltin, useImported, forgetImport } =
     useDataset(settings.config);
-  const { expId, ev, isEval, isSettings, isCompare, compareA, compareB, go } = useHashRoute();
+  const { expId, ev, isEval, isSettings, isCompare, isPlan, compareA, compareB, go } = useHashRoute();
   const [importOpen, setImportOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -66,6 +69,15 @@ export default function App() {
         title: '回到实验列表',
         subtitle: '全部 120 个实验，可再筛选',
         extra: '实验列表 全部 清选 排序',
+        group: '功能',
+      },
+      {
+        kind: 'action',
+        id: 'act:plan',
+        target: '#/plan',
+        title: '实验设计 / 样本量',
+        subtitle: '要跑几天、能测出多大的提升',
+        extra: '设计 实验设计 样本量 样本 功效 power 天数 多久 要跑 MDE 流量 规划',
         group: '功能',
       },
       {
@@ -161,12 +173,22 @@ export default function App() {
             <button
               onClick={() => go('#/')}
               className={
-                expId || isEval
+                expId || isEval || isPlan
                   ? 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
                   : 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
               }
             >
               实验列表
+            </button>
+            <button
+              onClick={() => go('#/plan')}
+              className={
+                isPlan
+                  ? 'whitespace-nowrap rounded-lg bg-panel2 px-2 py-1.5 text-[11.5px] text-ink sm:px-2.5 sm:text-xs'
+                  : 'whitespace-nowrap rounded-lg px-2 py-1.5 text-[11.5px] text-muted transition-colors hover:bg-panel2 hover:text-ink sm:px-2.5 sm:text-xs'
+              }
+            >
+              实验设计
             </button>
             <button
               onClick={() => go('#/eval')}
@@ -296,6 +318,14 @@ export default function App() {
           />
         )}
 
+        {data && isPlan && (
+          <PlanScreen
+            dataset={data.dataset}
+            analyses={data.analyses}
+            onOpen={(id) => go(`#/e/${id}`)}
+          />
+        )}
+
         {data && isCompare && (
           <CompareScreen
             dataset={data.dataset}
@@ -308,19 +338,20 @@ export default function App() {
           />
         )}
 
-        {data && !expId && !isEval && !isSettings && !isCompare && (
+        {data && !expId && !isEval && !isSettings && !isCompare && !isPlan && (
           <ExperimentList
             dataset={data.dataset}
             analyses={data.analyses}
             onOpen={(id) => go(`#/e/${id}`)}
             onCompare={(a, b) => go(compareHref(a, b))}
+            decisions={dec.map}
             seedNote={
               data.dataset.groundTruth === false ? '导入数据（无已知真值）' : `seed ${data.dataset.seedBase}`
             }
           />
         )}
 
-        {data && expId && !isEval && !isSettings && !isCompare && (() => {
+        {data && expId && !isEval && !isSettings && !isCompare && !isPlan && (() => {
           const exp = data.dataset.experiments.find((e) => e.id === expId);
           const analysis = data.analyses.get(expId);
           if (!exp || !analysis) {
@@ -343,6 +374,9 @@ export default function App() {
               analyses={data.analyses}
               initialEv={ev}
               onBack={() => go('#/')}
+              decision={dec.map[expId]}
+              onDecide={dec.put}
+              onUndecide={dec.remove}
               onCompare={(id) => go(compareHref(id))}
             />
           );

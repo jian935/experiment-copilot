@@ -45,6 +45,8 @@ import type { AgentCtx } from '../../lib/agent/types.ts';
 import type { Analysis as AnalysisT } from '../../lib/decide.ts';
 import { C } from '../lib/palette';
 import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
+import { DecisionCard } from './DecisionCard';
+import type { DecisionRecord } from '../lib/decisions';
 
 type Tab = 'segments' | 'guardrails' | 'calc';
 
@@ -57,6 +59,9 @@ export function ExperimentDetail({
   initialEv,
   onBack,
   onCompare,
+  decision,
+  onDecide,
+  onUndecide,
 }: {
   exp: Experiment;
   analysis: Analysis;
@@ -66,6 +71,10 @@ export function ExperimentDetail({
   initialEv?: string | null;
   onBack: () => void;
   onCompare: (a: string) => void;
+  /** 人做的决定（与引擎结论无关，可以不同） */
+  decision?: DecisionRecord;
+  onDecide: (rec: DecisionRecord) => void;
+  onUndecide: (expId: string) => void;
 }) {
   const [drawer, setDrawer] = useState(!!initialEv);
   const [focusEv, setFocusEv] = useState<string | null>(initialEv ?? null);
@@ -301,6 +310,14 @@ export function ExperimentDetail({
           />
         </div>
       </Panel>
+
+      <DecisionCard
+        expId={exp.id}
+        analysis={analysis}
+        record={decision}
+        onSave={onDecide}
+        onRemove={onUndecide}
+      />
 
       {/* 贝叶斯视角 */}
       <Panel className="mt-4">

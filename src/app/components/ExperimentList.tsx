@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { HUMAN_LABEL, type DecisionRecord } from '../lib/decisions';
 import { ArrowLeftRight, ArrowRight, Check, Link2, Search, X } from 'lucide-react';
 import type { Analysis } from '../../lib/decide.ts';
 import type { Dataset, Experiment } from '../../lib/types.ts';
@@ -45,6 +46,7 @@ export function ExperimentList({
   onOpen,
   onCompare,
   seedNote,
+  decisions,
 }: {
   dataset: Dataset;
   analyses: Map<string, Analysis>;
@@ -52,6 +54,8 @@ export function ExperimentList({
   /** 进对比视图；只传一个 id 时进的是「选对手」状态 */
   onCompare: (a: string, b?: string) => void;
   seedNote: string;
+  /** 已记录的人工决定（与引擎结论无关） */
+  decisions: Record<string, DecisionRecord>;
 }) {
   const initial = useMemo(() => readFilters(), []);
   const [q, setQ] = useState(initial.q ?? '');
@@ -297,6 +301,14 @@ export function ExperimentList({
                       <div className="flex items-baseline gap-2">
                         <span className="font-mono text-[11px] text-dim">{e.id}</span>
                         <span className="truncate text-[13px] font-medium text-ink">{e.name}</span>
+                        {decisions[e.id] && (
+                          <span
+                            className="shrink-0 rounded bg-brand/15 px-1 py-0.5 text-[9px] text-brand2"
+                            title={`已记录决定：${HUMAN_LABEL[decisions[e.id].decision]}${decisions[e.id].note ? ` · ${decisions[e.id].note}` : ''}`}
+                          >
+                            已决策
+                          </span>
+                        )}
                       </div>
                       <div className="mt-0.5 truncate text-[11px] text-dim">{e.hypothesis}</div>
                     </td>

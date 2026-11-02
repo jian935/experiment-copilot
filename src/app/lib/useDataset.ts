@@ -195,6 +195,7 @@ export function useHashRoute(): {
   isEval: boolean;
   isSettings: boolean;
   isCompare: boolean;
+  isPlan: boolean;
   /** 对比视图的两个实验 id（可为 null：还没选） */
   compareA: string | null;
   compareB: string | null;
@@ -221,6 +222,7 @@ export function useHashRoute(): {
     isEval: /^#\/eval/.test(hash),
     isSettings: /^#\/settings/.test(hash),
     isCompare: /^#\/compare/.test(hash),
+    isPlan: /^#\/plan/.test(hash),
     compareA: /^#\/compare/.test(hash) ? route.a : null,
     compareB: /^#\/compare/.test(hash) ? route.b : null,
     go: (h) => {
