@@ -10,6 +10,7 @@ import {
   ListTree,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import type { Analysis, Evidence } from '../../lib/decide.ts';
 import type { Experiment } from '../../lib/types.ts';
@@ -17,12 +18,20 @@ import { fmtP } from '../lib/format';
 import { absoluteUrl, copyText } from '../lib/share';
 import { Button, Drawer, cx } from './ui';
 
+/**
+ * 证据条目的颜色/图标。
+ *
+ * 颜色都写成「浅色主题的 700 / 深色主题的 300」双档：这两种主题同时存在（#/settings 可切），
+ * 只写 `text-sky-300` 会在浅色主题的白底上低对比到几乎看不见 —— 类别标签看不见，
+ * 读者就分不清哪一条是护栏、哪一条是稳健性。
+ */
 const KIND_META: Record<Evidence['kind'], { label: string; icon: typeof FlaskConical; cls: string }> = {
-  srm: { label: 'SRM', icon: FlaskConical, cls: 'text-sky-300 bg-sky-400/10 ring-sky-400/25' },
+  srm: { label: 'SRM', icon: FlaskConical, cls: 'text-sky-700 dark:text-sky-300 bg-sky-400/10 ring-sky-400/25' },
   metric: { label: '主指标', icon: BarChart3, cls: 'text-brand2 bg-brand/10 ring-brand/25' },
-  segment: { label: '分层', icon: ListTree, cls: 'text-violet-300 bg-violet-400/10 ring-violet-400/25' },
-  guardrail: { label: '护栏', icon: ShieldAlert, cls: 'text-amber-300 bg-amber-400/10 ring-amber-400/25' },
-  decision: { label: '结论', icon: Gavel, cls: 'text-emerald-300 bg-emerald-400/10 ring-emerald-400/25' },
+  segment: { label: '分层', icon: ListTree, cls: 'text-violet-700 dark:text-violet-300 bg-violet-400/10 ring-violet-400/25' },
+  guardrail: { label: '护栏', icon: ShieldAlert, cls: 'text-amber-700 dark:text-amber-300 bg-amber-400/10 ring-amber-400/25' },
+  robustness: { label: '稳健性', icon: ShieldCheck, cls: 'text-teal-700 dark:text-teal-300 bg-teal-400/10 ring-teal-400/25' },
+  decision: { label: '结论', icon: Gavel, cls: 'text-emerald-700 dark:text-emerald-300 bg-emerald-400/10 ring-emerald-400/25' },
 };
 
 export function EvidenceDrawer({

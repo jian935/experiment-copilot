@@ -1,0 +1,134 @@
+{
+  "generatedAt": "2026-11-02T13:35:43.837Z",
+  "trials": 300,
+  "usersPerArm": 1200,
+  "alpha": 0.05,
+  "seed": 20261105,
+  "params": {
+    "payerRate": 0.08,
+    "whaleShareOfPayers": 0.125,
+    "arpuTarget": 3.6,
+    "sigma": 0.9,
+    "trimP": 0.01
+  },
+  "tail": [
+    {
+      "kappa": 1,
+      "bias": -0.11587470819752056,
+      "biasAbs": 0.5995275051542791,
+      "biasAbsTrim": 0.5119131445675471,
+      "mseRaw": 0.5602761035675914,
+      "mseTrim": 0.40879312296005754,
+      "coverRaw": 0.9666666666666667,
+      "coverTrim": 0.89,
+      "falseSigRaw": 0.03333333333333333,
+      "falseSigTrim": 0.11,
+      "topShare1": 0.3967704376849794,
+      "gini": 0.9576198418202955
+    },
+    {
+      "kappa": 10,
+      "bias": 0.003001831761944615,
+      "biasAbs": 0.9920177734971704,
+      "biasAbsTrim": 0.5166082674948581,
+      "mseRaw": 1.6055461560169135,
+      "mseTrim": 0.42125561456432253,
+      "coverRaw": 0.9633333333333334,
+      "coverTrim": 0.7733333333333333,
+      "falseSigRaw": 0.03666666666666667,
+      "falseSigTrim": 0.22666666666666666,
+      "topShare1": 0.6147101384747292,
+      "gini": 0.9728857842821833
+    },
+    {
+      "kappa": 50,
+      "bias": -0.092987532314058,
+      "biasAbs": 1.4535750668510439,
+      "biasAbsTrim": 0.6150365880954041,
+      "mseRaw": 3.4007017352478917,
+      "mseTrim": 0.7032480239902922,
+      "coverRaw": 0.96,
+      "coverTrim": 0.4666666666666667,
+      "falseSigRaw": 0.04,
+      "falseSigTrim": 0.5333333333333333,
+      "topShare1": 0.8684195879260282,
+      "gini": 0.9878473272450414
+    },
+    {
+      "kappa": 200,
+      "bias": 0.05338931509792405,
+      "biasAbs": 1.7580376338477632,
+      "biasAbsTrim": 0.7707671429801894,
+      "mseRaw": 4.8899771051432745,
+      "mseTrim": 1.2321127876087565,
+      "coverRaw": 0.9466666666666667,
+      "coverTrim": 0.33666666666666667,
+      "falseSigRaw": 0.05333333333333334,
+      "falseSigTrim": 0.6633333333333333,
+      "topShare1": 0.9534582638609862,
+      "gini": 0.9926604195024902
+    }
+  ],
+  "power": [
+    {
+      "kappa": 1,
+      "lift": 0.03,
+      "detectRaw": 0.03666666666666667,
+      "detectTrim": 0.10666666666666667,
+      "coverTrim": 0.89
+    },
+    {
+      "kappa": 10,
+      "lift": 0.03,
+      "detectRaw": 0.05333333333333334,
+      "detectTrim": 0.23333333333333334,
+      "coverTrim": 0.7766666666666666
+    },
+    {
+      "kappa": 50,
+      "lift": 0.03,
+      "detectRaw": 0.03,
+      "detectTrim": 0.5466666666666666,
+      "coverTrim": 0.42
+    },
+    {
+      "kappa": 200,
+      "lift": 0.03,
+      "detectRaw": 0.03666666666666667,
+      "detectTrim": 0.6866666666666666,
+      "coverTrim": 0.20666666666666667
+    }
+  ],
+  "granularity": [
+    {
+      "perCell": 1,
+      "rowsPerArm": 1200,
+      "kappa": 200,
+      "biasAbsRaw": 1.722101937804138,
+      "biasAbsTrim": 0.776419784717912,
+      "coverRaw": 0.9666666666666667,
+      "coverTrim": 0.3466666666666667,
+      "biasGain": 0.5491441199422089
+    },
+    {
+      "perCell": 5,
+      "rowsPerArm": 240,
+      "kappa": 200,
+      "biasAbsRaw": 1.6100971808019127,
+      "biasAbsTrim": 1.4025805084785206,
+      "coverRaw": 0.9466666666666667,
+      "coverTrim": 0.8666666666666667,
+      "biasGain": 0.12888456348953914
+    },
+    {
+      "perCell": 50,
+      "rowsPerArm": 24,
+      "kappa": 200,
+      "biasAbsRaw": 1.5344280876503598,
+      "biasAbsTrim": 1.4879502309725188,
+      "coverRaw": 0.9733333333333334,
+      "coverTrim": 0.9666666666666667,
+      "biasGain": 0.030290019487985043
+    }
+  ]
+}

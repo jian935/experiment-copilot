@@ -611,6 +611,59 @@ async function runMultiArmScenario() {
   return problems;
 }
 
+/* ─────────── 第十阶段：稳健性面板 —— ARPU 实验必须看到，率实验必须看不到 ───────────
+ * 这块最容易「看着有、其实空」：表格渲染了但档位数据是空的、曲线画了但区间带没画、
+ * 或者反过来——把 ARPU 的截尾表塞进了转化率实验，读者会拿它去解释 pp。
+ * 所以正反两面都验。
+ */
+async function runRobustScenario() {
+  const problems = [];
+  try {
+    await send('Page.navigate', { url: `${BASE}/#/e/E003` });
+    await waitText((t) => t.includes('稳健性'), 'E003 详情页稳健性面板');
+    const text = (await evaluate('document.body.innerText')).replace(/\s+/g, ' ');
+
+    for (const kw of ['稳健性：极端值有没有替你做决定', '收入集中度', '单点杠杆', '截尾单位 = 你的数据粒度', '截尾 p 值不是显著性结论']) {
+      if (!text.includes(kw)) problems.push(`面板缺少「${kw}」`);
+    }
+    if (!/结论稳定|对极值敏感|符号会翻转|不可用/.test(text)) problems.push('没有给出稳健性判定徽章');
+
+    // 档位表：原始 + 4 个截尾档 = 5 行（用「原始」这个词定位，别去数 <tr>——表头也算）
+    const tiers = await evaluate(`(() => {
+      const t = [...document.querySelectorAll('table')].find((x) => (x.innerText || '').includes('压平行数'));
+      if (!t) return -1;
+      return t.querySelectorAll('tbody tr').length;
+    })()`);
+    if (tiers !== 5) problems.push(`截尾档位表是 ${tiers} 行（应当 原始 + 0.5%/1%/2%/5% = 5 行）`);
+
+    // 敏感性曲线：必须有区间带（polygon）+ 折线（polyline）两种
+    const svgBits = await evaluate(`(() => {
+      const s = document.querySelector('svg[aria-label="截尾敏感性曲线"]');
+      if (!s) return 'no-svg';
+      return JSON.stringify({ poly: s.querySelectorAll('polygon').length, line: s.querySelectorAll('polyline').length });
+    })()`);
+    if (svgBits === 'no-svg') problems.push('敏感性曲线没画出来');
+    else {
+      const b = JSON.parse(svgBits);
+      if (b.poly < 1) problems.push('敏感性曲线缺少区间带（polygon）');
+      if (b.line < 1) problems.push('敏感性曲线缺少差值折线（polyline）');
+    }
+
+    if (text.includes('undefined') || text.includes('NaN')) problems.push('稳健性面板出现 undefined / NaN');
+
+    // 反向检查：转化率实验不该出现这块面板（ARPU 的截尾表解释不了 pp）
+    await send('Page.navigate', { url: `${BASE}/#/e/E001` });
+    await waitText((t) => t.includes('结论卡') || t.includes('分日趋势'), 'E001 详情页');
+    const rateText = await evaluate('document.body.innerText');
+    if (rateText.includes('稳健性：极端值有没有替你做决定')) {
+      problems.push('转化率实验也出现了 ARPU 的稳健性面板（口径混排）');
+    }
+  } catch (e) {
+    problems.push(String(e && e.message ? e.message : e));
+  }
+  return problems;
+}
+
 console.log(`\nUI 冒烟：${ROUTES.length} 条路由 @ ${BASE}\n${'─'.repeat(70)}`);
 for (const r of rows) {
   const mark = r.problems.length ? '✗' : '✓';
@@ -700,6 +753,18 @@ if (multiArmProblems.length) {
   for (const p of multiArmProblems) console.log(`    · ${p}`);
 } else {
   console.log('✓ 通过（校正 p 与同时区间都在，P(best) 合计 100%，趋势图画了 3 条线）');
+}
+console.log('');
+
+const robustProblems = await runRobustScenario();
+console.log(`\n稳健性（去极值）：ARPU 实验有面板 / 转化率实验没有`);
+console.log('─'.repeat(70));
+if (robustProblems.length) {
+  failed++;
+  console.log('✗ 失败');
+  for (const p of robustProblems) console.log(`    · ${p}`);
+} else {
+  console.log('✓ 通过（5 个截尾档位 + 区间带 + 集中度与杠杆，且没有漏进率口径实验）');
 }
 console.log('');
 

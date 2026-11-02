@@ -56,6 +56,7 @@ The value is not the model. The value is that the number can be recomputed and t
 | Family-wise correction | A list-page switch: naive 68 → Holm 53 (15 retracted), each row labelled "not significant after Holm" with adjusted p | [`11-列表页-全局校正.png`](docs/screenshots/11-列表页-全局校正.png) |
 | Expected loss | Four tiles + a net-value curve (break-even and point estimate both marked) + two sliders for k / MMP; gate vetoes in red, heterogeneity as an amber advisory | [`12-详情页-期望损失.png`](docs/screenshots/12-详情页-期望损失.png) |
 | Import persistence | "Data source" chip: imported datasets live in IndexedDB, survive a reload, can switch back and forth, and can be deleted | [`13-导入持久化.png`](docs/screenshots/13-导入持久化.png) |
+| Robustness (winsorization) | A five-tier trim sweep with a sensitivity curve, revenue concentration, and single-row leverage (delete which row changes the verdict?). The panel states that **the trimmed p is not a significance conclusion**, with the simulation behind that statement | [`29-稳健性-去极值.png`](docs/screenshots/29-稳健性-去极值.png) |
 | Experiment comparison | Tick two rows → same unit shares **one** x-axis (line length = uncertainty); different units (pp vs currency) are refused and stacked instead; 15 side-by-side rows | [`14-实验对比.png`](docs/screenshots/14-实验对比.png) · [`15-对比-不能同轴.png`](docs/screenshots/15-对比-不能同轴.png) · [`16-列表勾选对比.png`](docs/screenshots/16-列表勾选对比.png) |
 | Command palette ⌘K | One panel over everything: experiments (id / name / hypothesis / **rule names**), metric names, and app actions; multi-word is AND, an exact id always ranks first, ↑↓ + ↵ works end to end | [`17-全局搜索.png`](docs/screenshots/17-全局搜索.png) · [`18-全局搜索-功能分组.png`](docs/screenshots/18-全局搜索-功能分组.png) |
 | Theme | Light / dark / follow-system, one button to cycle; **every colour is a CSS variable**, so SVG charts switch together with the cards — never "dark cards, light charts" | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
@@ -80,9 +81,10 @@ npm run dev        # local dev (regenerates data first)
 npm run build      # dist/ (tsc --noEmit + vite build)
 npm run preview    # preview the build
 
-npm test           # 468 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
+npm test           # 496 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
                    #   import parsing / A-A calibration / metric dictionary / configurable thresholds / CUPED /
-                   #   sequential / novelty / multiplicity / A-B-n multi-arm / expected loss / comparison / forest scaling / ⌘K /
+                   #   sequential / novelty / multiplicity / A-B-n multi-arm / winsorized robustness / expected loss / comparison /
+                   #   forest scaling / ⌘K /
                    #   methodology cross-check / days-to-significance / multi-turn / ARPU / heterogeneity F1 / baseline)
 npm run eval       # eval report: heterogeneity F1 + hallucinated-number rate over 2200 Agent Q&A
 npm run eval:check # compare against eval/baseline.json; any drift exits 1 (this is what CI runs)
@@ -97,6 +99,7 @@ npm run seq        # sequential testing: false-positive rate under repeated look
 npm run novelty    # novelty effect: A/A calibration + detection rate on injected decay
 npm run fwer       # multiplicity: FWER simulation + Holm/BH on the 120 experiments
 npm run multiarm   # A/B/n: all-null naive vs Dunnett false-positive rate, winner-pick rate, P(best) calibration
+npm run robust     # winsorization: raw vs trimmed bias/MSE/CI coverage under heavy tails, and what granularity does to it
 npm run loss       # expected loss: gates + net value vs the frequentist rule, on realised truth
 npm run forecast   # "how many more days" across the 120 experiments
 npm run method     # every number quoted in the methodology doc
@@ -178,7 +181,7 @@ src/app/                UI: Vite + React 19 + TS + Tailwind v3
   components/CompareScreen.tsx  Two experiments on one shared axis, or a refusal
   components/CommandPalette.tsx ⌘K palette (keyboard-only path works end to end)
 scripts/                Generation / calibration / data export / screen recording / video / portfolio build
-tests/                  468 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
+tests/                  496 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
                         simulations + metric dictionary/configurability/multi-turn + heterogeneity F1/baseline self-test)
 eval/baseline.json      Regression baseline: 86 metrics + a data fingerprint
 data/                   120 experiments / 6,720 rows
@@ -206,13 +209,14 @@ right-hand column of `docs/EVAL.md`.
 | Novelty effect | A/A false positives **4.8% (rate) / 6.4% (ARPU)**; the first version of this detector measured 12.0% / 15.0%, and that is documented rather than deleted |
 | Multiplicity | All-null family: "at least one significant" = **99.79%** (1−0.95¹²⁰). On real data naive 68 → Holm **53**, and 5 of the 15 retracted ones had zero injected effect |
 | A/B/n multi-arm | Every treatment arm is compared against the shared control with **Dunnett** simultaneous inference (exact 1-D Gauss–Hermite quadrature after conditioning on the control mean). All-null false-positive rate over 20000 runs: naive **9.41% (3 arms) / 12.75% (4 arms)** vs Dunnett **5.34% / 5.04%**; critical z 2.212 / 2.349 / 2.442 matches the published tables. At 4 arms Bonferroni needs a 2.394 boundary vs Dunnett's 2.353 (40606 vs 41657 per arm, i.e. **2.6% more**) because it ignores the positive correlation induced by the shared control — a modest but real gain, so both numbers are shown side by side rather than claimed as a win |
+| Winsorized robustness | ARPU only, and deliberately **not** a second significance test. Trimming reduces MSE from **4.89 → 1.23** under heavy tails (κ=200), but the trimmed 95% interval covers the true ARPU difference only **33.67%** of the time while the raw delta-method interval still covers **94.67%** — it estimates a different quantity, so its p-value is labelled `p*` and never feeds the decision. Tail weight barely moves the raw interval (94.67%–96.67% across κ=1…200); what it does inflate is the point estimate's absolute bias (0.600 → 1.758 yuan). Detection goes 3.67% → 68.67% after trimming, which is a change of hypothesis, not a gain in power. Granularity decides whether trimming does anything at all: one user per row cuts bias 54.9%, five users per row 12.9%, fifty users per row 3.0% |
 | Expected loss | Gates + net value **20.182** vs the frequentist rule 15.696 (+25.4% / +28.6%); the ungated rule scores higher (23.978) but would ship 15 experiments whose refund rate went **1.19% → 2.03% (1.71×)** |
 | Interval choice | Newcombe instead of Wald: at a 0.12% baseline with n=30 both cover 100%, but the widths are **0.906pp vs 22.869pp** |
 | Chart scaling bug | The forest plot's pp axis drew **341 grid lines** (step computed in percentage points, start in percent). Fixed, and locked by 6 tests |
 | Comparability | 120 experiments × all pairs = **7140 pairs**, asserting "shared axis ⟺ same unit" — not a sample |
-| Unit tests | **468** across 36 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
+| Unit tests | **496** across 38 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
 | Regression baseline | **86 metrics** + data fingerprint in `eval/baseline.json`; `npm run eval:check` exits 1 on any drift |
-| Bundle | **660KB** JS / 216KB gzip, zero chart libraries, zero backend |
+| Bundle | **680KB** JS / 223KB gzip, zero chart libraries, zero backend |
 
 ## Why these methods (every choice comes with its cost)
 
@@ -249,7 +253,7 @@ float (`0.02099419631592228`) straight out of a tool result. Fixed on both sides
 Two of the six runs did **not** come out clean, and they are documented in `docs/ABLATION-NOTES.md` rather than
 re-run until they looked good: one wrote `4.2e-13` as `1e-13`, one computed `0.26` that the engine never produced.
 
-## What broke along the way (five that mattered)
+## What broke along the way (seven that mattered)
 
 Every one of these was found by measurement or by looking at the rendered screen — not by reading the code again.
 
@@ -260,13 +264,15 @@ Every one of these was found by measurement or by looking at the rendered screen
 | The novelty detector's first version had A/A false positives of **12.0% / 15.0%** | 1000 all-null experiments | Half a window is 3–4 days; any same-day SE misses day-to-day drift. Day-level clustering + Welch t brought it to **4.8% / 6.4%** |
 | 48 "unsourced numbers" in rule mode | The automatic eval, not the human ablation | The audit whitelist accepted numbers but not strings, so `mdeNowText: "0.63pp"` was flagged. **If a metric isn't automated, it stays at "I believe it's zero"** |
 | A dataset missing `refunds` printed "0.00% → 0.00%, not worse" | Writing the FAQ — the claim "missing columns are never fabricated" was false | Filling 0 turns "no data" into "checked, fine". Now it reads "unavailable (column missing)" / "not applicable" / "not evaluated" and is excluded from the decision |
+| Trimming 1% clipped **exactly zero rows** yet reported "conclusion stable" | The first run on real ARPU data: `clippedHigh` was 0 in every tier | The quantile was weighted by exposures while a single row already held 1.8% of traffic, so the boundary always landed *inside* that row. The "robustness check" had checked nothing and declared a pass — **worse than not running it**. Switching to one vote per row also matches `ratioTest`'s own sampling model |
+| Simulation showed detection jumping **3.67% → 68.67%** after trimming; it almost went into the README as a win | Looking at the same tier's interval coverage: **20.67%** | What jumped was detection of a *different hypothesis*. Trimming changes the estimand, not the precision. Quoting only the flattering number is self-confirmation — so all four numbers are now reported side by side |
 
 ## The bar
 
 This is not a demo that renders three charts. The acceptance criteria are the ones a flagship tool would be held to:
 
 - **Every number is reversible**: expand to formula → sample size → data version → recompute and diff.
-- **Every claim is falsifiable**: 468 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
+- **Every claim is falsifiable**: 496 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
   and an automatic eval that fails the build when a metric drifts.
 - **Every method states its cost**, including the cases where our own choice is worse than the textbook one.
 - **No silent fallbacks**: missing columns, missing ground truth, an unavailable model, an exhausted storage quota —
@@ -276,7 +282,7 @@ This is not a demo that renders three charts. The acceptance criteria are the on
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3** (not v4: its range-syntax media queries break on Chrome < 104).
 **Zero chart libraries** — the forest plot and the daily trend are hand-written SVG (the trend used to be Recharts;
-removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm and the import layer have since brought it to 660KB / 216KB gzip). Statistics are in-house with tests. No backend,
+removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 680KB / 223KB gzip). Statistics are in-house with tests. No backend,
 no database. The Agent talks to DeepSeek directly from the browser, and the site deploys as static files.
 
 ## Milestones
@@ -286,6 +292,8 @@ M8 statistical depth ✅ → M9 product completeness ✅ → M10 differentiation
 M11 evaluation loop (hallucination rate / heterogeneity F1 / baseline / CI) ✅ →
 M12 sequential & advanced (sequential / novelty / multiplicity / expected loss) ✅ →
 **M13 polish & delivery (import persistence ✅, comparison ✅, ⌘K ✅, themes ✅, no chart libs ✅, methodology ✅, FAQ ✅)** →
+**M14 A/B/n multi-arm (Dunnett / P(best) / multi-arm planning / multi-arm import) ✅** →
+**M15 winsorized robustness (trim sweep / revenue concentration / single-row leverage) ✅** →
 G2 Pages deploy (deliberately last).
 
 Acceptance criteria live in the blueprint (§13); the extension list and measurements live in

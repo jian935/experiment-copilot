@@ -47,6 +47,7 @@ import { C } from '../lib/palette';
 import { Button, DecisionBadge, InlineCode, Panel, PanelHead, cx } from './ui';
 import { DecisionCard } from './DecisionCard';
 import { MultiArmPanel } from './MultiArmPanel';
+import { RobustnessPanel } from './RobustnessPanel';
 import { armLabel } from '../../lib/arms.ts';
 import type { DecisionRecord } from '../lib/decisions';
 
@@ -332,6 +333,9 @@ export function ExperimentDetail({
         onSave={onDecide}
         onRemove={onUndecide}
       />
+
+      {/* 稳健性：ARPU 的结论会不会被几个大客户决定（只有连续指标才有） */}
+      <RobustnessPanel analysis={analysis} />
 
       {/* 多臂对比（k=2 时组件自己返回 null，老实验的界面一模一样） */}
       <MultiArmPanel analysis={analysis} />

@@ -13,6 +13,7 @@ import {
 } from './multiarm.ts';
 import { buildPeekReport, type LookInput, type PeekReport } from './sequential.ts';
 import { noveltyReport, planExposureSplit, type NoveltyReport } from './novelty.ts';
+import { robustnessReport, type RobustCell, type RobustnessReport } from './robust.ts';
 
 export interface VariantAgg {
   n: number;
@@ -92,7 +93,7 @@ export interface RuleTrace {
 
 export interface Evidence {
   id: string;
-  kind: 'srm' | 'metric' | 'segment' | 'guardrail' | 'decision';
+  kind: 'srm' | 'metric' | 'segment' | 'guardrail' | 'robustness' | 'decision';
   label: string;
   value?: number;
   detail: string;
@@ -200,6 +201,15 @@ export interface Analysis {
   novelty: NoveltyReport;
   /** CUPED：用前周期数据做方差缩减后的检验（无前周期数据时为 undefined）；口径与主指标一致 */
   cuped?: CupedResult;
+  /**
+   * 稳健性诊断：极端值有没有在替你做决定。**只对连续指标（ARPU）存在**。
+   *
+   * 为什么不参与 decision：截尾分位是看着数据定的，截尾后的 p 没有名义 α 保证
+   * （见 `lib/robust.ts` 的 `CAVEAT`）。拿一个不保证第一类错误的检验去改决策，
+   * 等于用一个更松的口径把结论推向"上线"。所以它作为**并行的诊断**给出，
+   * 结论卡与详情页会把它标成风险，但 `decision` 仍由主口径决定。
+   */
+  robustness?: RobustnessReport;
   /** 贝叶斯视角：率口径用 Beta-Binomial，连续口径用正态后验 */
   bayes: BayesResult;
   /** 置信度 = P(treatment 真正优于 control)；与频率派 p 值口径不同，但结论互补 */
@@ -520,6 +530,30 @@ function hasRevenue(rows: DailyRow[]): boolean {
   return rows.some((r) => r.revenue !== undefined && r.revenue > 0);
 }
 
+/**
+ * 稳健性诊断用的格子：与 `ratioCellsOf` 同源，多带一个人类可读标签。
+ *
+ * 为什么标签要在这里生成而不是让 UI 拼：杠杆表里要写「删掉哪一行」，
+ * 如果 UI 各自拼 `date + device + tenure`，一旦有人改了文案，「哪一行」就对不上了。
+ * 标签是数据的一部分，跟着数据一起走。
+ */
+function robustCellsOf(rows: DailyRow[], control: string, treatment: string): RobustCell[] {
+  const tenureLabel = (t: string) => (t === 'new' ? '新用户' : t === 'old' ? '老用户' : String(t));
+  const out: RobustCell[] = [];
+  for (const r of rows) {
+    if (r.revenue === undefined || !(r.exposures > 0)) continue;
+    if (r.variant !== control && r.variant !== treatment) continue;
+    out.push({
+      n: r.exposures,
+      sum: r.revenue,
+      treatment: r.variant === treatment,
+      label: `${r.date} · ${r.device} · ${tenureLabel(r.tenure)}`,
+      key: `${r.date}|${r.device}|${r.tenure}|${r.variant}`,
+    });
+  }
+  return out;
+}
+
 function breakdownOf(c: VariantAgg, t: VariantAgg): ArpuBreakdown | undefined {
   if (!(c.n > 0) || !(t.n > 0) || !(c.c > 0) || !(t.c > 0)) return undefined;
   const cvrC = c.c / c.n;
@@ -826,6 +860,17 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
   const overall = twoProportionZ(c.c, c.n, t.c, t.n);
   const arpu = revenueOk ? ratioTest(ratioCellsOf(rows, treatment)) ?? undefined : undefined;
   const arpuBreakdown = arpu ? breakdownOf(c, t) : undefined;
+
+  // 稳健性诊断：只在主指标真的是连续口径时算（率口径的极端值问题是另一件事，
+  // 伯努利结构下不存在「几个用户撑起均值」，硬塞一份 ARPU 的截尾表只会误导）。
+  const robustness =
+    metricKind === 'continuous' && arpu
+      ? robustnessReport(robustCellsOf(rows, control, treatment), {
+          alpha: cfg.alpha,
+          controlArm: control,
+          treatmentArm: treatment,
+        })
+      : undefined;
 
   // CUPED：只有明细行带前周期数据时才算（导入的真实数据常常没有，那就自动退回普通检验）。
   // 协变量必须与主指标同口径：率指标用前周期转化数，ARPU 用前周期收入。
@@ -1151,6 +1196,87 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
       propSteps(overall),
     );
   }
+
+  // ---- 稳健性（只有 ARPU 口径才有）----
+  // 位置在主指标之后：读者刚看到「ARPU 差 −1.04 元、p<0.001」，紧接着最该被回答的
+  // 就是「这 1 块钱是不是几十个大客户贡献的」。等看完四层分析再问，性质就变了。
+  if (robustness) {
+    const cc = robustness.concentration;
+    const top1 = cc.top[0];
+    const lev = robustness.leverage[0];
+    const vLabel: Record<RobustnessReport['verdict'], string> = {
+      stable: '截尾前后一致（稳定）',
+      sensitive: '截尾后「显著与否」翻转（对极值敏感）',
+      flip: '截尾后差值符号翻转',
+      unavailable: '不可用',
+    };
+    const scan = robustness.grid
+      .map(
+        (g) =>
+          `${(g.p * 100).toFixed(1)}% → ${fmtDiff(g.diff, '元')}，p=${ep(g.pValue)}` +
+          `（压平 ${g.clippedHigh} 行 / 占曝光 ${(g.exposureTouchedShare * 100).toFixed(1)}%）`,
+      )
+      .join('；');
+    add(
+      'robustness',
+      '稳健性：极端值敏感性',
+      `${vLabel[robustness.verdict]}；最重的 1% 曝光贡献了 ${(top1.revenueShare * 100).toFixed(1)}% 的收入（人人等额时这个数是 1.0%），` +
+        `收入 Gini ${cc.gini.toFixed(3)}` +
+        (lev
+          ? `；杠杆最大的一行是「${lev.label}」（${lev.arm}，占该臂收入 ${(lev.shareOfArmRevenue * 100).toFixed(1)}%），删掉它差值会变成 ${fmtDiff(lev.diffWithout, '元')}`
+          : ''),
+      robustness.grid[0]?.pValue,
+      [
+        {
+          title: '① 截尾在做什么（口径先说清）',
+          formula: '每行的每单位值 vᵢ = 收入ᵢ / 曝光ᵢ；分臂按 v 的 1−p 分位把 vᵢ 压到分位线，收入ᵢ’ = min(vᵢ, v₍₁₋ₚ₎) × 曝光ᵢ',
+          value:
+            `分母不动、指标定义不变（这是截尾与「删掉」的本质区别）。只动右尾：左尾是「没买」的合法值，` +
+            `截掉它等于假装所有人都买了。参考档位 p=${((robustness.arms.control.p || 0) * 100).toFixed(1)}% → ` +
+            `对照臂上界 ${Number.isFinite(robustness.arms.control.upper) ? `${robustness.arms.control.upper.toFixed(2)} 元` : '未截尾'}，` +
+            `处理臂上界 ${Number.isFinite(robustness.arms.treatment.upper) ? `${robustness.arms.treatment.upper.toFixed(2)} 元` : '未截尾'}`,
+        },
+        {
+          title: '② 扫描：每个档位各估一次',
+          formula: '同一份数据、同一套 delta method，只换截尾比例',
+          value: scan || '（无有效档位）',
+        },
+        {
+          title: '③ 集中度：极端值到底占多少（不依赖分位选择）',
+          formula: '按每曝光收入降序，取最重的前 pct 曝光，累计收入 / 总收入',
+          value:
+            cc.top.map((x) => `前 ${(x.pct * 100).toFixed(0)}% 曝光 → ${(x.revenueShare * 100).toFixed(1)}% 收入`).join('；') +
+            `；Gini ${cc.gini.toFixed(3)}（0 = 人人等额，1 = 全在一人身上）` +
+            (cc.payerShare < 1 ? `；有收入的曝光占 ${(cc.payerShare * 100).toFixed(1)}%` : ''),
+        },
+        {
+          title: '④ 单点杠杆：删掉一行，结论会变成什么（精确重算，不是近似）',
+          formula: 'leave-one-row-out：去掉该行后重新跑一遍 delta method',
+          value:
+            robustness.leverage.length
+              ? robustness.leverage
+                  .map(
+                    (l) =>
+                      `「${l.label}」(${l.arm}) 人均 ${l.arpu.toFixed(2)} 元 → 删掉后差值 ${fmtDiff(l.diffWithout, '元')}、` +
+                      `p=${ep(l.pWithout)}（差值的变动 ${fmtDiff(l.dDiff, '元')}）`,
+                  )
+                  .join('；')
+              : '两臂分布对称，没有任何一行能单独掀动结论',
+        },
+        {
+          title: '⑤ 这次诊断的边界（必须一起读）',
+          formula: '截尾单位 = 你的数据粒度；截尾 p 值 = 敏感性指标，不是显著性结论',
+          value:
+            (robustness.granularity === 'user'
+              ? '数据是用户级明细（每行约 1 人），截尾真正作用在用户身上。'
+              : `数据是聚合格子（每行中位 ${robustness.medianExposuresPerRow.toFixed(0)} 次曝光），` +
+                '截尾去掉的是「整格异常」（某一天被刷、某个人群灌量），控制不了格子内部的长尾；要做用户级截尾需要用户级明细表。') +
+            ` ${robustness.reason} ${robustness.caveat}`,
+        },
+      ],
+    );
+  }
+
 
   // ---- 多臂比较（A/B/n）----
   // 放在主指标之后、副指标之前：读者先看到「这一臂 vs 对照」的结论，
@@ -1599,6 +1725,7 @@ export function analyze(exp: Experiment, allRows: DailyRow[], cfgOverride?: Part
     overall,
     ...(arpu ? { arpu } : {}),
     ...(arpuBreakdown ? { arpuBreakdown } : {}),
+    ...(robustness ? { robustness } : {}),
     srm,
     segments,
     interaction: { tenure: interaction },

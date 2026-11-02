@@ -29,7 +29,8 @@
     "method": "tsx scripts/method_numbers.ts",
     "shot": "node scripts/screenshot.mjs",
     "audit:ui": "node scripts/audit_ui_controls.mjs",
-    "e2e:import": "node scripts/e2e_import.mjs"
+    "e2e:import": "node scripts/e2e_import.mjs",
+    "robust": "tsx scripts/robust_report.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
