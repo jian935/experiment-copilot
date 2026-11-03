@@ -68,7 +68,7 @@ function cite(a: Analysis, kind: Evidence['kind'], labelPart?: string): string[]
 }
 
 /** 10 个工具全部是纯函数：只读 Analysis / Dataset 与口径字典，不联网、不算任何新口径 */
-export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unknown> = {}): ToolCall {
+function runToolInner(name: ToolName, ctx: AgentCtx, args: Record<string, unknown> = {}): ToolCall {
   const { analysis: a, exp, dataset } = ctx;
 
   switch (name) {
@@ -819,6 +819,18 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
     default:
       throw new Error(`未知工具：${name}`);
   }
+}
+
+/**
+ * 计时包装：给每次工具调用记 durationMs（毫秒，两位小数）。
+ * 只做可观测性——**不改任何工具的行为**，也不把时间写进 eval 输出/基线。
+ * 放在这里而不是散落各调用点：answer.ts 有几十处 runTool，逐处包裹必漏。
+ */
+const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unknown> = {}): ToolCall {
+  const t0 = nowMs();
+  const call = runToolInner(name, ctx, args);
+  return { ...call, durationMs: Math.round((nowMs() - t0) * 100) / 100 };
 }
 
 /** 给 LLM 的工具描述（OpenAI function-calling 格式） */

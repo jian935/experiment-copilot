@@ -6,6 +6,7 @@ import {
   CornerDownLeft,
   KeyRound,
   Loader2,
+  ScrollText,
   Send,
   ShieldCheck,
   Sparkles,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { answerQuestion } from '../../lib/agent/answer.ts';
 import { TOOL_LABEL } from '../../lib/agent/tools.ts';
+import { runLogJson } from '../../lib/agent/runlog.ts';
 import type { AgentCtx, AgentReply, AgentTurn, ToolCall } from '../../lib/agent/types.ts';
 import { askWithLlm } from '../lib/llm';
 import { useSettings } from '../lib/settings';
@@ -27,6 +29,13 @@ function hostOf(baseUrl: string): string {
   } catch {
     return baseUrl || '默认端点';
   }
+}
+
+/** 毫秒的人类可读写法：<1ms 写 µs，<1s 写 ms，再大写 s */
+function fmtMs(ms: number): string {
+  if (ms < 1) return `${(ms * 1000).toFixed(0)}µs`;
+  if (ms < 1000) return `${ms.toFixed(ms < 10 ? 2 : 0)}ms`;
+  return `${(ms / 1000).toFixed(2)}s`;
 }
 
 const SUGGESTIONS = [
@@ -333,6 +342,8 @@ function AssistantTurn({
   onCite: (id: string) => void;
 }) {
   const [openTool, setOpenTool] = useState<number | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ok = (reply.violations?.length ?? 0) === 0;
 
   return (
@@ -342,6 +353,22 @@ function AssistantTurn({
           {reply.by === 'llm' ? 'DeepSeek' : '规则引擎'}
         </span>
         <span className="font-mono text-[9.5px] text-dim">{reply.intent}</span>
+        {typeof reply.elapsedMs === 'number' && (
+          <span
+            className="rounded bg-panel2 px-1 py-0.5 font-mono text-[9px] text-dim"
+            title="整轮耗时（含工具与模型往返）。仅可观测性，不参与判定，也不进评测与基线。"
+          >
+            {fmtMs(reply.elapsedMs)}
+          </span>
+        )}
+        {reply.usage && (
+          <span
+            className="rounded bg-panel2 px-1 py-0.5 font-mono text-[9px] text-dim"
+            title={`prompt ${reply.usage.promptTokens} / completion ${reply.usage.completionTokens} tokens`}
+          >
+            {reply.usage.totalTokens} tok
+          </span>
+        )}
         <span
           className={cx(
             'ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9.5px]',
@@ -375,6 +402,11 @@ function AssistantTurn({
                 <Wrench size={10} className="shrink-0 text-brand2" />
                 <span className="shrink-0 text-[10px] text-brand2">{TOOL_LABEL[c.tool]}</span>
                 <span className="truncate text-[10px] text-dim">{c.summary}</span>
+                {typeof c.durationMs === 'number' && (
+                  <span className="shrink-0 font-mono text-[9px] text-dim/70" title="该工具本次耗时">
+                    {fmtMs(c.durationMs)}
+                  </span>
+                )}
                 <ChevronDown
                   size={10}
                   className={cx('ml-auto shrink-0 text-dim transition-transform', openTool === i && 'rotate-180')}
@@ -388,6 +420,38 @@ function AssistantTurn({
             </div>
           ))}
         </div>
+      )}
+
+      <div className="mb-2 flex items-center gap-1.5">
+        <button
+          onClick={() => setShowLog((v) => !v)}
+          className="inline-flex items-center gap-1 rounded border border-line bg-panel px-1.5 py-0.5 text-[9.5px] text-muted transition-colors hover:border-line2 hover:text-ink"
+          title="这条回答是怎么来的：工具、耗时、审计、用量。可贴进 issue 复现。"
+        >
+          <ScrollText size={9} /> 运行日志
+        </button>
+        {showLog && (
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(runLogJson(reply));
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              } catch {
+                /* 剪贴板不可用（非安全上下文）就忽略，用户仍可手动选中复制 */
+              }
+            }}
+            className="rounded border border-line bg-panel px-1.5 py-0.5 text-[9.5px] text-muted transition-colors hover:border-line2 hover:text-ink"
+          >
+            {copied ? '已复制 ✓' : '复制 JSON'}
+          </button>
+        )}
+      </div>
+
+      {showLog && (
+        <pre className="mb-2 max-h-[220px] overflow-auto rounded-lg border border-line/70 bg-panel/60 px-2 py-1.5 font-mono text-[9px] leading-4 text-muted">
+          {runLogJson(reply)}
+        </pre>
       )}
 
       <div className="space-y-1.5 text-[12.5px] leading-6 text-ink/90">

@@ -2,7 +2,7 @@ import { auditNumbers, buildWhitelist } from './audit.ts';
 import { runTool } from './tools.ts';
 import { METRIC_LABELS } from '../metrics.ts';
 import { MEMORY_DECISION_LABEL, type MemoryDecisionKind } from './memory.ts';
-import type { AgentCtx, AgentReply, AgentTurn, ToolCall } from './types.ts';
+import type { AgentCtx, AgentReply, AgentTurn, ToolCall, TokenUsage } from './types.ts';
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
 const pp = (v: number, d = 2) => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}pp`;
@@ -18,6 +18,10 @@ const DECISION_CN: Record<string, string> = {
   iterate: '定向上线',
   inconclusive: '无法下结论',
 };
+
+/** 墙钟计时（毫秒，两位）。只用于运行轨迹，不参与判定/评测。 */
+const nowMs = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const round2 = (v: number): number => Math.round(v * 100) / 100;
 
 function citeOf(ctx: AgentCtx, kind: 'metric' | 'decision' | 'srm' | 'guardrail' | 'segment'): string[] {
   return ctx.analysis.evidence.filter((e) => e.kind === kind).map((e) => e.id);
@@ -717,6 +721,7 @@ export function resolveFollowUp(question: string, history?: AgentTurn[]): Follow
 
 /** 规则模式：不需要任何密钥，纯确定性路由与模板 */
 export function answerQuestion(question: string, ctx: AgentCtx, history?: AgentTurn[]): AgentReply {
+  const t0 = nowMs();
   const q = question.trim();
   const hist = history ?? ctx.history;
   const fu = resolveFollowUp(q, hist);
@@ -732,6 +737,7 @@ export function answerQuestion(question: string, ctx: AgentCtx, history?: AgentT
     calls,
     audit,
     by: 'rules',
+    elapsedMs: round2(nowMs() - t0),
     violations: violationsOf(text, calls, audit),
     ...(fu.rewritten
       ? {
@@ -786,10 +792,21 @@ export function replyFromLlm(
   calls: ToolCall[],
   ctx: AgentCtx,
   note?: string,
+  extra?: { elapsedMs?: number; usage?: TokenUsage },
 ): AgentReply {
   const whitelist = buildWhitelist([ctx.analysis, ...calls.map((c) => c.data)]);
   const audit = auditNumbers(text, whitelist);
-  return { text, intent: 'llm', calls, audit, by: 'llm', note, violations: violationsOf(text, calls, audit) };
+  return {
+    text,
+    intent: 'llm',
+    calls,
+    audit,
+    by: 'llm',
+    note,
+    violations: violationsOf(text, calls, audit),
+    ...(extra?.elapsedMs != null ? { elapsedMs: extra.elapsedMs } : {}),
+    ...(extra?.usage ? { usage: extra.usage } : {}),
+  };
 }
 
 export { citesOf };

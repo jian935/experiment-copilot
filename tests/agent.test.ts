@@ -231,3 +231,28 @@ describe('LLM 的 system prompt', () => {
     expect(p).toContain(guardrailCtx.exp.id);
   });
 });
+
+describe('Agent 运行轨迹（M19）', () => {
+  it('规则模式每条工具调用都带 durationMs，整轮带 elapsedMs', () => {
+    const r = answerQuestion('主指标显著吗？', guardrailCtx);
+    expect(r.calls.length).toBeGreaterThan(0);
+    for (const c of r.calls) {
+      expect(typeof c.durationMs).toBe('number');
+      expect(c.durationMs!).toBeGreaterThanOrEqual(0);
+    }
+    expect(typeof r.elapsedMs).toBe('number');
+    expect(r.elapsedMs!).toBeGreaterThanOrEqual(0);
+  });
+
+  it('replyFromLlm 传入 usage/elapsed 时原样透传，不传则留空', () => {
+    const plain = replyFromLlm('主指标显著 [E1]。', [], guardrailCtx);
+    expect(plain.usage).toBeUndefined();
+    expect(plain.elapsedMs).toBeUndefined();
+    const withMeta = replyFromLlm('主指标显著 [E1]。', [], guardrailCtx, undefined, {
+      elapsedMs: 321,
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+    });
+    expect(withMeta.elapsedMs).toBe(321);
+    expect(withMeta.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
+  });
+});

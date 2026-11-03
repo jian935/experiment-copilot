@@ -1,6 +1,6 @@
 import { replyFromLlm, systemPrompt } from '../../lib/agent/answer.ts';
 import { TOOL_NAMES, TOOL_SCHEMA, runTool } from '../../lib/agent/tools.ts';
-import type { AgentCtx, AgentReply, AgentTurn, ToolCall, ToolName } from '../../lib/agent/types.ts';
+import type { AgentCtx, AgentReply, AgentTurn, ToolCall, ToolName, TokenUsage } from '../../lib/agent/types.ts';
 
 const DEFAULT_BASE = 'https://api.deepseek.com/v1';
 
@@ -79,6 +79,8 @@ export async function askWithLlm(
     { role: 'user', content: question },
   ];
   const calls: ToolCall[] = [];
+  const t0 = Date.now();
+  let usageAcc: TokenUsage | null = null;
 
   for (let round = 0; round < 3; round++) {
     let res: Response;
@@ -109,9 +111,20 @@ export async function askWithLlm(
 
     const data = (await res.json()) as {
       choices?: { message?: { content?: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
     const msg = data.choices?.[0]?.message;
     if (!msg) throw new Error('模型返回为空（choices 缺失）');
+    // 累计多轮 usage（OpenAI 兼容接口每轮各返回一份）
+    const u = data.usage;
+    if (u) {
+      const prev = usageAcc as TokenUsage | null;
+      usageAcc = {
+        promptTokens: (prev?.promptTokens ?? 0) + (u.prompt_tokens ?? 0),
+        completionTokens: (prev?.completionTokens ?? 0) + (u.completion_tokens ?? 0),
+        totalTokens: (prev?.totalTokens ?? 0) + (u.total_tokens ?? 0),
+      };
+    }
 
     if (msg.tool_calls?.length) {
       messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: msg.tool_calls });
@@ -144,8 +157,14 @@ export async function askWithLlm(
     }
 
     const text = (msg.content ?? '').trim();
-    return replyFromLlm(text || '（模型没有返回内容）', calls, ctx);
+    return replyFromLlm(text || '（模型没有返回内容）', calls, ctx, undefined, {
+      elapsedMs: Date.now() - t0,
+      usage: usageAcc ?? undefined,
+    });
   }
 
-  return replyFromLlm('（工具调用超过 3 轮，已停止）', calls, ctx, '超过最大工具轮次');
+  return replyFromLlm('（工具调用超过 3 轮，已停止）', calls, ctx, '超过最大工具轮次', {
+    elapsedMs: Date.now() - t0,
+    usage: usageAcc ?? undefined,
+  });
 }

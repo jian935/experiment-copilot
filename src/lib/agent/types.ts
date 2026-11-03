@@ -33,6 +33,18 @@ export interface ToolCall {
   data: unknown;
   /** 引用的证据编号（当前实验的 evidence id） */
   cites: string[];
+  /**
+   * 本次工具实际耗时（毫秒，保留两位）。**只用于「运行轨迹」可观测性，不参与任何判定**，
+   * 也不进评测输出/回归基线——否则墙钟时间会让评测每次都不一样。
+   */
+  durationMs?: number;
+}
+
+/** 模型用量（OpenAI 兼容接口的 usage 字段）；规则模式没有这个 */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
 export type ToolName =
@@ -64,6 +76,10 @@ export interface AgentReply {
   audit: { total: number; suspicious: string[] };
   /** 生成方式：规则模板 / 大模型 */
   by: 'rules' | 'llm';
+  /** 整轮耗时（毫秒）：规则模式是本地计算，智能模式含模型往返。仅可观测性，不进评测。 */
+  elapsedMs?: number;
+  /** 模型用量；只有智能模式且服务端返回 usage 时才有 */
+  usage?: TokenUsage;
   /** LLM 失败时的降级说明 */
   note?: string;
   /** 违反铁律的地方（缺引用 / 出现无法溯源的数字），UI 直接展示 */
