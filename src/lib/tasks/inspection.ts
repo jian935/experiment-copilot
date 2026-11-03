@@ -53,6 +53,7 @@ import type {
   NextAction, PowerSummary, RiskLevel, RiskSignal, SignalCode,
 } from './types.ts';
 import type { Analysis } from '../decide.ts';
+import { buildMemory, EMPTY_MEMORY } from '../agent/memory.ts';
 import { normalInv } from '../stats.ts';
 import type { Dataset, Decision, Experiment } from '../types.ts';
 
@@ -201,7 +202,8 @@ interface Ctx {
   an: Analysis;
   rows: Dataset['daily'];
   asOf: string;
-  opts: Required<Omit<InspectionOptions, 'materiality'>> & { materiality?: number };
+  // decisions 是跨实验的留痕，不进单实验判定（否则每加一个字段都要给 inspectOne 补一份），故从 opts 里 omit 掉
+  opts: Required<Omit<InspectionOptions, 'materiality' | 'decisions'>> & { materiality?: number };
 }
 
 /**
@@ -660,6 +662,9 @@ export function runInspection(
     materiality: opts.materiality,
   };
 
+  // 记忆层（M18）：把本机决策留痕带进巡检。缺省 EMPTY_MEMORY → 既有的巡检信号与评测完全不受影响。
+  const mem = opts.decisions && opts.decisions.length ? buildMemory(opts.decisions) : EMPTY_MEMORY;
+
   const items: InspectionItem[] = [];
   const stats: Array<{ mdeRel: number | null; ratio: number; insuff: boolean }> = [];
   let noAnalysis = 0;
@@ -723,6 +728,15 @@ export function runInspection(
   const byDecision: Record<Decision, number> = { ship: 0, 'no-ship': 0, iterate: 0, inconclusive: 0 };
   for (const x of items) byDecision[x.decision] += 1;
 
+  // 决策留痕备注（M18）：只列「人工判决与当时引擎结论不一致」的实验。
+  // 这是附加信息，不进入风险打分，避免动摇 M17 已锁定的信号口径。
+  const memoryNotes =
+    mem.count > 0
+      ? items
+          .filter((x) => mem.contradicts(x.expId))
+          .map((x) => ({ expId: x.expId, text: mem.summaryFor(x.expId) }))
+      : [];
+
   const digest = digestOf(items, mustLook);
   const power = powerOf(stats);
 
@@ -745,6 +759,8 @@ export function runInspection(
     scope: [...INSPECTION_SCOPE],
     power,
     digest,
+    memoryCount: mem.count,
+    memoryNotes,
   };
   return report;
 }
@@ -924,6 +940,25 @@ export function renderMarkdown(r: InspectionReport): string {
   section('本周处理', r.items.filter((x) => x.risk === 'warn'));
   section('等你拍板 / 需要资源', r.items.filter((x) => x.risk === 'info'));
   section('无需投入', r.items.filter((x) => x.risk === 'ok'));
+
+  if (r.memoryCount > 0) {
+    L.push('## 决策留痕（本机）');
+    L.push('');
+    L.push(
+      `你已在本机对 **${r.memoryCount}** 个实验下过人工决定。` +
+        '决策留痕只存在你本机浏览器，不上传、不进评测、不进任何公开产物——换机器或清缓存就看不到了。',
+    );
+    L.push('');
+    if (r.memoryNotes.length) {
+      L.push(
+        `其中 **${r.memoryNotes.length}** 个实验的人工判决与当时引擎结论不一致——这是正常的人机分歧，` +
+          '留痕的目的就是把「人做过判断」冻结下来，复盘看的是理由而不是 p 值：',
+      );
+      L.push('');
+      r.memoryNotes.forEach((m) => L.push(`- ${m.expId}：${m.text}`));
+      L.push('');
+    }
+  }
 
   L.push('## 这份报告怎么来的');
   L.push('');

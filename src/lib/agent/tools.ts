@@ -5,6 +5,7 @@ import { LOSS_CAUTIONS, LOSS_GATES, applyGates, defaultLoss, expectedLoss } from
 import type { Analysis, Evidence } from '../decide.ts';
 import type { Decision } from '../types.ts';
 import type { AgentCtx, ToolCall, ToolName } from './types.ts';
+import { MEMORY_DECISION_LABEL } from './memory.ts';
 import { METRIC_DEFS, directionLabel, findMetrics } from '../metrics.ts';
 
 export const TOOL_LABEL: Record<ToolName, string> = {
@@ -24,6 +25,7 @@ export const TOOL_LABEL: Record<ToolName, string> = {
   novelty_check: '新颖效应（时间衰减）',
   fwer_check: '多人比较校正（FWER）',
   loss_decide: '期望损失决策',
+  recall_decision: '回忆人工判决',
 };
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -781,6 +783,39 @@ export function runTool(name: ToolName, ctx: AgentCtx, args: Record<string, unkn
       };
     }
 
+    case 'recall_decision': {
+      // 记忆层（M18）：把本机已冻结的人工判决原样复述出来，不替用户算、不编造历史。
+      // 评测场景下 ctx.memory 为空 → 如实说「没有记录」，这本身就是诚实性的证据。
+      const m = ctx.memory;
+      const rec = m?.decisionFor(exp.id);
+      if (!rec) {
+        return {
+          tool: name,
+          args,
+          summary: '你尚未对该实验下过人工决定',
+          data: { hasDecision: false },
+          cites: [],
+        };
+      }
+      const label = MEMORY_DECISION_LABEL[rec.decision];
+      return {
+        tool: name,
+        args,
+        summary: `你于 ${rec.decidedAt.slice(0, 10)} 判了「${label}」`,
+        data: {
+          hasDecision: true,
+          expId: rec.expId,
+          decision: rec.decision,
+          decisionLabel: label,
+          note: rec.note,
+          decidedAt: rec.decidedAt,
+          engineDecision: rec.engineDecision ?? null,
+          contradicts: m?.contradicts(exp.id) ?? false,
+        },
+        cites: [],
+      };
+    }
+
     default:
       throw new Error(`未知工具：${name}`);
   }
@@ -955,8 +990,17 @@ export const TOOL_SCHEMA = [
           riskAversion: { type: 'number', description: '风险厌恶系数 k（≥1，默认 2）' },
           mmp: { type: 'number', description: '最小值得上线的提升（效应单位，默认率 0.001 / ARPU 0.02）' },
         },
-        required: [],
+          required: [],
       },
+    },
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'recall_decision',
+      description:
+        '回忆本机已记录的「人工判决」（上线 / 不上线 / 迭代 / 搁置）及其理由与冻结时的引擎结论。用于回答「我之前对这个实验怎么判的」。没有记录时如实说没有，不编造历史',
+      parameters: { type: 'object', properties: {}, required: [] },
     },
   },
 ];

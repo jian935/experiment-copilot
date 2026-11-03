@@ -4,6 +4,7 @@ import { generateDataset } from '../src/lib/simulate.ts';
 import { answerQuestion, replyFromLlm, systemPrompt } from '../src/lib/agent/answer.ts';
 import { TOOL_NAMES, runTool } from '../src/lib/agent/tools.ts';
 import { auditNumbers, buildWhitelist } from '../src/lib/agent/audit.ts';
+import { buildMemory, type MemoryDecision } from '../src/lib/agent/memory.ts';
 import { mdeTwoProportion } from '../src/lib/stats.ts';
 import type { AgentCtx } from '../src/lib/agent/types.ts';
 
@@ -22,7 +23,7 @@ const heteroCtx = ctxOf('E002');
 describe('Agent 工具（M4）', () => {
   it('全部工具都能调用，且引用的证据编号都真实存在', () => {
     // 数量硬编码在这里，是为了让「加了一个工具却忘了注册 schema / 忘加标签」必然报错
-    expect(TOOL_NAMES.length).toBe(16);
+    expect(TOOL_NAMES.length).toBe(17);
     const valid = new Set(guardrailCtx.analysis.evidence.map((e) => e.id));
     for (const name of TOOL_NAMES) {
       const call = runTool(name, guardrailCtx, name === 'segment_breakdown' ? { dimension: 'device' } : {});
@@ -39,6 +40,37 @@ describe('Agent 工具（M4）', () => {
     const call = runTool('compute_mde', ctx, { baseline: 0.05, nPerArm: 10000 });
     const data = call.data as { mde: number };
     expect(data.mde).toBeCloseTo(mdeTwoProportion(0.05, 10000), 10);
+  });
+});
+
+describe('Agent 记忆层（M18）', () => {
+  const decs: MemoryDecision[] = [
+    { expId: 'E001', decision: 'ship', note: '护栏可承受', decidedAt: '2026-05-12T08:30:00.000Z', engineDecision: 'no-ship' },
+  ];
+
+  it('recall_decision 在没有 memory 时如实说没有，不编造', () => {
+    const call = runTool('recall_decision', guardrailCtx);
+    expect((call.data as { hasDecision: boolean }).hasDecision).toBe(false);
+    expect(call.cites).toEqual([]);
+  });
+
+  it('recall_decision 带 memory 时返回判决、理由与矛盾标记', () => {
+    const ctx: AgentCtx = { ...guardrailCtx, memory: buildMemory(decs) };
+    const call = runTool('recall_decision', ctx);
+    const d = call.data as { hasDecision: boolean; decision: string; note: string; contradicts: boolean };
+    expect(d.hasDecision).toBe(true);
+    expect(d.decision).toBe('ship');
+    expect(d.note).toBe('护栏可承受');
+    expect(d.contradicts).toBe(true);
+  });
+
+  it('「我之前怎么判的」路由到 recall 意图，并复述人工判决', () => {
+    const ctx: AgentCtx = { ...guardrailCtx, memory: buildMemory(decs) };
+    const reply = answerQuestion('我之前对这个实验怎么判的？', ctx);
+    expect(reply.intent).toBe('recall');
+    expect(reply.text).toContain('上线');
+    expect(reply.text).toContain('护栏可承受');
+    expect(reply.text).toContain('不一致');
   });
 
   it('explain_rules 报出的命中序号与实际规则顺序一致', () => {

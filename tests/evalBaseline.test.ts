@@ -82,10 +82,10 @@ describe('flattenEval / flattenAgent', () => {
     }
   });
 
-  it('16 个工具都在基线里各占一个 key（新增工具会显式进基线，不会悄悄漏掉）', () => {
+  it('17 个工具都在基线里各占一个 key（新增工具会显式进基线，不会悄悄漏掉）', () => {
     const f = flattenAgent(agent);
     const toolKeys = Object.keys(f).filter((k) => k.startsWith('agent.tool.'));
-    expect(toolKeys).toHaveLength(16);
+    expect(toolKeys).toHaveLength(17);
     expect(toolKeys.every((k) => f[k] > 0)).toBe(true);
   });
 });

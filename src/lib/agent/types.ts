@@ -1,5 +1,6 @@
 import type { Analysis } from '../decide.ts';
 import type { Dataset, Experiment } from '../types.ts';
+import type { AgentMemory } from './memory.ts';
 
 /** 一轮对话（旧→新）。规则模式用它做指代补全，智能模式把它塞进 messages */
 export interface AgentTurn {
@@ -18,6 +19,8 @@ export interface AgentCtx {
   question?: string;
   /** 之前的对话，用于多轮追问 */
   history?: AgentTurn[];
+  /** 记忆层（M18）：本机已记录的人工判决，用于回答「你之前怎么判的」 */
+  memory?: AgentMemory;
 }
 
 /** 一次工具调用的记录：UI 直接渲染这些，回答里的 [E1] 就是 cites */
@@ -48,7 +51,8 @@ export type ToolName =
   | 'peeking_check'
   | 'novelty_check'
   | 'fwer_check'
-  | 'loss_decide';
+  | 'loss_decide'
+  | 'recall_decision';
 
 export interface AgentReply {
   /** 最终回答（含 [E1] 这类引用标记） */

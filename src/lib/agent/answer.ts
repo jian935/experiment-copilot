@@ -1,6 +1,7 @@
 import { auditNumbers, buildWhitelist } from './audit.ts';
 import { runTool } from './tools.ts';
 import { METRIC_LABELS } from '../metrics.ts';
+import { MEMORY_DECISION_LABEL, type MemoryDecisionKind } from './memory.ts';
 import type { AgentCtx, AgentReply, AgentTurn, ToolCall } from './types.ts';
 
 const pct = (v: number, d = 2) => `${(v * 100).toFixed(d)}%`;
@@ -528,6 +529,34 @@ const INTENTS: IntentDef[] = [
             .join('；')}。它们在同一个引擎下走的是同一套规则，可以直接横向看。`
         : '数据集中没有主指标或类型相同的实验，暂时无法横向对比。';
       return { calls: [s], text };
+    },
+  },
+
+  {
+    key: 'recall',
+    // 记忆层入口（M18）：只认「问历史判决」的问法，避免和相似实验检索（也含「历史」一词）抢。
+    // 题库题「我之前对这个实验怎么判的」必须命这里；其余检索类问法不含这些词，不会误触。
+    test: /之前|上次|当初|记得|已经判|判过|怎么判|如何判|决定过/,
+    run: (ctx) => {
+      const fc = runTool('recall_decision', ctx);
+      const d = fc.data as {
+        hasDecision: boolean;
+        decision?: MemoryDecisionKind;
+        note?: string;
+        decidedAt?: string;
+        engineDecision?: string | null;
+        contradicts?: boolean;
+      };
+      const text = d.hasDecision
+        ? `你于 ${d.decidedAt!.slice(0, 10)} 对该实验判了「${MEMORY_DECISION_LABEL[d.decision!]}」。${
+            d.engineDecision ? `引擎当时的结论是 ${d.engineDecision}。` : ''
+          }${d.note ? `当时的理由是：${d.note}。` : ''}${
+            d.contradicts
+              ? '你的判决和引擎结论不一致——这条留痕就是把「人做过判断」冻结下来，复盘看理由而不是 p 值。'
+              : ''
+          }`
+        : '你还没有对这个实验下过人工决定。决策留痕只存在你本机浏览器，不上传、不进评测、不进任何公开产物——换机器或清缓存就看不到了。';
+      return { calls: [fc], text };
     },
   },
 

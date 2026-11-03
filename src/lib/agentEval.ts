@@ -62,6 +62,9 @@ export const QA_BANK: QaItem[] = [
   { id: 'dict', q: 'ARPU 是怎么算的？', group: '口径' },
   { id: 'out_gmv', q: 'GMV 提升了多少？', group: '口径' },
   { id: 'out_ret', q: '留存率有变化吗？', group: '口径' },
+  // 记忆层（M18）：评测 ctx 不带 memory，所以全部实验都会落到「你还没判过」——
+  // 这本身就是诚实性的证据（不编造历史），也保证 recall_decision 工具被覆盖到。
+  { id: 'recall', q: '我之前对这个实验怎么判的？', group: '检索', expectIntent: 'recall' },
 ];
 
 export interface AgentQaRow {

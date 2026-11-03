@@ -9,6 +9,8 @@ import { MATERIALITY_REL } from '../../lib/tasks/constants.ts';
 import type { InspectionItem, InspectionReport, RiskLevel } from '../../lib/tasks/types.ts';
 import { C } from '../lib/palette.ts';
 import { Button, DecisionBadge, Panel, PanelHead, cx } from './ui';
+import { useDecisions } from '../lib/useDecisions';
+import { buildMemory, type MemoryDecision } from '../../lib/agent/memory.ts';
 
 /**
  * 巡检：把 120 个实验收成「今天只看 5 件」。
@@ -196,7 +198,26 @@ export function InspectionScreen({
   analyses: Map<string, Analysis>;
   onOpen: (id: string) => void;
 }) {
-  const report: InspectionReport = useMemo(() => runInspection(dataset, analyses), [dataset, analyses]);
+  // 记忆层（M18）：把本机决策留痕带进巡检。同样只做「读 + 适配成 MemoryDecision」。
+  const { map } = useDecisions();
+  const memoryDecisions: MemoryDecision[] = useMemo(
+    () =>
+      Object.values(map).map((r) => ({
+        expId: r.expId,
+        decision: r.decision,
+        note: r.note,
+        decidedAt: r.decidedAt,
+        engineDecision: r.snapshot.engineDecision,
+        diff: r.snapshot.diff,
+        unit: r.snapshot.unit,
+        p: r.snapshot.p,
+      })),
+    [map],
+  );
+  const report: InspectionReport = useMemo(
+    () => runInspection(dataset, analyses, { decisions: memoryDecisions }),
+    [dataset, analyses, memoryDecisions],
+  );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [group, setGroup] = useState<RiskLevel | null>('warn');
 
@@ -267,6 +288,47 @@ export function InspectionScreen({
               疑似系统性问题（优先查一件共用的事，不要逐个实验调）
             </div>
             <div className="mt-1 text-[11.5px] leading-5 text-muted">{report.systemic}</div>
+          </div>
+        </div>
+      )}
+
+      {report.memoryCount > 0 && (
+        <div
+          className="mt-4 flex gap-2.5 rounded-xl border px-4 py-3"
+          style={{ borderColor: `color-mix(in srgb, ${C.brand} 30%, transparent)`, background: `color-mix(in srgb, ${C.brand} 7%, transparent)` }}
+        >
+          <Info size={15} className="mt-[2px] shrink-0" style={{ color: C.brand }} />
+          <div className="min-w-0">
+            <div className="text-[12px] font-medium" style={{ color: C.brand }}>
+              本机留痕：你已对 {report.memoryCount} 个实验下过人工决定
+            </div>
+            <div className="mt-1 text-[11.5px] leading-5 text-muted">
+              决策留痕只存在你本机浏览器，不上传、不进评测、不进任何公开产物。
+              {report.memoryNotes.length > 0 && (
+                <>
+                  {' '}
+                  其中 {report.memoryNotes.length} 个与当时引擎结论不一致——这是正常的人机分歧，留痕的目的就是把「人做过判断」冻结下来：
+                </>
+              )}
+            </div>
+            {report.memoryNotes.length > 0 && (
+              <ul className="mt-1.5 space-y-1">
+                {report.memoryNotes.slice(0, 5).map((m) => (
+                  <li key={m.expId} className="text-[11px] leading-5 text-dim">
+                    <button
+                      onClick={() => onOpen(m.expId)}
+                      className="num mr-1 font-medium text-ink hover:underline"
+                    >
+                      {m.expId}
+                    </button>
+                    {m.text.replace(/^你于 \d{4}-\d{2}-\d{2} 对该实验判了「[^」]*」。/, '')}
+                  </li>
+                ))}
+                {report.memoryNotes.length > 5 && (
+                  <li className="text-[11px] text-dim">…还有 {report.memoryNotes.length - 5} 个，见导出周报</li>
+                )}
+              </ul>
+            )}
           </div>
         </div>
       )}

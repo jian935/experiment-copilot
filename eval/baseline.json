@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T11:07:27.337Z",
+  "generatedAt": "2026-11-03T11:04:11.534Z",
   "dataset": {
     "seedBase": 20261031,
     "experiments": 120,
@@ -72,7 +72,7 @@
     "hetero.interactionOnly.tp": 13,
     "hetero.interactionOnly.fp": 5,
     "hetero.interactionOnly.f1": 0.7878787878787877,
-    "agent.n": 2200,
+    "agent.n": 2320,
     "agent.numbers": 13546,
     "agent.suspicious": 0,
     "agent.hallucinationRate": 0,
@@ -83,7 +83,7 @@
     "agent.scopeRate": 1,
     "agent.trapN": 80,
     "agent.routeAccuracy": 1,
-    "agent.routeN": 1560,
+    "agent.routeN": 1680,
     "agent.tool.get_overview": 720,
     "agent.tool.bayesian_view": 600,
     "agent.tool.run_test": 360,
@@ -99,6 +99,7 @@
     "agent.tool.novelty_check": 120,
     "agent.tool.fwer_check": 120,
     "agent.tool.loss_decide": 120,
+    "agent.tool.recall_decision": 120,
     "agent.tool.metric_decompose": 40
   },
   "strings": {

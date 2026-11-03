@@ -33,9 +33,9 @@ describe('白名单要认得工具返回的格式化文本', () => {
 });
 
 describe('题库覆盖', () => {
-  it('16 个工具一个都不能少（有工具没被用到 = 白写）', () => {
+  it('17 个工具一个都不能少（有工具没被用到 = 白写）', () => {
     expect(ev.uncoveredTools).toEqual([]);
-    expect(ev.toolCalls.filter((t) => t.calls > 0)).toHaveLength(16);
+    expect(ev.toolCalls.filter((t) => t.calls > 0)).toHaveLength(17);
   });
 
   it('每道题都至少被问过一次，且题号唯一', () => {

@@ -51,6 +51,8 @@ import { RobustnessPanel } from './RobustnessPanel';
 import { DimensionChips, DimensionTable } from './DimensionPanel';
 import { armLabel } from '../../lib/arms.ts';
 import type { DecisionRecord } from '../lib/decisions';
+import { useDecisions } from '../lib/useDecisions';
+import { buildMemory, type MemoryDecision } from '../../lib/agent/memory.ts';
 
 type Tab = 'segments' | 'guardrails' | 'calc';
 
@@ -93,6 +95,23 @@ export function ExperimentDetail({
    * 不会因为上一份数据的维度名不存在而切出空表。
    */
   const [dimKey, setDimKey] = useState('');
+
+  // 记忆层（M18）：把本机决策留痕变成 Agent 能查的上下文。
+  // 这里只做「读 + 适配成 MemoryDecision 结构」，真正的聚合在 buildMemory（纯函数、可单测）。
+  const { map: decisionMap } = useDecisions();
+  const memory = useMemo(() => {
+    const decs: MemoryDecision[] = Object.values(decisionMap).map((r) => ({
+      expId: r.expId,
+      decision: r.decision,
+      note: r.note,
+      decidedAt: r.decidedAt,
+      engineDecision: r.snapshot.engineDecision,
+      diff: r.snapshot.diff,
+      unit: r.snapshot.unit,
+      p: r.snapshot.p,
+    }));
+    return buildMemory(decs);
+  }, [decisionMap]);
 
   function closeDrawer() {
     setDrawer(false);
@@ -755,7 +774,7 @@ export function ExperimentDetail({
       <AgentPanel
         open={agentOpen}
         onClose={() => setAgentOpen(false)}
-        ctx={{ dataset, analyses, exp, analysis } as AgentCtx}
+        ctx={{ dataset, analyses, exp, analysis, memory } as AgentCtx}
         onCite={(ev) => {
           setAgentOpen(false);
           setFocusEv(ev);

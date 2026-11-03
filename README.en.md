@@ -1,6 +1,6 @@
 # Experiment Copilot · an auditable verdict for every A/B test
 
-> Status: **M13 polish & delivery (UI side done: import persistence / experiment comparison / ⌘K search / light-dark themes / zero chart libraries)** ｜ 2026-11-01 ｜ Remaining: GitHub Pages deploy (deliberately last)
+> Status: **M18 memory layer (stateful Agent: recall_decision tool + recall intent + inspection memory card, reusing the local decision store)** ｜ 2026-11-03 ｜ Remaining: push + GitHub Pages deploy (deploy workflow ready, waiting on network)
 > Blueprint: [`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ Measurements: [`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI notes: [`docs/UI.md`](docs/UI.md) ｜ **Why these methods: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)** ｜ Interview Q&A: [`docs/FAQ.md`](docs/FAQ.md) ｜ 中文版：[`README.md`](README.md)
 
 **One line**: give it an A/B experiment, get back a **ship / don't ship** verdict you can audit.
@@ -61,6 +61,7 @@ The value is not the model. The value is that the number can be recomputed and t
 | Optional backend (zero dependencies) | `npm run server`: scrypt passwords + httpOnly session cookie, RBAC (viewer/analyst/admin), an approval flow for decisions (you cannot approve your own, rejecting requires a reason), an append-only audit log, API tokens (plaintext shown once, only sha256 stored) and scheduled re-scans that alert when a verdict changes. Storage is atomic single-file JSON + JSONL audit — a backend that cannot install or compile is not a backend. Without it the frontend silently falls back to local mode and **never renders a fake permission page** |
 | Robustness (winsorization) | A five-tier trim sweep with a sensitivity curve, revenue concentration, and single-row leverage (delete which row changes the verdict?). The panel states that **the trimmed p is not a significance conclusion**, with the simulation behind that statement | [`29-稳健性-去极值.png`](docs/screenshots/29-稳健性-去极值.png) |
 | **Inspection** (cross-experiment task) | Scans every experiment and answers **"which need me today, and what to do with each"**: four counts (must handle / this week / awaiting your call / no action), a first screen keeping **one representative per root cause**, and an explicit next action per item (fix traffic / do not ship / ship to a segment / collect more / design too weak / not worth it) with evidence ids. Same data always produces the same report — no model, no wall clock | [`30-巡检-第一屏.png`](docs/screenshots/30-巡检-第一屏.png) |
+| Inspection · local memory (M18) | Brings the local decision log into inspection: which experiments you judged on this machine and whether each contradicts the engine's verdict at the time, frozen into the weekly report (**not uploaded, not in eval, not in any public artifact**) | [`31-巡检-本机留痕.png`](docs/screenshots/31-巡检-本机留痕.png) |
 | Experiment comparison | Tick two rows → same unit shares **one** x-axis (line length = uncertainty); different units (pp vs currency) are refused and stacked instead; 15 side-by-side rows | [`14-实验对比.png`](docs/screenshots/14-实验对比.png) · [`15-对比-不能同轴.png`](docs/screenshots/15-对比-不能同轴.png) · [`16-列表勾选对比.png`](docs/screenshots/16-列表勾选对比.png) |
 | Command palette ⌘K | One panel over everything: experiments (id / name / hypothesis / **rule names**), metric names, and app actions; multi-word is AND, an exact id always ranks first, ↑↓ + ↵ works end to end | [`17-全局搜索.png`](docs/screenshots/17-全局搜索.png) · [`18-全局搜索-功能分组.png`](docs/screenshots/18-全局搜索-功能分组.png) |
 | Theme | Light / dark / follow-system, one button to cycle; **every colour is a CSS variable**, so SVG charts switch together with the cards — never "dark cards, light charts" | [`19-深色模式.png`](docs/screenshots/19-深色模式.png) · [`20-深色模式-对比.png`](docs/screenshots/20-深色模式-对比.png) |
@@ -85,7 +86,7 @@ npm run dev        # local dev (regenerates data first)
 npm run build      # dist/ (tsc --noEmit + vite build)
 npm run preview    # preview the build
 
-npm test           # 575 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
+npm test           # 587 unit tests (stats / decisions / evidence / card export / agent / tool loop / eval scope /
                    #   import parsing / A-A calibration / metric dictionary / configurable thresholds / CUPED /
                    #   sequential / novelty / multiplicity / A-B-n multi-arm / winsorized robustness / expected loss / comparison /
                    #   forest scaling / ⌘K /
@@ -188,9 +189,9 @@ src/app/                UI: Vite + React 19 + TS + Tailwind v3
   components/CompareScreen.tsx  Two experiments on one shared axis, or a refusal
   components/CommandPalette.tsx ⌘K palette (keyboard-only path works end to end)
 scripts/                Generation / calibration / data export / screen recording / video / portfolio build
-tests/                  575 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
+tests/                  587 unit tests (6 scipy-aligned cases + coverage/Bootstrap/non-inferiority/A-A/CUPED
                         simulations + metric dictionary/configurability/multi-turn + heterogeneity F1/baseline self-test)
-eval/baseline.json      Regression baseline: 86 metrics + a data fingerprint
+eval/baseline.json      Regression baseline: 87 metrics + a data fingerprint
 data/                   120 experiments / 6,720 rows
 docs/                   Blueprint / methodology / data notes / eval report / UI notes / FAQ / screenshots
 ```
@@ -221,9 +222,9 @@ right-hand column of `docs/EVAL.md`.
 | Interval choice | Newcombe instead of Wald: at a 0.12% baseline with n=30 both cover 100%, but the widths are **0.906pp vs 22.869pp** |
 | Chart scaling bug | The forest plot's pp axis drew **341 grid lines** (step computed in percentage points, start in percent). Fixed, and locked by 6 tests |
 | Comparability | 120 experiments × all pairs = **7140 pairs**, asserting "shared axis ⟺ same unit" — not a sample |
-| Unit tests | **575** across 43 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
-| Regression baseline | **86 metrics** + data fingerprint in `eval/baseline.json`; `npm run eval:check` exits 1 on any drift |
-| Bundle | **775KB** JS / 252KB gzip, zero chart libraries, zero backend |
+| Unit tests | **587** across 43 files; 6 z-test cases aligned with scipy (relative error < 1e-4) |
+| Regression baseline | **87 metrics** + data fingerprint in `eval/baseline.json`; `npm run eval:check` exits 1 on any drift |
+| Bundle | **780KB** JS / 254KB gzip, zero chart libraries, zero backend |
 
 ## Why these methods (every choice comes with its cost)
 
@@ -286,6 +287,27 @@ and it decides what to look at, how to rank it, and what page to write.
 | Evidence coverage | 100% | all weighted signals | Every conclusion traces back to the engine |
 | Engine false positives on null experiments | **10%** | 40 injected-null experiments | **This is the engine's metric, not inspection's**: inspection faithfully relayed the engine's error |
 
+### M18 — Memory layer: from "fresh each time" to "remembers what you decided"
+
+M17 made the Agent tell you which experiments to look at today. But that Agent was still **stateless**: switch experiments or sessions and it knew nothing about your history. A *mature flagship Agent* should at least remember — **the judgments you made on this batch of experiments**.
+
+This milestone adds no new statistic; it adds the "brain": turning the **decision log** that already exists (`decisions.ts` stores your ship / no-ship / iterate / hold, with the reason and a frozen snapshot of the numbers, in local storage) into context both the Agent and inspection can query.
+
+| Layer | What it does | The decision that mattered |
+|---|---|---|
+| Pure-function memory | `src/lib/agent/memory.ts`: `buildMemory(decisions)` only aggregates and generates text, **imports no browser storage** | It is called by the frontend Q&A, inspection, and the CLI eval; depending on `localStorage` there would break the eval. So it only accepts a *shape*; the caller reads the records and passes them in |
+| Agent tool | The 17th tool `recall_decision` + the 18th intent `recall`: "how did I decide on this experiment before" | When there is no record it **says so honestly** instead of inventing history — which is itself evidence of honesty (the eval ctx carries no memory, so all 120 experiments land here) |
+| Contradiction detection | Only "human ship & engine no-ship" (or the reverse) counts; engine inconclusive, or human iterate/hold (deferred) do not | The log is not meant to prove who was right; it freezes "a human made a call" so a post-mortem reads the *reason*, not the p-value |
+| Inspection reuse | `runInspection` accepts `decisions?`; the report gains `memoryCount` + `memoryNotes` (human–engine disagreements only), and does **not** enter the risk score | Memory is additive context, not a reason to move the M17 signal thresholds; `opts.decisions` is omitted from the per-experiment `inspectOne` opts so no field has to be re-plumbed |
+| UI | An inspection "local memory" card; the detail page injects memory into the Agent ctx | Same no-drift rule as M17: nav declares `aria-current`, the control audit keeps covering |
+
+**Why this instead of calibration / Bayesian:** calibration and Bayesian are depth on the analysis layer; memory is the last missing piece of the *agentification* line — inspection (proactive eyes) and task-level evaluation (evidence) were done, but there was no cross-session "brain". It adds no backend and reuses existing storage, making it the highest-leverage item on that line.
+
+**Three deliberate boundaries (in the spirit of M17):**
+1. **Memory only relays; it never computes for you.** It echoes the decision and reason you froze, runs no statistics, and does not use "human said ship" as new evidence to overturn the engine.
+2. **Memory is not uploaded, not in the eval, not in any public artifact.** The `decisions.ts` storage boundary was set in M16: this is just your local operation log, gone when you switch machines or clear the cache — same discipline as "imported data lives only in memory/IndexedDB".
+3. **Memory does not pollute the risk score.** Human–engine disagreement is "worth knowing", not "must handle today", so it gets its own section in the report rather than crowding the first screen.
+
 ## What broke along the way (nine that mattered)
 
 Every one of these was found by measurement or by looking at the rendered screen — not by reading the code again.
@@ -307,7 +329,7 @@ Every one of these was found by measurement or by looking at the rendered screen
 This is not a demo that renders three charts. The acceptance criteria are the ones a flagship tool would be held to:
 
 - **Every number is reversible**: expand to formula → sample size → data version → recompute and diff.
-- **Every claim is falsifiable**: 575 tests, an 86-metric regression baseline, a UI smoke run that drives a real browser,
+- **Every claim is falsifiable**: 587 tests, an 87-metric regression baseline, a UI smoke run that drives a real browser,
   and an automatic eval that fails the build when a metric drifts.
 - **Every method states its cost**, including the cases where our own choice is worse than the textbook one.
 - **No silent fallbacks**: missing columns, missing ground truth, an unavailable model, an exhausted storage quota —
@@ -317,7 +339,7 @@ This is not a demo that renders three charts. The acceptance criteria are the on
 
 Vite 8 + React 19 + TypeScript + Tailwind CSS **v3** (not v4: its range-syntax media queries break on Chrome < 104).
 **Zero chart libraries** — the forest plot and the daily trend are hand-written SVG (the trend used to be Recharts;
-removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 775KB / 252KB gzip). Statistics are in-house with tests. **No backend by default** (Pages serves the static build);
+removing it took the bundle from 915KB → 573KB, gzip 286KB → 187KB; multi-arm, robustness and the import layer have since brought it to 780KB / 254KB gzip). Statistics are in-house with tests. **No backend by default** (Pages serves the static build);
 there is an optional zero-dependency backend for roles/approvals/audit/API/alerts. The Agent talks to DeepSeek directly from the browser, and the site deploys as static files.
 
 ## Milestones
@@ -331,6 +353,7 @@ M12 sequential & advanced (sequential / novelty / multiplicity / expected loss) 
 **M15 winsorized robustness (trim sweep / revenue concentration / single-row leverage) ✅** →
 **M16 dimension slicing, editable metric dictionary, optional backend (RBAC / approvals / audit / API / alerts) ✅** →
 **M17 inspection task + task-level evaluation (deterministic orchestration / risk scoring / first-screen dedup / 15-task baseline) ✅** →
+**M18 memory layer (stateful Agent: recall_decision tool + recall intent + inspection memory card, reusing the local decision store) ✅** →
 G2 Pages deploy (deliberately last).
 
 Acceptance criteria live in the blueprint (§13); the extension list and measurements live in

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-02T17:21:08.997Z",
+  "generatedAt": "2026-11-03T11:27:50.048Z",
   "seedBase": 20261031,
   "config": {
     "alpha": 0.05,
@@ -9,7 +9,7 @@
     "useCuped": true
   },
   "summary": {
-    "n": 2200,
+    "n": 2320,
     "numbers": 13546,
     "suspicious": 0,
     "hallucinationRate": 0,
@@ -20,7 +20,7 @@
     "scopeRate": 1,
     "trapN": 80,
     "routeAccuracy": 1,
-    "routeN": 1560
+    "routeN": 1680
   },
   "byGroup": [
     {
@@ -65,7 +65,7 @@
     },
     {
       "group": "检索",
-      "n": 240,
+      "n": 360,
       "numbers": 840,
       "suspicious": 0,
       "citationRate": 1,
@@ -139,6 +139,10 @@
     },
     {
       "intent": "metric",
+      "n": 120
+    },
+    {
+      "intent": "recall",
       "n": 120
     },
     {
@@ -328,6 +332,16 @@
       "routeAccuracy": 1
     },
     {
+      "qaId": "recall",
+      "group": "检索",
+      "q": "我之前对这个实验怎么判的？",
+      "n": 120,
+      "numbers": 0,
+      "suspicious": 0,
+      "citationRate": 1,
+      "routeAccuracy": 1
+    },
+    {
       "qaId": "decomp",
       "group": "口径",
       "q": "收入变化里转化率和客单价各占多少？",
@@ -397,6 +411,10 @@
     },
     {
       "tool": "loss_decide",
+      "calls": 120
+    },
+    {
+      "tool": "recall_decision",
       "calls": 120
     },
     {

@@ -7,6 +7,7 @@
  * 不如新增一层「任务上下文」，让工具各管各的：单实验工具照旧，巡检走自己的编排。
  */
 import type { Decision } from '../types.ts';
+import type { MemoryDecision } from '../agent/memory.ts';
 
 /** 风险等级。语义是「谁该处理、什么时候处理」，不是「分数高低」 */
 export type RiskLevel = 'critical' | 'warn' | 'info' | 'ok';
@@ -162,6 +163,14 @@ export interface InspectionReport {
   power: PowerSummary;
   /** 评测用：结构化摘要（不含长文本），便于逐位比对基线 */
   digest: InspectionDigest;
+  /** 本机已记录人工判决的实验数（M18 记忆层；0 表示没记录） */
+  memoryCount: number;
+  /**
+   * 决策留痕备注：人工判决与当时引擎结论不一致的实验清单。
+   * 这是**附加**信息，不进入风险打分（避免动摇 M17 已锁定的信号口径），
+   * 只在报告里单独成节，提醒「人做过判断、且和引擎结论对不上」的实验。
+   */
+  memoryNotes: { expId: string; text: string }[];
 }
 
 /**
@@ -212,4 +221,6 @@ export interface InspectionOptions {
   /** 功效口径（用于解析估算「还要多少人」） */
   power?: number;
   alpha?: number;
+  /** 本机已记录的人工判决（M18 记忆层）；提供后报告会显示留痕统计与矛盾提醒 */
+  decisions?: MemoryDecision[];
 }
