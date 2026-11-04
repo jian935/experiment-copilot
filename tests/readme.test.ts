@@ -22,6 +22,39 @@ const zh = readFileSync(resolve(root, 'README.md'), 'utf8');
 const en = readFileSync(resolve(root, 'README.en.md'), 'utf8');
 
 /**
+ * 从真实产物读出的数字（M20 修）。
+ *
+ * 以前 `FIGURES` 是一张写死的字符串清单，断言是 `README.includes(数字)`。
+ * 那只能证明「这个字符串在文档里出现过」，**证明不了它等于实测值**：
+ * 2026-11-04 全量巡检发现工具数 16→17、题库 18→20、问答 2200→2320 之后，
+ * 595 个单测依然全绿，就是因为旧字符串还留在文档里。
+ * 所以现在这些值一律当场从产物 / 源码算，不再有第二份需要人工同步的清单。
+ */
+const agentEval = JSON.parse(readFileSync(resolve(root, 'data/agent_eval.json'), 'utf8')) as {
+  summary: { n: number; numbers: number; citableN: number };
+  byQa: unknown[];
+  toolCalls: unknown[];
+  uncoveredTools: string[];
+};
+const baseline = JSON.parse(readFileSync(resolve(root, 'eval/baseline.json'), 'utf8')) as {
+  metrics: Record<string, unknown>;
+};
+const toolsSrc = readFileSync(resolve(root, 'src/lib/agent/tools.ts'), 'utf8');
+const schemaAt = toolsSrc.indexOf('export const TOOL_SCHEMA');
+if (schemaAt < 0) throw new Error('找不到 TOOL_SCHEMA：工具数无法从源码复算，请同步 readme.test.ts');
+const toolCount = (toolsSrc.slice(schemaAt).match(/^\s+name: '/gm) ?? []).length;
+
+const REAL = {
+  answers: agentEval.summary.n,
+  numbers: agentEval.summary.numbers,
+  citable: agentEval.summary.citableN,
+  questions: agentEval.byQa.length,
+  tools: toolCount,
+  covered: agentEval.toolCalls.length,
+  metrics: Object.keys(baseline.metrics).length,
+};
+
+/**
  * 两版都必须出现的实测数字。
  *
  * 选的标准：能被 `npm run eval` / `npm run eval:check` / `npm test` 复算，
@@ -37,12 +70,13 @@ const FIGURES = [
   '9.70%', // 朴素标准误的误报率
   '7.24%', // CUPED 方差缩减
   '0.857', // 分层检测 F1
-  '2200', // Agent 问答条数
-  '13546', // 可溯源数字个数
-  '1840', // 引用覆盖率分母
+  // ↓ 这四项由真实产物当场算出，不再手写（写死就会漂）
+  String(REAL.answers), // Agent 问答条数 ← data/agent_eval.json
+  String(REAL.numbers), // 可溯源数字个数 ← 同上
+  String(REAL.citable), // 引用覆盖率分母 ← 同上
+  String(REAL.metrics), // 回归基线指标数 ← eval/baseline.json
   // 单测条数故意不放进这张静态清单：它已经由下面那条断言**动态**对上实际用例数，
   // 放两份维护只会让「加一个测试要改两个地方」，而两处都可能忘记。
-  '87', // 回归基线指标数
   '784KB', // 产物 JS
   '255KB', // 产物 gzip
   '99.79%', // 全零族至少一个显著
@@ -77,11 +111,46 @@ describe('中英双版 README', () => {
     expect(en.includes('](README.md)')).toBe(true);
   });
 
-  it('关键数字在两版里字面一致', () => {
+  it('关键数字在两版里字面一致，且等于实测值', () => {
     const missZh = FIGURES.filter((f) => !zh.includes(f));
     const missEn = FIGURES.filter((f) => !en.includes(f));
     // 报出缺了哪几个，而不是只说「不相等」——否则改的人得自己 diff 一遍
     expect({ missZh, missEn }).toEqual({ missZh: [], missEn: [] });
+
+    // 第二层：`includes` 只保证「这个字符串出现过」，挡不住文档里同时留着一个过时的旧数。
+    // 所以把文档**实际声称**的值读回来，逐个和真值比。2026-11-04 那次全绿却漏掉
+    // 4 处漂移，缺的就是这一层。
+    const claimed = (md: string, re: RegExp): number | null => {
+      const m = re.exec(md);
+      return m ? Number(m[1]) : null;
+    };
+    type Claim = { name: string; got: number | null; want: number };
+    const zhClaims: Claim[] = [
+      { name: 'ZH 问答条数（命令清单）', got: claimed(zh, /(\d+) 条 Agent 问答/), want: REAL.answers },
+      // 不能只写 /(\d+) 条问答/：会先撞上 ABLATION 那节的「24 条问答」
+      { name: 'ZH 问答条数（评测表）', got: claimed(zh, /规则模式 \*\*(\d+) 条问答/), want: REAL.answers },
+      { name: 'ZH 数字个数', got: claimed(zh, /(\d+) 个数字/), want: REAL.numbers },
+      { name: 'ZH 题库数', got: claimed(zh, /(\d+) 道题覆盖全部/), want: REAL.questions },
+      { name: 'ZH 工具数', got: claimed(zh, /^\| (\d+) 个工具/m), want: REAL.tools },
+      { name: 'ZH 基线指标数', got: claimed(zh, /回归基线：(\d+) 个指标/), want: REAL.metrics },
+    ];
+    const enClaims: Claim[] = [
+      { name: 'EN 问答条数（命令清单）', got: claimed(en, /over (\d+) Agent Q&A/), want: REAL.answers },
+      { name: 'EN 问答条数（评测表）', got: claimed(en, /across (\d+) rule-mode answers/), want: REAL.answers },
+      { name: 'EN 题库数', got: claimed(en, /a (\d+)-question bank/), want: REAL.questions },
+      { name: 'EN 基线指标数', got: claimed(en, /Regression baseline: (\d+) metrics/), want: REAL.metrics },
+    ];
+    // markdown 里是 **17/17** tools，加粗闭合符夹在斜杠和 tools 之间
+    const cover = /(\d+)\/(\d+)\*{0,2}\s+tools/.exec(en);
+    enClaims.push({ name: 'EN 工具覆盖分子', got: cover ? Number(cover[1]) : null, want: REAL.covered });
+    enClaims.push({ name: 'EN 工具覆盖分母', got: cover ? Number(cover[2]) : null, want: REAL.tools });
+
+    // 失败时直接打印「哪一项、文档写了多少、实测是多少」，不用人再 diff 一遍 README
+    expect([...zhClaims, ...enClaims].filter((c) => c.got !== c.want)).toEqual([]);
+
+    // 第三层：产物内部自洽——schema 里的工具数必须等于评测覆盖数，且没有未覆盖工具
+    expect(REAL.covered).toBe(REAL.tools);
+    expect(agentEval.uncoveredTools).toEqual([]);
   });
 
   it('两版的相对链接都能打开（截图改名 / 文档挪位要立刻红）', () => {

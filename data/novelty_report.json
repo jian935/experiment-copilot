@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T10:45:42.857Z",
+  "generatedAt": "2026-11-04T07:11:50.409Z",
   "seedBase": 20261031,
   "sim": {
     "days": 7,
@@ -55,6 +55,7 @@
       "archetype": "srm",
       "decision": "inconclusive",
       "pattern": "decay",
+      "unit": "pp",
       "earlyDiff": 0.0042055565785285775,
       "lateDiff": -0.0038290862732182174,
       "delta": -0.008034642851746794,
@@ -68,6 +69,7 @@
       "archetype": "positive",
       "decision": "ship",
       "pattern": "decay",
+      "unit": "元",
       "earlyDiff": 1.9696278030276055,
       "lateDiff": 0.8390091419103441,
       "delta": -1.1306186611172615,
@@ -81,6 +83,7 @@
       "archetype": "negative",
       "decision": "no-ship",
       "pattern": "decay",
+      "unit": "元",
       "earlyDiff": -0.824388358399497,
       "lateDiff": -1.2756641882937143,
       "delta": -0.45127582989421733,

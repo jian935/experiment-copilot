@@ -92,8 +92,13 @@ npm test           # 595 unit tests (stats / decisions / evidence / card export 
                    #   sequential / novelty / multiplicity / A-B-n multi-arm / winsorized robustness / expected loss / comparison /
                    #   forest scaling / ⌘K /
                    #   methodology cross-check / days-to-significance / multi-turn / ARPU / heterogeneity F1 / baseline)
-npm run eval       # eval report: heterogeneity F1 + hallucinated-number rate over 2200 Agent Q&A
+npm run eval       # eval report: heterogeneity F1 + hallucinated-number rate over 2320 Agent Q&A
 npm run eval:check # compare against eval/baseline.json; any drift exits 1 (this is what CI runs)
+npm run check:generated
+                   #   re-run 11 generators and byte-compare data/ artifacts (ignoring generatedAt);
+                   #   catches "code gained a field but the report was never regenerated", which
+                   #   eval:check cannot see because it only compares metrics. Runs in CI too.
+                   #   To update artifacts on purpose: npm run check:generated -- --sync
 npm run ablation   # rule mode vs LLM, writes docs/ABLATION.md (needs DEEPSEEK_API_KEY)
 npm run smoke      # UI smoke (needs npm run build && npx vite preview --port 4321)
                    #   drives a real browser: blank screen / undefined / NaN / uncaught errors all fail the run
@@ -212,8 +217,8 @@ right-hand column of `docs/EVAL.md`.
 | Naive vs robust SE | The textbook `p(1−p)/n` pushes the rate-metric A/A false-positive rate to **9.70%**; the cell-level robust SE brings it back to **6.20%** |
 | CUPED | Median variance reduction **7.24%** (rate 7.00% / continuous 10.14%; ρ=0.271, φ=1.24) |
 | Heterogeneity detector | F1 **0.857** (P 0.923 / R 0.800, 15 positives), 95% CI 0.67–0.97; relaxing the rule drops F1 to 0.788 |
-| Hallucinated numbers | **0 of 13546** numbers across 2200 rule-mode answers; citation coverage 100% (denominator 1840 — answers with no citable evidence are excluded) |
-| Tool coverage | **16/16** tools reached by an 18-question bank |
+| Hallucinated numbers | **0 of 13546** numbers across 2320 rule-mode answers; citation coverage 100% (denominator 1840 — answers with no citable evidence are excluded) |
+| Tool coverage | **17/17** tools reached by a 20-question bank |
 | Sequential testing | Peeking daily for 7 days: naive false-positive **16.37%** → O'Brien–Fleming **4.93%**; mSPRT costs 3.09σ for "look whenever you want" (0.52%) |
 | Novelty effect | A/A false positives **4.8% (rate) / 6.4% (ARPU)**; the first version of this detector measured 12.0% / 15.0%, and that is documented rather than deleted |
 | Multiplicity | All-null family: "at least one significant" = **99.79%** (1−0.95¹²⁰). On real data naive 68 → Holm **53**, and 5 of the 15 retracted ones had zero injected effect |
