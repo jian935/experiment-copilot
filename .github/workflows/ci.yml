@@ -46,6 +46,13 @@ jobs:
       - name: 类型检查
         run: npm run typecheck
 
+      - name: 生成前端数据（public/data 是构建产物，不进仓库）
+        # 2026-11-05 首次推送到 GitHub 时 CI 红在这里：tests/dimensions / metricDict / taskEval
+        # 直接读 `public/data/dataset.json`，而 `public/data/` 整个目录在 .gitignore 里。
+        # 本地一直绿是因为跑过 build；CI 是干净 checkout，没有这个文件。
+        # 修法不是把 1.7MB 派生物塞进仓库，而是让 CI 按真实构建顺序先生成它。
+        run: npm run data
+
       - name: 单测（统计 / 决策 / 证据 / Agent / 导入 / 评测 / 基线）
         run: npm test
 
