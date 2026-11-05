@@ -1,6 +1,8 @@
 # Experiment Copilot · 实验结论官
 
-> 状态：**M19 运行轨迹（Agent 可观测性）** ｜ 2026-11-03 ｜ 剩余：推送 + GitHub Pages 部署（部署工作流已就绪，等网络）
+**▶ 在线 Demo：[jian935.github.io/experiment-copilot](https://jian935.github.io/experiment-copilot/)** ｜ 纯前端 · 零后端 · 打开即用 ｜ 仓库：[github.com/jian935/experiment-copilot](https://github.com/jian935/experiment-copilot)
+
+> 状态：**M19 运行轨迹（Agent 可观测性）** ｜ 2026-11-06 已部署上线（CI 绿 → 自动发布 Pages）
 > 方案：[`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ 实测记录：[`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI 说明：[`docs/UI.md`](docs/UI.md) ｜ **为什么是这个口径：[`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)** ｜ 会被问到的问题：[`docs/FAQ.md`](docs/FAQ.md) ｜ English：[`README.en.md`](README.en.md)
 
 **一句话**：输入一个 A/B 实验，输出一张「能不能上」的可审计结论卡。

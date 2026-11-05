@@ -1,6 +1,8 @@
 # Experiment Copilot · an auditable verdict for every A/B test
 
-> Status: **M19 run trace (Agent observability: per-tool timing + turn elapsed + model usage + copyable run log)** ｜ 2026-11-03 ｜ Remaining: push + GitHub Pages deploy (deploy workflow ready, waiting on network)
+**▶ Live demo: [jian935.github.io/experiment-copilot](https://jian935.github.io/experiment-copilot/)** ｜ static, zero backend, opens instantly ｜ Repo: [github.com/jian935/experiment-copilot](https://github.com/jian935/experiment-copilot)
+
+> Status: **M19 run trace (Agent observability: per-tool timing + turn elapsed + model usage + copyable run log)** ｜ 2026-11-06 deployed (CI green → auto-publish to Pages)
 > Blueprint: [`docs/BLUEPRINT.md`](docs/BLUEPRINT.md) ｜ Measurements: [`docs/EVAL.md`](docs/EVAL.md) · [`docs/AUDIT-2026-11-01.md`](docs/AUDIT-2026-11-01.md) ｜ UI notes: [`docs/UI.md`](docs/UI.md) ｜ **Why these methods: [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md)** ｜ Interview Q&A: [`docs/FAQ.md`](docs/FAQ.md) ｜ 中文版：[`README.md`](README.md)
 
 **One line**: give it an A/B experiment, get back a **ship / don't ship** verdict you can audit.
