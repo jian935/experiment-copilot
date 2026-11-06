@@ -1,5 +1,7 @@
 # Experiment Copilot · 实验结论官
 
+[![CI](https://github.com/jian935/experiment-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/jian935/experiment-copilot/actions/workflows/ci.yml)
+
 **▶ 在线 Demo：[jian935.github.io/experiment-copilot](https://jian935.github.io/experiment-copilot/)** ｜ 纯前端 · 零后端 · 打开即用 ｜ 仓库：[github.com/jian935/experiment-copilot](https://github.com/jian935/experiment-copilot)
 
 > 状态：**M19 运行轨迹（Agent 可观测性）** ｜ 2026-11-06 已部署上线（CI 绿 → 自动发布 Pages）

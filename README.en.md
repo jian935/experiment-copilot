@@ -1,5 +1,7 @@
 # Experiment Copilot · an auditable verdict for every A/B test
 
+[![CI](https://github.com/jian935/experiment-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/jian935/experiment-copilot/actions/workflows/ci.yml)
+
 **▶ Live demo: [jian935.github.io/experiment-copilot](https://jian935.github.io/experiment-copilot/)** ｜ static, zero backend, opens instantly ｜ Repo: [github.com/jian935/experiment-copilot](https://github.com/jian935/experiment-copilot)
 
 > Status: **M19 run trace (Agent observability: per-tool timing + turn elapsed + model usage + copyable run log)** ｜ 2026-11-06 deployed (CI green → auto-publish to Pages)
